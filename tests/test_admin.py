@@ -2,13 +2,16 @@ import re
 import sqlite3
 from dataclasses import replace
 from html import unescape
+from unittest.mock import patch
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
 from fastapi.testclient import TestClient
+from itsdangerous import TimestampSigner
 
 from app.feishu import FeishuAuthError, FeishuUser, HttpFeishuAuth
 from app.main import create_app
+from app.session import SESSION_MAX_AGE, SignedCookie
 from test_login import login
 
 
@@ -21,6 +24,20 @@ def csrf(client):
     response = client.get('/admin')
     assert response.status_code == 200
     return unescape(re.search(r'name="csrf_token" value="([^"]+)"', response.text)[1])
+
+
+def replace_session(client, settings):
+    signer = SignedCookie(settings.session_secret, salt='web-session', max_age=SESSION_MAX_AGE)
+    old_session = client.cookies['session']
+    _, issued_at = signer.serializer.make_signer().unsign(old_session, return_timestamp=True)
+    # Derive a distinct timestamp from the cookie, never from wall-clock time:
+    # now - 1 can equal the old timestamp if signing crosses a second boundary.
+    with patch.object(TimestampSigner, 'get_timestamp', return_value=int(issued_at.timestamp()) - 1):
+        new_session = signer.encode(settings.admin_open_id)
+    assert new_session != old_session
+    assert signer.decode(new_session) == settings.admin_open_id
+    client.cookies.delete('session')
+    client.cookies.set('session', new_session)
 
 
 def add(client, open_id='ou_new_contact', **extra):
@@ -145,19 +162,30 @@ def test_mutations_require_signed_session_bound_csrf(client, settings, path, kin
         client.cookies.delete('admin_csrf')
         client.cookies.set('admin_csrf', value)
     if kind == 'other-session':
-        from app.session import SESSION_MAX_AGE, SignedCookie
         # Independently signed session with the same identity, as after relogin.
-        signer = SignedCookie(settings.session_secret, salt='web-session', max_age=SESSION_MAX_AGE)
-        from itsdangerous import TimestampSigner
-        original = TimestampSigner.get_timestamp
-        from unittest.mock import patch
-        with patch.object(TimestampSigner, 'get_timestamp', lambda self: original(self) - 1):
-            new_session = signer.encode(settings.admin_open_id)
-        client.cookies.delete('session')
-        client.cookies.set('session', new_session)
+        replace_session(client, settings)
     before = users(settings)
     response = client.post(path, data={'csrf_token': value, 'open_id': 'victim', 'name': '测试', 'avatar_url': ''})
     assert response.status_code == 403
+    assert users(settings) == before
+
+
+@pytest.mark.parametrize('path', ['/admin/users', '/admin/users/victim/remove'])
+@pytest.mark.parametrize('elapsed', [0, 1])
+def test_other_session_csrf_rejected_across_second_boundary(client, settings, monkeypatch, path, elapsed):
+    now = 1_800_000_000
+    monkeypatch.setattr(TimestampSigner, 'get_timestamp', lambda self: now)
+    assert login(client).status_code == 302
+    assert add(client, open_id='victim').status_code == 303
+    token = csrf(client)
+    now += elapsed
+    replace_session(client, settings)
+    # A valid replacement session must reach CSRF validation, not fail auth.
+    assert client.get('/').status_code == 200
+    before = users(settings)
+    response = client.post(path, data={'csrf_token': token, 'open_id': 'victim', 'name': '测试'})
+    assert response.status_code == 403
+    assert 'CSRF 校验失败' in response.text
     assert users(settings) == before
 
 
