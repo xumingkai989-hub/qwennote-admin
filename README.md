@@ -1,6 +1,6 @@
 # QwenNote Admin
 
-工单 01–07：飞书登录白名单、手动同步、幂等入库、同步状态、录音列表与日期筛选、详情与 Markdown 导出、全文搜索、对外只读 API、API Key 命令行管理与审计。Python 3.11 + FastAPI + Jinja2 + 标准库 sqlite3，无 ORM、前端构建或定时任务。包含管理员白名单管理与飞书联系人搜索；部署由工单 08 处理。
+工单 01–08：飞书登录白名单、手动同步、幂等入库、同步状态、录音列表与日期筛选、详情与 Markdown 导出、全文搜索、对外只读 API、API Key 命令行管理与审计，以及 SWAS HTTPS 部署。Python 3.11 + FastAPI + Jinja2 + 标准库 sqlite3，无 ORM、前端构建。包含管理员白名单管理与飞书联系人搜索；生产定时任务使用 systemd。
 
 ## 本地运行
 
@@ -224,3 +224,51 @@ curl --silent --show-error --include --header @- \
 真实应用需开通 `directory:employee:search`，并按[官方接口文档](https://open.feishu.cn/document/directory-v1/employee/search)授权姓名、头像、部门、邮箱字段及所需通讯录数据范围。凭据缺失时适配器抛出明确的 `FeishuSearchNotConfigured`，页面显示“通讯录搜索未配置”；权限、网络、HTTP 或响应格式失败均显示可读错误，不输出提供方原始响应，不伪装成空结果。`Settings.from_env` 沿用启动时必填环境变量校验。测试只使用假 FeishuAuth 和 httpx.MockTransport，未进行真实租户联调。
 
 工单 07 新增 52 项离线测试，覆盖管理员边界、搜索不落库、敏感字段过滤与 HTML 转义、添加后完整 OAuth 回调、重复添加与恢复、旧 session 撤权、POST/CSRF（缺失、伪造、过期、跨 session、重复字段、Secure cookie）、未配置提示，以及真实适配器的应用 token、open_id、20 人上限、空结果与两阶段错误。已有停用用户测试按本工单要求更新为明确的 403。
+
+## 生产部署（工单 08）
+
+目标 `https://qwennote.mingkai.xin`，SWAS 实例 `74ee3f09792c48649cf8aad318702dd5`（香港，`8.210.78.233`）。仅使用已有 `/usr/bin/python3.11`，应用监听 `127.0.0.1:8090`。不修改系统 Python、8081、dashboard-shell 或其他站点的 nginx 配置。
+
+在已配置阿里云 CLI 的本机仓库执行：
+
+```sh
+python3 scripts/deploy.py
+```
+
+脚本复用 `~/.hermes/digital-agent/tools/swas_run.py`，显式指定实例；记录主站部署前状态和其他 nginx conf 的哈希。打包排除 Git、venv、data、env、scratch 和缓存，base64 按 48,000 字符分 part；该实例实测整块命令被 `CmdContent.ExceedLimit` 拒绝，因此每 part 用最多 12,000 字符的命令顺序追加。服务端 SHA-256 校验成功才解包到 UTC 命名的 `/opt/qwennote/releases/YYYYMMDDTHHMMSSZ/`。日志在本机 `/tmp/qwennote-deploy-logs/<UTC时间戳>/`，不包含生成的环境变量值。远端失败即停止；修复后可重新执行，产生新的 release。
+
+安装使用 Python 3.11 venv 和阿里云 pip 源，创建无登录 shell 的系统用户 `qwennote`。release、`data` 与 `backups` 归它所有，数据库固定为 `/opt/qwennote/data/qwennote.db`。原子切换 `current`；升级时将原 release 保存到 `previous`。服务日志进 journald，systemd 只允许写持久数据目录。
+
+服务器实测 Python 与系统 CLI 的 SQLite 均为 3.26.0，缺少应用全文索引需要的 trigram tokenizer。`scripts/build_sqlite.sh` 从 [SQLite 官方下载页](https://www.sqlite.org/download.html)锁定 3.54.1 amalgamation 和 SHA3-256，核对后使用已有 gcc 构建到 release 的 `.sqlite/`；应用和同步单元通过 `LD_LIBRARY_PATH` 使用它，备份单元的 PATH 选择配套 `sqlite3` CLI。不替换系统 SQLite 或 Python。手工检查数据库前先执行 `export PATH=/opt/qwennote/current/.sqlite/bin:$PATH`。
+
+环境文件仅在服务器首次创建：`/etc/qwennote/qwennote.env`，`root:root`、600。`SESSION_SECRET` 由服务器 `openssl rand -hex 32` 生成；飞书 ID、密钥、管理员 ID、千问 token 均留空，默认 `QWENNOTE_SOURCE=fixture`，fixture 路径为 `/opt/qwennote/current/tests/fixtures/minutes`。后续部署保留已有 env。通过服务器安全终端编辑实际凭据，不把 env、数据库或证书提交 Git。
+
+当前代码的标准入口是 `create_app`，标准配置校验要求真实飞书字段。`scripts/deployment_runtime.py` 只向已解包 release 的 `app/main.py` 追加 `app` 导出，让 systemd 使用约定的 `uvicorn app.main:app`；checkout 中的应用文件不变。仅部署 fixture 模式允许飞书字段为空，不创建空管理员或虚构身份，核心密钥、数据库、回调和 fixture 路径仍校验。首页返回飞书 302，但缺真实凭据时无法完成登录；API 无有效 Key 时返回 401。切换到 HTTP 源后恢复标准必填校验。
+
+`deploy/nginx/qwennote-http.conf` 先用于 ACME webroot；取得受信任证书后替换为 `deploy/nginx/qwennote.conf`，始终只写 `/etc/nginx/conf.d/qwennote.conf`。80 保留 ACME，其他请求 301 HTTPS；443 使用专属证书、反代头、安全头和 2MB 请求限制。先尝试 dnf certbot；dnf 不可用时使用独立 `/opt/qwennote/acme` 的 acme.sh 与 Let's Encrypt，不填写虚构邮箱，不使用自签证书。失败时停在 HTTP 引导配置并报告。certbot 使用续期 timer 与专属 nginx reload hook；acme.sh 使用专属 systemd 续期 timer。
+
+服务和检查：
+
+```sh
+systemctl status qwennote
+journalctl -u qwennote -n 50 --no-pager
+ss -lntp | grep 8090
+curl -sS https://qwennote.mingkai.xin/ -o /dev/null -w '%{http_code} %{ssl_verify_result}\n'
+curl -sS https://qwennote.mingkai.xin/api/v1/recordings -o /dev/null -w '%{http_code}\n'
+curl -sS https://qwennote.mingkai.xin/api/v1/recordings -H 'Authorization: Bearer test' -o /dev/null -w '%{http_code}\n'
+nginx -t
+```
+
+`qwennote-sync.timer` 每天上海时间 03:00 运行 `python -m scripts.sync_once`，直接复用 `app.sync.run_sync`，失败退出非零。`qwennote-backup.timer` 每天上海时间 04:00 运行 `scripts/backup.sh`，用 SQLite `.backup` 在线备份、校验后原子命名为 `backups/qwennote-YYYYMMDD.db`，保留最近七个日期。两个 timer 都启用 `Persistent=true`，停机错过时间后补跑。手动验收启动的是 timer 对应的 service：
+
+```sh
+export PATH=/opt/qwennote/current/.sqlite/bin:$PATH
+systemctl start qwennote-sync.service
+journalctl -u qwennote-sync.service -n 10 --no-pager
+sqlite3 /opt/qwennote/data/qwennote.db 'SELECT count(*) FROM recordings; SELECT id,status,fetched,inserted,updated FROM sync_runs ORDER BY id DESC LIMIT 1;'
+systemctl start qwennote-backup.service
+ls -l /opt/qwennote/backups/qwennote-*.db
+systemctl list-timers --all 'qwennote-*'
+```
+
+回滚以 root 执行 `/opt/qwennote/current/scripts/rollback.sh`，原子指回 `previous` 并重启 `qwennote`，打印实际版本目录。无有效前一版则明确失败且不动 current；重启失败恢复原指向。首次部署没有可回滚版本。回滚只切应用代码，持久数据库不回退；涉及不兼容数据库迁移的后续升级须另行安排数据恢复。

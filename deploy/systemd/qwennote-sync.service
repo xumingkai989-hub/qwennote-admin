@@ -1,0 +1,22 @@
+[Unit]
+Description=QwenNote daily application sync
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=qwennote
+Group=qwennote
+WorkingDirectory=/opt/qwennote/current
+EnvironmentFile=/etc/qwennote/qwennote.env
+Environment=PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+Environment=LD_LIBRARY_PATH=/opt/qwennote/current/.sqlite/lib
+ExecStart=/opt/qwennote/current/.venv/bin/python -m scripts.sync_once
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/qwennote/data
+StandardOutput=journal
+StandardError=journal

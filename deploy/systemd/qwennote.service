@@ -1,0 +1,26 @@
+[Unit]
+Description=QwenNote private web application
+After=network.target
+
+[Service]
+Type=simple
+User=qwennote
+Group=qwennote
+WorkingDirectory=/opt/qwennote/current
+EnvironmentFile=/etc/qwennote/qwennote.env
+Environment=PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+Environment=LD_LIBRARY_PATH=/opt/qwennote/current/.sqlite/lib
+ExecStart=/opt/qwennote/current/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8090
+Restart=always
+RestartSec=3
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/qwennote/data
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,10 @@
+[Unit]
+Description=QwenNote backup at 04:00 Asia/Shanghai
+
+[Timer]
+OnCalendar=*-*-* 04:00:00 Asia/Shanghai
+Persistent=true
+Unit=qwennote-backup.service
+
+[Install]
+WantedBy=timers.target

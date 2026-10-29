@@ -1,0 +1,10 @@
+[Unit]
+Description=QwenNote sync at 03:00 Asia/Shanghai
+
+[Timer]
+OnCalendar=*-*-* 03:00:00 Asia/Shanghai
+Persistent=true
+Unit=qwennote-sync.service
+
+[Install]
+WantedBy=timers.target
