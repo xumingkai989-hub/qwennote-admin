@@ -196,12 +196,13 @@ def test_title_is_escaped_and_zero_duration_is_visible(list_client, add_recordin
     assert '0 分钟' in html
 
 
-def test_header_search_is_visibly_unavailable_and_css_is_served(list_client):
+def test_header_search_is_enabled_and_css_is_served(list_client):
     html = list_client.get('/').text
     assert 'QwenNote' in html and '测试用户' in html and '退出' in html
     search, = [field for field in Page(html).inputs if field.get('type') == 'search']
-    assert 'disabled' in search
-    assert '后续工单' in html
+    assert 'disabled' not in search
+    assert search.get('name') == 'q'
+    assert 'action="/search"' in html
     assert '更新' in html
     assert '/static/app.css' in html
     css = list_client.get('/static/app.css')

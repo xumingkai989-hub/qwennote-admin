@@ -66,6 +66,9 @@ class Store(SyncStore, Protocol):
 
     def list_recordings(self, start: date, end: date, page: int = 1) -> RecordingPage: ...
 
+    def search_recordings(self, query: str, start: date | None = None,
+                          end: date | None = None, page: int = 1) -> RecordingPage: ...
+
 
 class SQLiteStore:
     def __init__(self, db_path: Path):
@@ -136,6 +139,97 @@ class SQLiteStore:
                 conn.execute("ALTER TABLE recordings_nullable RENAME TO recordings")
             conn.execute('CREATE INDEX IF NOT EXISTS recordings_created_at_idx '
                          'ON recordings (created_at DESC, recording_id DESC)')
+            # Keep the schema change, backfill and index creation in one write
+            # transaction. Existing databases need no export/import.
+            if not conn.in_transaction:
+                conn.execute('BEGIN IMMEDIATE')
+            columns = conn.execute('PRAGMA table_info(recordings)').fetchall()
+            new_column = not any(row['name'] == 'search_text' for row in columns)
+            new_index = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'recordings_fts'",
+            ).fetchone() is None
+            if new_column:
+                conn.execute("ALTER TABLE recordings ADD COLUMN search_text TEXT NOT NULL DEFAULT ''")
+                self._backfill_search_text(conn)
+            conn.execute("""
+                CREATE VIRTUAL TABLE IF NOT EXISTS recordings_fts USING fts5(
+                    search_text, content='recordings', content_rowid='rowid', tokenize='trigram'
+                )
+            """)
+            conn.execute("""
+                CREATE TRIGGER IF NOT EXISTS recordings_fts_insert AFTER INSERT ON recordings BEGIN
+                    INSERT INTO recordings_fts(rowid, search_text) VALUES (new.rowid, new.search_text);
+                END
+            """)
+            conn.execute("""
+                CREATE TRIGGER IF NOT EXISTS recordings_fts_delete AFTER DELETE ON recordings BEGIN
+                    INSERT INTO recordings_fts(recordings_fts, rowid, search_text)
+                    VALUES ('delete', old.rowid, old.search_text);
+                END
+            """)
+            conn.execute("""
+                CREATE TRIGGER IF NOT EXISTS recordings_fts_update AFTER UPDATE OF search_text ON recordings
+                WHEN old.search_text IS NOT new.search_text BEGIN
+                    INSERT INTO recordings_fts(recordings_fts, rowid, search_text)
+                    VALUES ('delete', old.rowid, old.search_text);
+                    INSERT INTO recordings_fts(rowid, search_text) VALUES (new.rowid, new.search_text);
+                END
+            """)
+            if new_column or new_index:
+                conn.execute("INSERT INTO recordings_fts(recordings_fts) VALUES ('rebuild')")
+
+    @staticmethod
+    def _backfill_search_text(conn: sqlite3.Connection) -> None:
+        conn.execute("""
+            UPDATE recordings SET search_text =
+                coalesce(title, '') || char(10) || coalesce(summary_md, '') || char(10) || coalesce(transcript_md, '')
+        """)
+
+    def rebuild_search(self) -> None:
+        self.migrate()
+        with self._connect() as conn:
+            conn.execute('BEGIN IMMEDIATE')
+            self._backfill_search_text(conn)
+            conn.execute("INSERT INTO recordings_fts(recordings_fts) VALUES ('rebuild')")
+
+    def search_recordings(self, query: str, start: date | None = None,
+                          end: date | None = None, page: int = 1) -> RecordingPage:
+        if not query:
+            return RecordingPage([], 0, 1, 1)
+        if len(query) >= 3:
+            # Quoting the entire phrase makes operators and quotes literal.
+            where = 'rowid IN (SELECT rowid FROM recordings_fts WHERE recordings_fts MATCH ?)'
+            params = ['"' + query.replace('"', '""') + '"']
+        else:
+            # Trigram MATCH cannot find 1–2 character queries. Escape LIKE
+            # metacharacters so %, _ and backslash remain literal keywords.
+            where = "search_text LIKE ? ESCAPE '\\'"
+            params = ['%' + query.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_') + '%']
+        if start is not None:
+            where += ' AND created_at >= ?'
+            params.append(start.isoformat())
+        if end is not None:
+            where += ' AND created_at <= ?'
+            params.append(end.isoformat() + 'T23:59:59.999999+08:00')
+        with self._connect() as conn:
+            conn.execute('BEGIN')
+            # Membership selects each recording once, including matches in
+            # several fields. Both paths share sorting and pagination.
+            total = conn.execute(f'SELECT COUNT(*) FROM recordings WHERE {where}', params).fetchone()[0]
+            pages = max(1, (total + 19) // 20)
+            page = min(max(1, page), pages)
+            rows = conn.execute(
+                'SELECT recording_id, title, created_at, duration_min, has_transcript, has_summary, '
+                f'summary_md, transcript_md FROM recordings WHERE {where} '
+                'ORDER BY created_at DESC, recording_id DESC LIMIT 20 OFFSET ?',
+                (*params, (page - 1) * 20),
+            ).fetchall()
+        return RecordingPage([
+            StoredRecording(row['recording_id'], row['title'], datetime.fromisoformat(row['created_at']),
+                            row['duration_min'], bool(row['has_transcript']), bool(row['has_summary']),
+                            row['summary_md'] or '', row['transcript_md'] or '')
+            for row in rows
+        ], total, page, pages)
 
     def list_recordings(self, start: date, end: date, page: int = 1) -> RecordingPage:
         # Stored timestamps already have Shanghai wall-clock semantics. Do not
@@ -202,9 +296,11 @@ class SQLiteStore:
     def upsert_recording(self, meta: RecordingMeta, detail: RecordingDetail, synced_at: str) -> str:
         if detail.recording_id != meta.recording_id or not meta.recording_id or meta.created_at.tzinfo is None:
             raise ValueError('Invalid recording identity or timestamp')
-        fields = ('title', 'created_at', 'duration_min', 'summary_md', 'transcript_md', 'has_transcript', 'has_summary')
+        fields = ('title', 'created_at', 'duration_min', 'summary_md', 'transcript_md', 'has_transcript', 'has_summary',
+                  'search_text')
         values = (meta.title, meta.created_at.astimezone(SHANGHAI).isoformat(), meta.duration_min,
-                  detail.summary_md, detail.transcript_md, int(detail.has_transcript), int(detail.has_summary))
+                  detail.summary_md, detail.transcript_md, int(detail.has_transcript), int(detail.has_summary),
+                  '\n'.join((meta.title or '', detail.summary_md or '', detail.transcript_md or '')))
         with self._connect() as conn:
             conn.execute('BEGIN IMMEDIATE')
             old = conn.execute('SELECT * FROM recordings WHERE recording_id = ?', (meta.recording_id,)).fetchone()
@@ -213,11 +309,12 @@ class SQLiteStore:
                 return 'unchanged'
             conn.execute(
                 'INSERT INTO recordings (recording_id, title, created_at, duration_min, summary_md, transcript_md, '
-                'has_transcript, has_summary, synced_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) '
+                'has_transcript, has_summary, search_text, synced_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) '
                 'ON CONFLICT(recording_id) DO UPDATE SET '
                 'title = excluded.title, created_at = excluded.created_at, duration_min = excluded.duration_min, '
                 'summary_md = excluded.summary_md, transcript_md = excluded.transcript_md, '
-                'has_transcript = excluded.has_transcript, has_summary = excluded.has_summary, synced_at = excluded.synced_at',
+                'has_transcript = excluded.has_transcript, has_summary = excluded.has_summary, '
+                'search_text = excluded.search_text, synced_at = excluded.synced_at',
                 (meta.recording_id, *values, synced_at),
             )
             return 'updated' if old else 'inserted'

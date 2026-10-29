@@ -1,13 +1,16 @@
 {% extends "base.html" %}
 {% block content %}
+  {% set list_path = '/search' if search_query else '/' %}
+  {% set filter_prefix = '/search?q=' ~ (search_query | urlencode) ~ '&' if search_query else '/?' %}
   <header class="topbar">
     <a class="brand" href="/">QwenNote<span>录音笔记</span></a>
     <div class="account"><span>{{ user.name }}</span><form action="/auth/logout" method="post"><button class="text-button" type="submit">退出</button></form></div>
     <button id="sync-button" type="button">{{ '重试' if sync_run and sync_run.status == 'failed' else '更新' }}</button>
-    <div class="search-placeholder">
-      <input type="search" aria-label="搜索录音（尚未开放）" placeholder="搜索录音 · 即将支持" disabled aria-describedby="search-help">
-      <span id="search-help">搜索功能将在后续工单开放</span>
-    </div>
+    <form class="search-form" action="/search" method="get" role="search">
+      <input type="search" name="q" aria-label="搜索录音" placeholder="搜索标题、总结、转写" value="{{ search_query | default('') }}">
+      {% if search_query %}{% for name, value in filters.params.items() %}<input type="hidden" name="{{ name }}" value="{{ value }}">{% endfor %}{% endif %}
+      <button type="submit">搜索</button>
+    </form>
   </header>
   <section class="sync-panel" aria-label="同步状态" aria-live="polite" aria-atomic="true">
     <p id="sync-time">上次同步时间：{{ (sync_run.finished_at or sync_run.started_at) if sync_run else '尚未同步' }}</p>
@@ -15,20 +18,23 @@
     <p id="sync-counts">{{ ('拉取 %s · 新增 %s · 更新 %s' % (sync_run.fetched, sync_run.inserted, sync_run.updated)) if sync_run else '拉取 0 · 新增 0 · 更新 0' }}</p>
     <p id="sync-error">{{ sync_run.error if sync_run and sync_run.error else '' }}</p>
   </section>
-  <div class="list-heading"><h1>录音列表</h1><span>共 {{ recordings.total }} 条</span></div>
+  <div class="list-heading">{% if search_query %}<h1>搜索「{{ search_query }}」，共 {{ recordings.total }} 条</h1>{% else %}<h1>录音列表</h1><span>共 {{ recordings.total }} 条</span>{% endif %}</div>
   <p class="time-note">时间均为笔记创建时间，非录音开始时间（Asia/Shanghai）</p>
   <section class="filters" aria-label="日期筛选">
     <nav class="quick-filters" aria-label="快捷日期">
-      <a class="filter-link" href="/?page=1" {% if filters.mode == 'today' %}aria-current="date"{% endif %}>今天</a>
-      <a class="filter-link" href="/?yesterday=1&amp;page=1" {% if filters.mode == 'yesterday' %}aria-current="date"{% endif %}>昨天</a>
+      {% if search_query %}<a class="filter-link" href="{{ filter_prefix }}page=1" {% if filters.mode == 'all' %}aria-current="date"{% endif %}>全部日期</a>{% endif %}
+      <a class="filter-link" href="{{ filter_prefix }}{% if search_query %}date={{ today }}&amp;{% endif %}page=1" {% if filters.mode == 'today' %}aria-current="date"{% endif %}>今天</a>
+      <a class="filter-link" href="{{ filter_prefix }}yesterday=1&amp;page=1" {% if filters.mode == 'yesterday' %}aria-current="date"{% endif %}>昨天</a>
     </nav>
-    <form action="/" method="get" class="date-filter" {% if filters.mode == 'date' %}aria-current="true"{% endif %}>
+    <form action="{{ list_path }}" method="get" class="date-filter" {% if filters.mode == 'date' %}aria-current="true"{% endif %}>
+      {% if search_query %}<input type="hidden" name="q" value="{{ search_query }}">{% endif %}
       <label for="date">指定日期</label>
       <input id="date" type="date" name="date" value="{{ filters.start if filters.mode == 'date' else '' }}" required>
       <input type="hidden" name="page" value="1">
       <button class="secondary" type="submit">查看</button>
     </form>
-    <form action="/" method="get" class="date-filter range-filter" {% if filters.mode == 'range' %}aria-current="true"{% endif %}>
+    <form action="{{ list_path }}" method="get" class="date-filter range-filter" {% if filters.mode == 'range' %}aria-current="true"{% endif %}>
+      {% if search_query %}<input type="hidden" name="q" value="{{ search_query }}">{% endif %}
       <label for="from">起始日期</label>
       <input id="from" type="date" name="from" value="{{ filters.start if filters.mode == 'range' else '' }}" required>
       <label for="to">结束日期</label>
@@ -37,7 +43,7 @@
       <button class="secondary" type="submit">筛选区间</button>
     </form>
   </section>
-  <p class="selected-period">当前：{{ filters.start }}{% if filters.mode == 'range' %} 至 {{ filters.end }}{% endif %}</p>
+  <p class="selected-period">当前：{% if filters.mode == 'all' %}全部日期{% else %}{{ filters.start }}{% if filters.mode == 'range' %} 至 {{ filters.end }}{% endif %}{% endif %}</p>
   <section class="recording-grid" aria-label="录音列表">
     {% for recording in recordings.items %}
     {% set status, status_label = recording.status %}
@@ -45,9 +51,20 @@
       <span class="badge badge-{{ status }}">{{ status_label }}</span>
       <h2><a href="/recordings/{{ recording.recording_id | urlencode }}{{ detail_query }}">{{ recording.title or '未命名录音' }}</a></h2>
       <div class="card-meta"><time datetime="{{ recording.created_at.isoformat() }}">{{ recording.created_at.strftime('%Y-%m-%d %H:%M') }}</time><span aria-label="录音时长">{{ (recording.duration_min ~ ' 分钟') if recording.duration_min is not none else '—' }}</span></div>
+      {% if search_query %}
+      <div class="search-hits">
+        {% for snippet in snippets[recording.recording_id] %}
+        <div class="search-hit"><span class="hit-label">{{ snippet.label }}</span><p class="search-snippet">{% for part in snippet.parts %}{% if part.highlighted %}<mark>{{ part.text }}</mark>{% else %}{{ part.text }}{% endif %}{% endfor %}</p></div>
+        {% endfor %}
+      </div>
+      {% endif %}
     </article>
     {% else %}
+    {% if search_query %}
+    <div class="empty-state"><h2>没有找到包含「{{ search_query }}」的录音</h2><p>可以换个关键词，或调整日期区间后重试。</p></div>
+    {% else %}
     <div class="empty-state"><h2>这一天没有录音</h2><p>可以切换日期，或点击右上角「更新」。</p></div>
+    {% endif %}
     {% endfor %}
   </section>
   <nav class="pagination" aria-label="录音分页">

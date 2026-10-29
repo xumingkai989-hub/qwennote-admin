@@ -14,6 +14,7 @@ from app.config import Settings
 from app.feishu import FeishuAuth, FeishuAuthError, HttpFeishuAuth
 from app.minutes import FixtureMinutesSource, HttpMinutesSource, MinutesSource, SHANGHAI
 from app.recording_content import (download_disposition, export_markdown, render_summary, transcript_segments)
+from app.search import search_snippets
 from app.session import SESSION_MAX_AGE, STATE_MAX_AGE, SignedCookie
 from app.store import SQLiteStore, Store
 from app.sync import SyncInProgress, run_sync
@@ -21,7 +22,7 @@ from app.sync import SyncInProgress, run_sync
 AUTHORIZE_URL = "https://accounts.feishu.cn/open-apis/authen/v1/authorize"
 
 
-def list_filters(request: Request) -> dict:
+def list_filters(request: Request, *, all_dates: bool = False) -> dict:
     query = request.query_params
     today = datetime.now(SHANGHAI).date()
     groups = sum(('date' in query, 'yesterday' in query, 'from' in query or 'to' in query))
@@ -51,6 +52,9 @@ def list_filters(request: Request) -> dict:
         start = end = today - timedelta(days=1)
         mode = 'yesterday'
         params = {'yesterday': '1'}
+    elif all_dates:
+        start = end = None
+        mode = 'all'
     else:
         start = end = today
         mode = 'today'
@@ -120,6 +124,36 @@ def create_app(
             context={"title": title, "message": message}, status_code=status,
         ))
 
+    @app.get('/search', response_class=HTMLResponse)
+    def search(request: Request, store: Annotated[Store, Depends(get_store)]):
+        open_id = sessions.decode(request.cookies.get('session'))
+        user = store.get_user(open_id) if open_id else None
+        if user is None or not user.is_active:
+            return error_page(request, 401, '请先登录', '请登录后搜索录音。')
+        query = request.query_params.get('q', '').strip()
+        if not query:
+            return RedirectResponse('/', status_code=302, headers={'Cache-Control': 'no-store'})
+        try:
+            filters = list_filters(request, all_dates=True)
+        except ValueError:
+            return error_page(request, 400, '筛选条件无效',
+                              '请选择一种筛选方式，使用 YYYY-MM-DD 日期、完整且顺序正确的区间和正整数页码。')
+        recordings = store.search_recordings(query, filters['start'], filters['end'], filters['page'])
+        params = {'q': query, **filters['params']}
+
+        def page_url(page: int) -> str:
+            return '/search?' + urlencode({**params, 'page': page})
+
+        return templates.TemplateResponse(request=request, name='home.html', context={
+            'title': f'搜索「{query}」', 'user': user, 'sync_run': store.latest_sync(),
+            'search_query': query, 'filters': filters, 'recordings': recordings,
+            'today': datetime.now(SHANGHAI).date().isoformat(),
+            'snippets': {item.recording_id: search_snippets(item, query) for item in recordings.items},
+            'detail_query': '?' + urlencode({**params, 'page': recordings.page}),
+            'previous_url': page_url(recordings.page - 1) if recordings.page > 1 else None,
+            'next_url': page_url(recordings.page + 1) if recordings.page < recordings.pages else None,
+        }, headers={'Cache-Control': 'no-store'})
+
     @app.get("/", response_class=HTMLResponse)
     def home(request: Request, store: Annotated[Store, Depends(get_store)]):
         open_id = sessions.decode(request.cookies.get("session"))
@@ -185,8 +219,11 @@ def create_app(
         if error is not None:
             return error
         try:
-            filters = list_filters(request)
-            back_url = '/?' + urlencode({**filters['params'], 'page': filters['page']})
+            query = request.query_params.get('q', '').strip()
+            filters = list_filters(request, all_dates=bool(query))
+            params = {'q': query} if query else {}
+            back_url = ('/search?' if query else '/?') + urlencode(
+                {**params, **filters['params'], 'page': filters['page']})
         except ValueError:
             back_url = '/'
         return templates.TemplateResponse(request=request, name='detail.html', context={

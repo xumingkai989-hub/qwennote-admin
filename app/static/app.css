@@ -18,8 +18,8 @@ input::placeholder { color: #526256; opacity: 1; }
 .account { display: flex; align-items: center; gap: 12px; min-width: 0; overflow-wrap: anywhere; }
 .text-button { color: #485c50; background: transparent; border: 0; padding: 8px; }
 .text-button:hover { background: #e4e9e0; }
-.search-placeholder { grid-column: 1 / -1; display: flex; align-items: center; gap: 16px; color: #5e6a62; font-size: 14px; }
-.search-placeholder input { width: 320px; }
+.search-form { grid-column: 1 / -1; display: flex; align-items: center; gap: 16px; color: #5e6a62; font-size: 14px; }
+.search-form input[type="search"] { flex: 1; width: 320px; }
 .sync-panel { display: flex; flex-wrap: wrap; gap: 4px 20px; margin: 20px 0 28px; padding: 12px 16px; border-radius: 10px; background: #e9eee5; color: #4f6053; font-size: 14px; }
 .sync-panel p { margin: 0; overflow-wrap: anywhere; }
 #sync-error { flex-basis: 100%; white-space: pre-wrap; color: #963c2d; }
@@ -59,8 +59,8 @@ h1 { margin: 0; font-size: 28px; letter-spacing: -.03em; }
   .brand { font-size: 22px; }
   .account { grid-row: 2; grid-column: 1 / -1; }
   #sync-button { grid-column: 2; grid-row: 1; }
-  .search-placeholder { flex-direction: column; align-items: stretch; gap: 6px; }
-  .search-placeholder input { width: 100%; }
+  .search-form { flex-direction: column; align-items: stretch; gap: 6px; }
+  .search-form input { width: 100%; }
   .sync-panel { margin: 16px 0 24px; }
   .date-filter { width: 100%; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; }
   .range-filter { grid-template-columns: auto minmax(0, 1fr); }
@@ -92,3 +92,10 @@ h1 { margin: 0; font-size: 28px; letter-spacing: -.03em; }
   .detail-actions { grid-row: 2; }
   .detail-section { padding: 18px; }
 }
+
+.list-heading h1, .empty-state h2 { overflow-wrap: anywhere; min-width: 0; }
+.search-hits { margin-top: 18px; }
+.search-hit + .search-hit { margin-top: 14px; }
+.hit-label { color: #526256; font-size: 14px; font-weight: 600; }
+.search-snippet { margin: 4px 0 0; font-size: 14px; white-space: pre-wrap; overflow-wrap: anywhere; }
+mark { background: #ffe99a; color: #27342f; border-radius: 2px; }
