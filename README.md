@@ -1,6 +1,6 @@
 # QwenNote Admin
 
-工单 01–02：飞书登录白名单、手动同步、幂等入库与同步状态。Python 3.11 + FastAPI + Jinja2 + 标准库 sqlite3，无 ORM、前端构建或定时任务。录音列表、详情、搜索、只读 API 和后台管理由后续工单实现。
+工单 01–03：飞书登录白名单、手动同步、幂等入库、同步状态及录音列表与日期筛选。Python 3.11 + FastAPI + Jinja2 + 标准库 sqlite3，无 ORM、前端构建或定时任务。详情、搜索、只读 API 和后台管理由后续工单实现。
 
 ## 本地运行
 
@@ -31,8 +31,9 @@ cp .env.example .env
 
 ## 登录与同步
 
-- `GET /`：未登录跳飞书授权；有效会话且仍在活动白名单内显示同步状态和“更新”按钮。显示最近批次时间、running/success/failed、拉取/新增/更新计数及安全错误说明；失败可重试。时间均按 Asia/Shanghai，录音时间是笔记创建时间。
-- `POST /sync`：活动白名单会话可触发，未登录或被停用返回 401，跨域 Origin 返回 403。同步完成返回 HTTP 200 和 `status/fetched/inserted/updated/started_at/finished_at/error` JSON；`error` 成功为 null。按钮通过 fetch 调用，禁用当前按钮直到请求结束，再直接更新页面文字与计数。
+- `GET /`：未登录跳飞书授权；有效会话且仍在活动白名单内显示录音列表、同步状态和“更新”按钮。显示最近批次时间、running/success/failed、拉取/新增/更新计数及安全错误说明；失败可重试。时间均按 Asia/Shanghai，录音时间是笔记创建时间。
+- `POST /sync`：活动白名单会话可触发，未登录或被停用返回 401，跨域 Origin 返回 403。同步完成返回 HTTP 200 和 `status/fetched/inserted/updated/started_at/finished_at/error` JSON；`error` 成功为 null。按钮通过 fetch 调用，禁用当前按钮直到请求结束，更新状态文字并刷新当前筛选下的列表；请求失败时显示错误并允许重试。
+- `POST /auth/logout`：清除当前浏览器的 session cookie 并返回首页，之后重新走飞书登录。拒绝带外站 Origin 的请求。
 - 每个获准执行的同步恰好新增一行 `sync_runs`，开始为 running，结束写 success 或 failed。同一数据库旁的 `*.sync.lock` 使用非阻塞 `flock`，跨线程、应用实例及进程互斥；并发请求返回 409，不新增批次。锁文件不能在运行中删除。进程退出会释放锁，下次同步将中断的 running 批次标为 failed，再创建新批次。
 - 每天的列表与每条详情通过 `MinutesSource` 注入；同一批按 `recording_id` 去重。`fetched` 是唯一录音数（含详情失败的条目），`inserted` 是实际新增数，`updated` 是已有录音业务字段发生变化的数量。完全相同的数据只写 `synced_at`，updated=0，保留已有 `owner_open_id`。
 - 每条成功录音独立提交。详情失败或校验/入库失败记录安全说明、跳过该条、继续其余，整批 failed；列表失败终止后续拉取，整批 failed。已提交内容和旧数据均保留，不删除源中消失的录音。异常原文及服务商响应不写数据库或页面，避免泄漏凭据。
@@ -41,6 +42,24 @@ cp .env.example .env
 `GET /auth/callback` 校验非空 code 和与浏览器匹配的 state，换身份后检查白名单。成功 302 到 `/` 并写 HttpOnly、SameSite=Lax session cookie；白名单外或停用返回 403。Session 8 小时，state 10 分钟；每次首页及同步重新检查白名单。飞书失败返回通用 502 页面，不输出服务商响应或凭据。
 
 `create_app(settings=..., feishu_auth=..., store=..., minutes_source=...)` 支持替换依赖。路由也可通过 `get_feishu_auth`、`get_store`、`get_minutes_source` 与 `dependency_overrides` 注入；迁移始终使用工厂传入的 Store。
+
+## 录音列表与筛选
+
+登录后首页默认显示上海时区今天创建的笔记，按 `created_at DESC, recording_id DESC` 稳定排序。所有日期均包含当天 00:00 至 23:59:59.999999，存储已是 UTC+8 语义，查询和展示不再平移时间。页面明确标注“时间均为笔记创建时间，非录音开始时间”。
+
+| URL | 筛选 |
+| --- | --- |
+| `/` 或 `/?page=1` | 今天 |
+| `/?yesterday=1` | 昨天 |
+| `/?date=2026-10-29` | 指定日期 |
+| `/?from=2026-10-01&to=2026-10-29` | 含首尾日期的区间 |
+| `/?date=2026-10-29&page=2` | 同一筛选的第 2 页 |
+
+选择新日期时回到第 1 页；前后翻页保留当前筛选，刷新和分享 URL 可恢复。日期必须为 `YYYY-MM-DD`，区间两端必填且起始不晚于结束；筛选方式互斥，页码必须为正整数，错误返回可读的 400 页面。超出末页的页码显示最后一页，空列表显示“这一天没有录音”和“第 1 / 1 页”。
+
+每页 20 条，由 SQL `COUNT(*)` 与 `LIMIT 20 OFFSET ?` 在同一读事务完成；使用创建时间索引，列表查询只选 ID、标题、创建时间、时长和两个状态标记，不读取或渲染 `summary_md`、`transcript_md`。四态依次为：两者都有→已转录（绿）、仅转写→仅转写（蓝）、仅总结→仅总结（黄）、两者都无→未转录（灰）。时长为 null 时显示“—”，0 显示“0 分钟”。
+
+页面由 Jinja2 渲染，样式集中于 `app/static/app.css`。640px 及以下卡片为单列，较宽屏幕为两列，字号不小于 14px。标题链接到 `/recordings/{id}`，本工单未实现该详情路由。搜索框禁用并明确提示后续开放。
 
 ## 数据源
 
@@ -83,4 +102,6 @@ PY
 .venv/bin/python -m pytest -q
 ```
 
-82 项测试通过。使用 TestClient、FakeMinutesSource、假 FeishuAuth、临时 SQLite 和 httpx.MockTransport；自动阻断 socket、DNS 及真实 HTTP transport，不需要环境密钥。覆盖已有登录行为、首次入库、重复同步、标题与内容变化、部分/整批失败保留旧数据、跨应用并发 409、批次一一对应、90 天边界、配置、旧表迁移、中断恢复、fixture 完整链路及 MCP 握手/JSON/SSE/分页/异常。保留 Starlette 对 AnyIO 别名的既有弃用警告。
+112 项测试通过，其中工单 03 新增 30 项。使用 TestClient、FakeMinutesSource、假 FeishuAuth、临时 SQLite 和 httpx.MockTransport；自动阻断 socket、DNS 及真实 HTTP transport，不需要环境密钥。覆盖已有登录与同步、MCP 握手/JSON/SSE/分页/异常，以及上海跨日默认筛选、指定日期/昨天/含首尾区间、四态与时长、创建时间排序与同时间分页、20/5 分页不重复及筛选保留、空状态、非法参数、正文不进入 HTML、静态 CSS、搜索占位和退出。保留 Starlette 对 AnyIO 别名的既有弃用警告。
+
+工单 03 在本机 Chrome 对 TestClient 渲染的合成数据页面进行了独立布局检查（不加入 pytest 或项目依赖）：320/375/390px 下卡片单列、1280px 下两列；指定日期、区间、第 2 页与空状态均无横向溢出，实际文字最小 14px。长标题与长用户名也不撑宽页面。该检查不包含真实飞书、千问联调或实体手机。

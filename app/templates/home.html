@@ -1,19 +1,60 @@
 {% extends "base.html" %}
 {% block content %}
-  <header style="display:flex;align-items:center;justify-content:space-between;gap:1rem">
-    <div><h1>已登录</h1><p>{{ user.name }}</p></div>
+  <header class="topbar">
+    <a class="brand" href="/">QwenNote<span>录音笔记</span></a>
+    <div class="account"><span>{{ user.name }}</span><form action="/auth/logout" method="post"><button class="text-button" type="submit">退出</button></form></div>
     <button id="sync-button" type="button">{{ '重试' if sync_run and sync_run.status == 'failed' else '更新' }}</button>
+    <div class="search-placeholder">
+      <input type="search" aria-label="搜索录音（尚未开放）" placeholder="搜索录音 · 即将支持" disabled aria-describedby="search-help">
+      <span id="search-help">搜索功能将在后续工单开放</span>
+    </div>
   </header>
-  <section aria-label="同步状态" aria-live="polite" aria-atomic="true">
+  <section class="sync-panel" aria-label="同步状态" aria-live="polite" aria-atomic="true">
     <p id="sync-time">上次同步时间：{{ (sync_run.finished_at or sync_run.started_at) if sync_run else '尚未同步' }}</p>
     <p id="sync-status">状态：{{ sync_run.status if sync_run else '尚未同步' }}</p>
     <p id="sync-counts">{{ ('拉取 %s · 新增 %s · 更新 %s' % (sync_run.fetched, sync_run.inserted, sync_run.updated)) if sync_run else '拉取 0 · 新增 0 · 更新 0' }}</p>
-    <p id="sync-error" style="white-space:pre-wrap">{{ sync_run.error if sync_run and sync_run.error else '' }}</p>
+    <p id="sync-error">{{ sync_run.error if sync_run and sync_run.error else '' }}</p>
   </section>
-  <p>时间为笔记创建时间（Asia/Shanghai）。</p>
-  <section aria-label="录音列表占位">
-    <p>录音列表待后续工单实现</p>
+  <div class="list-heading"><h1>录音列表</h1><span>共 {{ recordings.total }} 条</span></div>
+  <p class="time-note">时间均为笔记创建时间，非录音开始时间（Asia/Shanghai）</p>
+  <section class="filters" aria-label="日期筛选">
+    <nav class="quick-filters" aria-label="快捷日期">
+      <a class="filter-link" href="/?page=1" {% if filters.mode == 'today' %}aria-current="date"{% endif %}>今天</a>
+      <a class="filter-link" href="/?yesterday=1&amp;page=1" {% if filters.mode == 'yesterday' %}aria-current="date"{% endif %}>昨天</a>
+    </nav>
+    <form action="/" method="get" class="date-filter" {% if filters.mode == 'date' %}aria-current="true"{% endif %}>
+      <label for="date">指定日期</label>
+      <input id="date" type="date" name="date" value="{{ filters.start if filters.mode == 'date' else '' }}" required>
+      <input type="hidden" name="page" value="1">
+      <button class="secondary" type="submit">查看</button>
+    </form>
+    <form action="/" method="get" class="date-filter range-filter" {% if filters.mode == 'range' %}aria-current="true"{% endif %}>
+      <label for="from">起始日期</label>
+      <input id="from" type="date" name="from" value="{{ filters.start if filters.mode == 'range' else '' }}" required>
+      <label for="to">结束日期</label>
+      <input id="to" type="date" name="to" value="{{ filters.end if filters.mode == 'range' else '' }}" required>
+      <input type="hidden" name="page" value="1">
+      <button class="secondary" type="submit">筛选区间</button>
+    </form>
   </section>
+  <p class="selected-period">当前：{{ filters.start }}{% if filters.mode == 'range' %} 至 {{ filters.end }}{% endif %}</p>
+  <section class="recording-grid" aria-label="录音列表">
+    {% for recording in recordings.items %}
+    {% set status, status_label = recording.status %}
+    <article class="recording-card" data-recording-id="{{ recording.recording_id }}">
+      <span class="badge badge-{{ status }}">{{ status_label }}</span>
+      <h2><a href="/recordings/{{ recording.recording_id | urlencode }}">{{ recording.title or '未命名录音' }}</a></h2>
+      <div class="card-meta"><time datetime="{{ recording.created_at.isoformat() }}">{{ recording.created_at.strftime('%Y-%m-%d %H:%M') }}</time><span aria-label="录音时长">{{ (recording.duration_min ~ ' 分钟') if recording.duration_min is not none else '—' }}</span></div>
+    </article>
+    {% else %}
+    <div class="empty-state"><h2>这一天没有录音</h2><p>可以切换日期，或点击右上角「更新」。</p></div>
+    {% endfor %}
+  </section>
+  <nav class="pagination" aria-label="录音分页">
+    {% if previous_url %}<a href="{{ previous_url }}" rel="prev">上一页</a>{% else %}<span aria-disabled="true">上一页</span>{% endif %}
+    <span>第 {{ recordings.page }} / {{ recordings.pages }} 页</span>
+    {% if next_url %}<a href="{{ next_url }}" rel="next">下一页</a>{% else %}<span aria-disabled="true">下一页</span>{% endif %}
+  </nav>
   <script>
     const button = document.getElementById('sync-button');
     button.addEventListener('click', async () => {
@@ -29,6 +70,7 @@
         document.getElementById('sync-counts').textContent = `拉取 ${result.fetched} · 新增 ${result.inserted} · 更新 ${result.updated}`;
         document.getElementById('sync-error').textContent = result.error || '';
         button.textContent = result.status === 'failed' ? '重试' : '更新';
+        window.location.reload();
       } catch (error) {
         document.getElementById('sync-status').textContent = '状态：请求未完成';
         document.getElementById('sync-error').textContent = error.message;

@@ -1,21 +1,62 @@
 import secrets
 from contextlib import asynccontextmanager
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Annotated
 from urllib.parse import urlencode
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from app.config import Settings
 from app.feishu import FeishuAuth, FeishuAuthError, HttpFeishuAuth
-from app.minutes import FixtureMinutesSource, HttpMinutesSource, MinutesSource
+from app.minutes import FixtureMinutesSource, HttpMinutesSource, MinutesSource, SHANGHAI
 from app.session import SESSION_MAX_AGE, STATE_MAX_AGE, SignedCookie
 from app.store import SQLiteStore, Store
 from app.sync import SyncInProgress, run_sync
 
 AUTHORIZE_URL = "https://accounts.feishu.cn/open-apis/authen/v1/authorize"
+
+
+def list_filters(request: Request) -> dict:
+    query = request.query_params
+    today = datetime.now(SHANGHAI).date()
+    groups = sum(('date' in query, 'yesterday' in query, 'from' in query or 'to' in query))
+    if groups > 1:
+        raise ValueError('请选择一种日期筛选方式。')
+
+    def parse_date(value: str) -> date:
+        result = date.fromisoformat(value)
+        if result.isoformat() != value:
+            raise ValueError('日期格式须为 YYYY-MM-DD。')
+        return result
+
+    params = {}
+    if 'date' in query:
+        start = end = parse_date(query['date'])
+        mode = 'date'
+        params = {'date': start.isoformat()}
+    elif 'from' in query or 'to' in query:
+        start, end = parse_date(query.get('from', '')), parse_date(query.get('to', ''))
+        if start > end:
+            raise ValueError('起始日期不能晚于结束日期。')
+        mode = 'range'
+        params = {'from': start.isoformat(), 'to': end.isoformat()}
+    elif 'yesterday' in query:
+        if query['yesterday'] != '1':
+            raise ValueError('昨天筛选须使用 yesterday=1。')
+        start = end = today - timedelta(days=1)
+        mode = 'yesterday'
+        params = {'yesterday': '1'}
+    else:
+        start = end = today
+        mode = 'today'
+    page = int(query.get('page', '1'))
+    if page < 1:
+        raise ValueError('页码须为正整数。')
+    return {'start': start, 'end': end, 'mode': mode, 'params': params, 'page': page}
 
 
 def get_store(request: Request) -> Store:
@@ -46,6 +87,7 @@ def create_app(
         yield
 
     app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
+    app.mount('/static', StaticFiles(directory=Path(__file__).parent / 'static'), name='static')
     app.state.store = repository
     app.state.feishu_auth = feishu_auth if feishu_auth is not None else HttpFeishuAuth(settings)
     if minutes_source is None:
@@ -82,8 +124,21 @@ def create_app(
         open_id = sessions.decode(request.cookies.get("session"))
         user = store.get_user(open_id) if open_id else None
         if user is not None and user.is_active:
+            try:
+                filters = list_filters(request)
+            except ValueError:
+                return error_page(request, 400, '筛选条件无效',
+                                  '请选择一种筛选方式，使用 YYYY-MM-DD 日期、完整且顺序正确的区间和正整数页码。')
+            recordings = store.list_recordings(filters['start'], filters['end'], filters['page'])
+
+            def page_url(page: int) -> str:
+                return '/?' + urlencode({**filters['params'], 'page': page})
+
             response = templates.TemplateResponse(request=request, name="home.html", context={
                 "user": user, "sync_run": store.latest_sync(),
+                'filters': filters, 'recordings': recordings,
+                'previous_url': page_url(recordings.page - 1) if recordings.page > 1 else None,
+                'next_url': page_url(recordings.page + 1) if recordings.page < recordings.pages else None,
             })
             response.headers["Cache-Control"] = "no-store"
             return response
@@ -96,6 +151,17 @@ def create_app(
         }), status_code=302)
         set_cookie(response, "oauth_state", states.encode(state), STATE_MAX_AGE)
         response.headers["Cache-Control"] = "no-store"
+        return response
+
+    @app.post('/auth/logout')
+    def logout(request: Request):
+        origin = request.headers.get('origin')
+        if origin and origin != str(request.base_url).rstrip('/'):
+            return JSONResponse({'detail': '请求来源无效'}, status_code=403)
+        response = RedirectResponse('/', status_code=302)
+        response.delete_cookie('session', path='/', httponly=True,
+                               secure=settings.secure_cookies, samesite='lax')
+        response.headers['Cache-Control'] = 'no-store'
         return response
 
     @app.post('/sync')

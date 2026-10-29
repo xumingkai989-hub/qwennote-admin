@@ -2,7 +2,7 @@ import fcntl
 import sqlite3
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Iterator, Protocol
 
@@ -20,6 +20,33 @@ class User:
     added_at: str
 
 
+@dataclass(frozen=True)
+class RecordingCard:
+    recording_id: str
+    title: str
+    created_at: datetime
+    duration_min: int | None
+    has_transcript: bool
+    has_summary: bool
+
+    @property
+    def status(self) -> tuple[str, str]:
+        return {
+            (True, True): ('complete', '已转录'),
+            (True, False): ('transcript-only', '仅转写'),
+            (False, True): ('summary-only', '仅总结'),
+            (False, False): ('empty', '未转录'),
+        }[self.has_transcript, self.has_summary]
+
+
+@dataclass(frozen=True)
+class RecordingPage:
+    items: list[RecordingCard]
+    total: int
+    page: int
+    pages: int
+
+
 class Store(SyncStore, Protocol):
     def migrate(self) -> None: ...
 
@@ -28,6 +55,8 @@ class Store(SyncStore, Protocol):
     def get_user(self, open_id: str) -> User | None: ...
 
     def update_profile(self, user: FeishuUser) -> None: ...
+
+    def list_recordings(self, start: date, end: date, page: int = 1) -> RecordingPage: ...
 
 
 class SQLiteStore:
@@ -97,6 +126,31 @@ class SQLiteStore:
                 conn.execute("INSERT INTO recordings_nullable SELECT * FROM recordings")
                 conn.execute("DROP TABLE recordings")
                 conn.execute("ALTER TABLE recordings_nullable RENAME TO recordings")
+            conn.execute('CREATE INDEX IF NOT EXISTS recordings_created_at_idx '
+                         'ON recordings (created_at DESC, recording_id DESC)')
+
+    def list_recordings(self, start: date, end: date, page: int = 1) -> RecordingPage:
+        # Stored timestamps already have Shanghai wall-clock semantics. Do not
+        # use SQLite date()/datetime(): they would shift +08:00 values to UTC.
+        bounds = (start.isoformat(), end.isoformat() + 'T23:59:59.999999+08:00')
+        where = 'created_at >= ? AND created_at <= ?'
+        with self._connect() as conn:
+            # Count and items share a read snapshot if a sync commits meanwhile.
+            conn.execute('BEGIN')
+            total = conn.execute(f'SELECT COUNT(*) FROM recordings WHERE {where}', bounds).fetchone()[0]
+            pages = max(1, (total + 19) // 20)
+            page = min(max(1, page), pages)
+            rows = conn.execute(
+                'SELECT recording_id, title, created_at, duration_min, has_transcript, has_summary '
+                f'FROM recordings WHERE {where} '
+                'ORDER BY created_at DESC, recording_id DESC LIMIT 20 OFFSET ?',
+                (*bounds, (page - 1) * 20),
+            ).fetchall()
+        return RecordingPage([
+            RecordingCard(row['recording_id'], row['title'], datetime.fromisoformat(row['created_at']),
+                          row['duration_min'], bool(row['has_transcript']), bool(row['has_summary']))
+            for row in rows
+        ], total, page, pages)
 
     @contextmanager
     def sync_lock(self) -> Iterator[None]:

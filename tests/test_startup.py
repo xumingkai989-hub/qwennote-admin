@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 
 from app.config import Settings
 from app.main import create_app
-from app.store import User
+from app.store import RecordingPage, User
 from test_login import login
 
 
@@ -59,6 +59,9 @@ def test_store_can_be_replaced_without_sqlite(settings, fake_auth):
 
         def latest_sync(self):
             return None
+
+        def list_recordings(self, start, end, page=1):
+            return RecordingPage([], 0, 1, 1)
 
     with TestClient(
         create_app(settings=settings, feishu_auth=fake_auth, store=FakeStore()),

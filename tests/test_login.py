@@ -84,12 +84,12 @@ def test_missing_or_blank_code_is_bad_request(client, params):
     assert "session" not in response.cookies
 
 
-def test_valid_session_can_visit_placeholder_home(client):
+def test_valid_session_can_visit_home(client):
     assert login(client).status_code == 302
     response = client.get("/")
     assert response.status_code == 200
-    assert "已登录" in response.text
-    assert "录音列表待后续工单实现" in response.text
+    assert "测试用户" in response.text
+    assert "录音列表" in response.text
 
 
 def test_tampered_session_redirects_to_login(client):
