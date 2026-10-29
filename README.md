@@ -1,6 +1,6 @@
 # QwenNote Admin
 
-工单 01–06：飞书登录白名单、手动同步、幂等入库、同步状态、录音列表与日期筛选、详情与 Markdown 导出、全文搜索、对外只读 API、API Key 命令行管理与审计。Python 3.11 + FastAPI + Jinja2 + 标准库 sqlite3，无 ORM、前端构建或定时任务。白名单管理页面由工单 07 实现。
+工单 01–07：飞书登录白名单、手动同步、幂等入库、同步状态、录音列表与日期筛选、详情与 Markdown 导出、全文搜索、对外只读 API、API Key 命令行管理与审计。Python 3.11 + FastAPI + Jinja2 + 标准库 sqlite3，无 ORM、前端构建或定时任务。包含管理员白名单管理与飞书联系人搜索；部署由工单 08 处理。
 
 ## 本地运行
 
@@ -21,7 +21,7 @@ cp .env.example .env
 | `FEISHU_REDIRECT_URI` | 完整回调 URL，路径 `/auth/callback`，必填 |
 | `SESSION_SECRET` | 至少 32 字节的随机签名密钥，必填 |
 | `DB_PATH` | SQLite 文件位置，自动创建父目录与表，必填 |
-| `ADMIN_OPEN_ID` | 首次启动加入白名单的管理员 open_id，必填 |
+| `ADMIN_OPEN_ID` | 唯一管理员身份（同时首次启动加入白名单），必填 |
 | `QWENNOTE_SOURCE` | `http`（默认）或显式指定 `fixture` |
 | `QWENNOTE_MCP_TOKEN` | HTTP 模式必填的 Bearer 凭据；仅从环境读取，不落库 |
 | `QWENNOTE_FIXTURE_DIR` | fixture 模式必填，本地 JSON 目录；示例 `./tests/fixtures/minutes` |
@@ -32,7 +32,7 @@ cp .env.example .env
 ## 登录与同步
 
 - `GET /`：未登录跳飞书授权；有效会话且仍在活动白名单内显示录音列表、同步状态和“更新”按钮。显示最近批次时间、running/success/failed、拉取/新增/更新计数及安全错误说明；失败可重试。时间均按 Asia/Shanghai，录音时间是笔记创建时间。
-- `POST /sync`：活动白名单会话可触发，未登录或被停用返回 401，跨域 Origin 返回 403。同步完成返回 HTTP 200 和 `status/fetched/inserted/updated/started_at/finished_at/error` JSON；`error` 成功为 null。按钮通过 fetch 调用，禁用当前按钮直到请求结束，更新状态文字并刷新当前筛选下的列表；请求失败时显示错误并允许重试。
+- `POST /sync`：活动白名单会话可触发，未登录返回 401，有效 session 的用户被停用返回 403，跨域 Origin 返回 403。同步完成返回 HTTP 200 和 `status/fetched/inserted/updated/started_at/finished_at/error` JSON；`error` 成功为 null。按钮通过 fetch 调用，禁用当前按钮直到请求结束，更新状态文字并刷新当前筛选下的列表；请求失败时显示错误并允许重试。
 - `POST /auth/logout`：清除当前浏览器的 session cookie 并返回首页，之后重新走飞书登录。拒绝带外站 Origin 的请求。
 - 每个获准执行的同步恰好新增一行 `sync_runs`，开始为 running，结束写 success 或 failed。同一数据库旁的 `*.sync.lock` 使用非阻塞 `flock`，跨线程、应用实例及进程互斥；并发请求返回 409，不新增批次。锁文件不能在运行中删除。进程退出会释放锁，下次同步将中断的 running 批次标为 failed，再创建新批次。
 - 每天的列表与每条详情通过 `MinutesSource` 注入；同一批按 `recording_id` 去重。`fetched` 是唯一录音数（含详情失败的条目），`inserted` 是实际新增数，`updated` 是已有录音业务字段发生变化的数量。完全相同的数据只写 `synced_at`，updated=0，保留已有 `owner_open_id`。
@@ -102,7 +102,7 @@ PY
 .venv/bin/python -m pytest -q
 ```
 
-238 项测试通过，其中工单 03 新增 30 项、工单 04 新增 27 项、工单 05 新增 36 项、工单 06 新增 63 项。使用 TestClient、FakeMinutesSource、假 FeishuAuth、临时 SQLite 和 httpx.MockTransport；自动阻断 socket、DNS 及真实 HTTP transport，不需要环境密钥。覆盖已有登录与同步、MCP 握手/JSON/SSE/分页/异常，以及上海跨日默认筛选、指定日期/昨天/含首尾区间、四态与时长、创建时间排序与同时间分页、20/5 分页不重复及筛选保留、空状态、非法参数、正文不进入 HTML、静态 CSS、搜索表单和退出。API 与 CLI 的新增覆盖见下文。保留 Starlette 对 AnyIO 别名的既有弃用警告。
+290 项测试通过，其中工单 03 新增 30 项、工单 04 新增 27 项、工单 05 新增 36 项、工单 06 新增 63 项、工单 07 新增 52 项。使用 TestClient、FakeMinutesSource、假 FeishuAuth、临时 SQLite 和 httpx.MockTransport；自动阻断 socket、DNS 及真实 HTTP transport，不需要环境密钥。覆盖已有登录与同步、MCP 握手/JSON/SSE/分页/异常，以及上海跨日默认筛选、指定日期/昨天/含首尾区间、四态与时长、创建时间排序与同时间分页、20/5 分页不重复及筛选保留、空状态、非法参数、正文不进入 HTML、静态 CSS、搜索表单和退出。API 与 CLI 的新增覆盖见下文。保留 Starlette 对 AnyIO 别名的既有弃用警告。
 
 工单 03 在本机 Chrome 对 TestClient 渲染的合成数据页面进行了独立布局检查（不加入 pytest 或项目依赖）：320/375/390px 下卡片单列、1280px 下两列；指定日期、区间、第 2 页与空状态均无横向溢出，实际文字最小 14px。长标题与长用户名也不撑宽页面。该检查不包含真实飞书、千问联调或实体手机。
 
@@ -206,3 +206,21 @@ curl --silent --show-error --include --header @- \
 四种端点均为 200，缺 Key 和吊销后各为 401，共六次调用对应六行审计；响应头、服务日志、数据库均未发现明文 Key。临时服务已停止，测试库已删除；复测时应使用新测试库、Key 和实际监听端口。
 
 工单 06 测试先行：CLI 尚未实现时 57 项初始化错误、2 项失败；完成 CLI 后、实现 API 前为 57 失败、2 通过。新增 63 项覆盖四个契约、五种失败鉴权、重复头/会话隔离、即时吊销、分页及上海日期边界、四态、完整每日导出和空状态、字面搜索及命中字段、参数错误、只读限制、500 审计、Key 哈希及日志/响应头/数据库无明文、CLI 重复迁移和错误输入。新增文件：`app/apikeys.py`、`app/public_api.py`、`tests/test_public_api.py`。
+
+
+## 后台白名单管理（工单 07）
+
+`GET /admin` 仅允许配置 `ADMIN_OPEN_ID` 对应的活动白名单用户访问，不依赖数据库角色或姓名；普通用户返回现有 error 模板的 403 页面，未登录使用现有飞书授权跳转。管理页与搜索响应均禁止缓存，并设置 `Referrer-Policy: no-referrer`。
+
+- `GET /admin?q=姓名或邮箱`：显示至多 20 个联系人，包含姓名、部门、邮箱与“添加”按钮。姓名、部门、邮箱、查询和隐藏表单字段均经过 Jinja 自动转义；不展示手机号、性别、令牌等其他敏感字段。搜索结果只用于本次响应，不写入数据库。
+- `POST /admin/users`：URL 编码表单包含 `open_id`、`name`、`avatar_url`、`csrf_token`。只保存被选中者的 ID、姓名、头像及白名单状态与加入时间。以 `open_id` 为唯一主键幂等 upsert；重复添加保留原加入时间，已移除者再次添加恢复启用。
+- `POST /admin/users/{open_id}/remove`：校验管理员及 CSRF 后将 `is_active` 设为 0，保留加入时间与停用状态。现有 session 在下次访问首页、搜索、详情、下载或同步时返回 403；重新登录也不能绕过白名单。管理员种子不会在重启时重新启用被停用的记录。
+- 白名单展示全部已添加用户的姓名、截断为前 8 位加 `…` 的 open_id、加入时间和启用/停用状态，`title` 属性提供完整 open_id。添加与移除成功均 303 返回管理页。
+
+**CSRF 方案：签名双提交 cookie。** 复用 `SignedCookie`，独立 `admin-csrf` salt，token 绑定当前已签名 session 的 SHA-256 摘要并附带随机值（不携带 session 本体），最长有效期 8 小时。管理页设置 HttpOnly、SameSite=Lax、Path=/admin cookie，HTTPS 配置下添加 Secure；表单包含相同 token。两个管理 POST 必须通过签名、时效、session 绑定和恒定时间比对，缺失、伪造、过期、重复字段或其他 session 的 token 返回 403，GET 不执行写操作。此方案无需依赖反向代理转发 Origin 的方式，普通 HTML 表单不带 Origin 时也能严格验证。
+
+`HttpFeishuAuth.search_users(query)` 获取企业自建应用的 tenant_access_token，调用飞书 [Directory 搜索员工接口](https://open.feishu.cn/document/directory-v1/employee/search)，明确指定 `employee_id_type=open_id`、`page_size=20`，不追随下一页。该接口支持应用身份；旧版 `search/v1/user` 要求用户令牌，不适用于仅配置 App ID/Secret 的服务。仅请求 ID、姓名、头像、部门、邮箱字段，并将响应转换为 `FeishuUser`；扩展的部门和邮箱仅供临时展示，不写 users 表。
+
+真实应用需开通 `directory:employee:search`，并按[官方接口文档](https://open.feishu.cn/document/directory-v1/employee/search)授权姓名、头像、部门、邮箱字段及所需通讯录数据范围。凭据缺失时适配器抛出明确的 `FeishuSearchNotConfigured`，页面显示“通讯录搜索未配置”；权限、网络、HTTP 或响应格式失败均显示可读错误，不输出提供方原始响应，不伪装成空结果。`Settings.from_env` 沿用启动时必填环境变量校验。测试只使用假 FeishuAuth 和 httpx.MockTransport，未进行真实租户联调。
+
+工单 07 新增 52 项离线测试，覆盖管理员边界、搜索不落库、敏感字段过滤与 HTML 转义、添加后完整 OAuth 回调、重复添加与恢复、旧 session 撤权、POST/CSRF（缺失、伪造、过期、跨 session、重复字段、Secure cookie）、未配置提示，以及真实适配器的应用 token、open_id、20 人上限、空结果与两阶段错误。已有停用用户测试按本工单要求更新为明确的 403。

@@ -99,3 +99,12 @@ h1 { margin: 0; font-size: 28px; letter-spacing: -.03em; }
 .hit-label { color: #526256; font-size: 14px; font-weight: 600; }
 .search-snippet { margin: 4px 0 0; font-size: 14px; white-space: pre-wrap; overflow-wrap: anywhere; }
 mark { background: #ffe99a; color: #27342f; border-radius: 2px; }
+
+.admin-section { margin-top: 28px; padding: 20px; border: 1px solid #dce2d7; border-radius: 14px; background: white; }
+.admin-section h2 { margin-top: 0; }
+.admin-table-wrap { overflow-x: auto; }
+.admin-table { border-collapse: collapse; width: 100%; text-align: left; font-size: 14px; }
+.admin-table caption { text-align: left; padding: 12px 0; }
+.admin-table th, .admin-table td { padding: 12px; border-bottom: 1px solid #dce2d7; overflow-wrap: anywhere; }
+.admin-table td { min-width: 100px; }
+.admin-table time { display: block; min-width: 180px; }

@@ -47,6 +47,8 @@ class FakeFeishuAuth:
     def __init__(self, user):
         self.user = user
         self.error = False
+        self.search_results = []
+        self.search_error = None
 
     def exchange_code(self, code):
         if self.error or code != "valid-test-code":
@@ -54,7 +56,9 @@ class FakeFeishuAuth:
         return self.user
 
     def search_users(self, query):
-        raise NotImplementedError
+        if self.search_error:
+            raise self.search_error
+        return [user for user in self.search_results if query in user.name or query in user.email]
 
 
 @pytest.fixture

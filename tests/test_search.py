@@ -138,7 +138,7 @@ def test_search_requires_active_whitelist(search_client, settings):
     login(search_client)
     with sqlite3.connect(settings.db_path) as conn:
         conn.execute('UPDATE users SET is_active = 0')
-    assert search_client.get('/search?q=看板').status_code == 401
+    assert search_client.get('/search?q=看板').status_code == 403
 
 
 def test_insert_update_delete_and_rebuild_keep_search_consistent(search_client, add_search_recording, settings):

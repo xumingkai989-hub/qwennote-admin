@@ -99,7 +99,7 @@ def test_anonymous_cannot_read_recording(client, suffix):
 def test_inactive_user_cannot_read_recording(detail_client, store, settings, suffix):
     with sqlite3.connect(store.db_path) as conn:
         conn.execute('UPDATE users SET is_active=0 WHERE open_id=?', (settings.admin_open_id,))
-    assert detail_client.get('/recordings/detail' + suffix).status_code in (302, 401)
+    assert detail_client.get('/recordings/detail' + suffix).status_code == 403
 
 
 def frontmatter(text):

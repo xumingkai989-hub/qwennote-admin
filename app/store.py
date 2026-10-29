@@ -92,6 +92,12 @@ class Store(SyncStore, Protocol):
 
     def get_user(self, open_id: str) -> User | None: ...
 
+    def list_users(self) -> list[User]: ...
+
+    def add_user(self, user: FeishuUser) -> None: ...
+
+    def remove_user(self, open_id: str) -> None: ...
+
     def update_profile(self, user: FeishuUser) -> None: ...
 
     def list_recordings(self, start: date, end: date, page: int = 1) -> RecordingPage: ...
@@ -469,6 +475,25 @@ class SQLiteStore:
         if row is None:
             return None
         return User(row["open_id"], row["name"], row["avatar_url"], bool(row["is_active"]), row["added_at"])
+
+    def list_users(self) -> list[User]:
+        with self._connect() as conn:
+            rows = conn.execute('SELECT * FROM users ORDER BY added_at, open_id').fetchall()
+        return [User(row['open_id'], row['name'], row['avatar_url'],
+                     bool(row['is_active']), row['added_at']) for row in rows]
+
+    def add_user(self, user: FeishuUser) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                'INSERT INTO users (open_id, name, avatar_url, is_active, added_at) '
+                'VALUES (?, ?, ?, 1, ?) ON CONFLICT(open_id) DO UPDATE SET '
+                'name = excluded.name, avatar_url = excluded.avatar_url, is_active = 1',
+                (user.open_id, user.name, user.avatar_url, datetime.now(timezone.utc).isoformat()),
+            )
+
+    def remove_user(self, open_id: str) -> None:
+        with self._connect() as conn:
+            conn.execute('UPDATE users SET is_active = 0 WHERE open_id = ?', (open_id,))
 
     def update_profile(self, user: FeishuUser) -> None:
         with self._connect() as conn:

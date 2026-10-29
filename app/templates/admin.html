@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block content %}
+  <header class="list-heading">
+    <h1>白名单管理</h1>
+    <a href="/">返回录音列表</a>
+  </header>
+  <section class="admin-section" aria-labelledby="contact-heading">
+    <h2 id="contact-heading">搜索飞书联系人</h2>
+    <form action="/admin" method="get" class="search-form">
+      <label for="contact-query">姓名或邮箱</label>
+      <input id="contact-query" type="search" name="q" value="{{ query }}" placeholder="输入姓名或邮箱" required>
+      <button type="submit">搜索</button>
+    </form>
+    {% if search_error %}
+      <p role="alert">{{ search_error }}</p>
+    {% elif query %}
+      <p>最多显示 20 人</p>
+      {% if results %}
+      <div class="admin-table-wrap">
+        <table class="admin-table">
+          <caption>联系人搜索结果</caption>
+          <thead><tr><th scope="col">姓名</th><th scope="col">部门</th><th scope="col">邮箱</th><th scope="col">操作</th></tr></thead>
+          <tbody>{% for person in results %}
+            <tr><td>{{ person.name }}</td><td>{{ person.department or '—' }}</td><td>{{ person.email or '—' }}</td>
+              <td><form action="/admin/users" method="post">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <input type="hidden" name="open_id" value="{{ person.open_id }}">
+                <input type="hidden" name="name" value="{{ person.name }}">
+                <input type="hidden" name="avatar_url" value="{{ person.avatar_url }}">
+                <button type="submit">添加</button>
+              </form></td>
+            </tr>
+          {% endfor %}</tbody>
+        </table>
+      </div>
+      {% else %}<p>未找到联系人</p>{% endif %}
+    {% endif %}
+  </section>
+  <section class="admin-section" aria-labelledby="whitelist-heading">
+    <h2 id="whitelist-heading">当前白名单</h2>
+    <div class="admin-table-wrap">
+      <table class="admin-table">
+        <thead><tr><th scope="col">姓名</th><th scope="col">open_id</th><th scope="col">加入时间</th><th scope="col">状态</th><th scope="col">操作</th></tr></thead>
+        <tbody>{% for person in users %}
+          <tr><td>{{ person.name }}</td><td title="{{ person.open_id }}">{{ person.open_id[:8] }}…</td>
+            <td><time datetime="{{ person.added_at }}">{{ person.added_at }}</time></td>
+            <td>{{ '已启用' if person.is_active else '已停用' }}</td>
+            <td><form action="{{ url_for('remove_user', open_id=person.open_id) }}" method="post">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <button type="submit" class="secondary">移除</button>
+            </form></td>
+          </tr>
+        {% endfor %}</tbody>
+      </table>
+    </div>
+  </section>
+{% endblock %}

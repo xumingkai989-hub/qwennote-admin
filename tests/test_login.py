@@ -112,7 +112,8 @@ def test_revoked_user_cannot_reuse_session(client, settings):
     login(client)
     with sqlite3.connect(settings.db_path) as conn:
         conn.execute("UPDATE users SET is_active = 0 WHERE open_id = ?", (settings.admin_open_id,))
-    assert client.get("/").status_code == 302
+    assert client.get("/").status_code == 403
+    client.cookies.clear()
     assert login(client).status_code == 403
 
 

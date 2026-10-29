@@ -150,7 +150,7 @@ def test_sync_requires_active_whitelist_session(client, settings):
     login(client)
     with sqlite3.connect(settings.db_path) as conn:
         conn.execute('UPDATE users SET is_active = 0')
-    assert client.post('/sync').status_code == 401
+    assert client.post('/sync').status_code == 403
     assert rows(settings, 'sync_runs') == []
 
 

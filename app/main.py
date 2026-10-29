@@ -10,6 +10,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Resp
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+from app.admin import install_admin
 from app.config import Settings
 from app.feishu import FeishuAuth, FeishuAuthError, HttpFeishuAuth
 from app.minutes import FixtureMinutesSource, HttpMinutesSource, MinutesSource, SHANGHAI
@@ -126,12 +127,31 @@ def create_app(
             context={"title": title, "message": message}, status_code=status,
         ))
 
+    def web_access_error(request: Request, open_id: str | None, message: str) -> Response:
+        return error_page(request, 403 if open_id else 401,
+                          '无访问权限' if open_id else '请先登录', message)
+
+    def login_redirect():
+        state = secrets.token_urlsafe(32)
+        response = RedirectResponse(AUTHORIZE_URL + "?" + urlencode({
+            "client_id": settings.feishu_app_id,
+            "redirect_uri": settings.feishu_redirect_uri,
+            "response_type": "code",
+            "state": state,
+        }), status_code=302)
+        set_cookie(response, "oauth_state", states.encode(state), STATE_MAX_AGE)
+        response.headers["Cache-Control"] = "no-store"
+        return response
+
+    install_admin(app, settings=settings, templates=templates, sessions=sessions,
+                  error_page=error_page, login_redirect=login_redirect)
+
     @app.get('/search', response_class=HTMLResponse)
     def search(request: Request, store: Annotated[Store, Depends(get_store)]):
         open_id = sessions.decode(request.cookies.get('session'))
         user = store.get_user(open_id) if open_id else None
         if user is None or not user.is_active:
-            return error_page(request, 401, '请先登录', '请登录后搜索录音。')
+            return web_access_error(request, open_id, '请登录后搜索录音。')
         query = request.query_params.get('q', '').strip()
         if not query:
             return RedirectResponse('/', status_code=302, headers={'Cache-Control': 'no-store'})
@@ -181,22 +201,15 @@ def create_app(
             })
             response.headers["Cache-Control"] = "no-store"
             return response
-        state = secrets.token_urlsafe(32)
-        response = RedirectResponse(AUTHORIZE_URL + "?" + urlencode({
-            "client_id": settings.feishu_app_id,
-            "redirect_uri": settings.feishu_redirect_uri,
-            "response_type": "code",
-            "state": state,
-        }), status_code=302)
-        set_cookie(response, "oauth_state", states.encode(state), STATE_MAX_AGE)
-        response.headers["Cache-Control"] = "no-store"
-        return response
+        if open_id:
+            return error_page(request, 403, '无访问权限', '你的账号不在访问白名单中。')
+        return login_redirect()
 
     def recording_for_request(request: Request, store: Store, recording_id: str):
         open_id = sessions.decode(request.cookies.get('session'))
         user = store.get_user(open_id) if open_id else None
         if user is None or not user.is_active:
-            return None, error_page(request, 401, '请先登录', '请登录后查看录音。')
+            return None, web_access_error(request, open_id, '请登录后查看录音。')
         recording = store.get_recording(recording_id)
         if recording is None:
             return None, error_page(request, 404, '录音不存在', '找不到该录音，请返回列表。')
@@ -255,7 +268,8 @@ def create_app(
         open_id = sessions.decode(request.cookies.get('session'))
         user = store.get_user(open_id) if open_id else None
         if user is None or not user.is_active:
-            return JSONResponse({'detail': '请先登录'}, status_code=401)
+            return JSONResponse({'detail': '无访问权限' if open_id else '请先登录'},
+                                status_code=403 if open_id else 401)
         origin = request.headers.get('origin')
         if origin and origin != str(request.base_url).rstrip('/'):
             return JSONResponse({'detail': '请求来源无效'}, status_code=403)
