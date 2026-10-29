@@ -1,0 +1,20 @@
+[project]
+name = "qwennote-admin"
+version = "0.1.0"
+description = "QwenNote private web application"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+    "fastapi==0.115.12",
+    "httpx==0.28.1",
+    "itsdangerous==2.2.0",
+    "Jinja2==3.1.6",
+    "python-dotenv==1.1.0",
+    "uvicorn==0.34.2",
+]
+
+[project.optional-dependencies]
+test = ["pytest==8.3.5"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

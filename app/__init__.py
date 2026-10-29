@@ -1,0 +1,1 @@
+"""QwenNote application."""
