@@ -13,6 +13,7 @@ from fastapi.templating import Jinja2Templates
 from app.config import Settings
 from app.feishu import FeishuAuth, FeishuAuthError, HttpFeishuAuth
 from app.minutes import FixtureMinutesSource, HttpMinutesSource, MinutesSource, SHANGHAI
+from app.public_api import install_public_api
 from app.recording_content import (download_disposition, export_markdown, render_summary, transcript_segments)
 from app.search import search_snippets
 from app.session import SESSION_MAX_AGE, STATE_MAX_AGE, SignedCookie
@@ -94,6 +95,7 @@ def create_app(
     app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
     app.mount('/static', StaticFiles(directory=Path(__file__).parent / 'static'), name='static')
     app.state.store = repository
+    install_public_api(app)
     app.state.feishu_auth = feishu_auth if feishu_auth is not None else HttpFeishuAuth(settings)
     if minutes_source is None:
         minutes_source = (FixtureMinutesSource(settings.minutes_fixture_dir)

@@ -1,4 +1,5 @@
 import fcntl
+import hmac
 import sqlite3
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -53,7 +54,36 @@ class RecordingPage:
     pages: int
 
 
+@dataclass(frozen=True)
+class RecordingBatch:
+    items: list[StoredRecording]
+    total: int
+
+
+@dataclass(frozen=True)
+class ApiKey:
+    id: int
+    name: str
+    created_at: str
+    revoked_at: str | None
+    last_used_at: str | None
+
+
 class Store(SyncStore, Protocol):
+    def create_api_key(self, name: str, key_hash: str) -> ApiKey: ...
+
+    def list_api_keys(self) -> list[ApiKey]: ...
+
+    def revoke_api_key(self, key_id: int) -> bool: ...
+
+    def authenticate_api_key(self, key_hash: str) -> tuple[int | None, bool]: ...
+
+    def audit_api_call(self, key_id: int | None, path: str, status_code: int) -> None: ...
+
+    def read_recordings(self, start: date | None = None, end: date | None = None,
+                        *, limit: int | None = 20, offset: int = 0,
+                        query: str | None = None) -> RecordingBatch: ...
+
     def get_recording(self, recording_id: str) -> StoredRecording | None: ...
 
     def migrate(self) -> None: ...
@@ -117,6 +147,21 @@ class SQLiteStore:
                     inserted INTEGER NOT NULL DEFAULT 0,
                     updated INTEGER NOT NULL DEFAULT 0,
                     error TEXT
+                );
+                CREATE TABLE IF NOT EXISTS api_keys (
+                    id INTEGER PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    key_hash TEXT NOT NULL UNIQUE,
+                    created_at TEXT NOT NULL,
+                    revoked_at TEXT,
+                    last_used_at TEXT
+                );
+                CREATE TABLE IF NOT EXISTS api_audit (
+                    id INTEGER PRIMARY KEY,
+                    key_id INTEGER REFERENCES api_keys(id),
+                    path TEXT NOT NULL,
+                    status_code INTEGER NOT NULL,
+                    at TEXT NOT NULL
                 );
             """)
             # Work order 01 used NOT NULL on optional values. Rebuild only that
@@ -192,10 +237,8 @@ class SQLiteStore:
             self._backfill_search_text(conn)
             conn.execute("INSERT INTO recordings_fts(recordings_fts) VALUES ('rebuild')")
 
-    def search_recordings(self, query: str, start: date | None = None,
-                          end: date | None = None, page: int = 1) -> RecordingPage:
-        if not query:
-            return RecordingPage([], 0, 1, 1)
+    @staticmethod
+    def _search_predicate(query: str) -> tuple[str, list[str]]:
         if len(query) >= 3:
             # Quoting the entire phrase makes operators and quotes literal.
             where = 'rowid IN (SELECT rowid FROM recordings_fts WHERE recordings_fts MATCH ?)'
@@ -205,6 +248,13 @@ class SQLiteStore:
             # metacharacters so %, _ and backslash remain literal keywords.
             where = "search_text LIKE ? ESCAPE '\\'"
             params = ['%' + query.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_') + '%']
+        return where, params
+
+    def search_recordings(self, query: str, start: date | None = None,
+                          end: date | None = None, page: int = 1) -> RecordingPage:
+        if not query:
+            return RecordingPage([], 0, 1, 1)
+        where, params = self._search_predicate(query)
         if start is not None:
             where += ' AND created_at >= ?'
             params.append(start.isoformat())
@@ -230,6 +280,76 @@ class SQLiteStore:
                             row['summary_md'] or '', row['transcript_md'] or '')
             for row in rows
         ], total, page, pages)
+
+    def read_recordings(self, start: date | None = None, end: date | None = None,
+                        *, limit: int | None = 20, offset: int = 0,
+                        query: str | None = None) -> RecordingBatch:
+        where, params = self._search_predicate(query) if query is not None else ('1 = 1', [])
+        if start is not None:
+            where += ' AND created_at >= ?'
+            params.append(start.isoformat())
+        if end is not None:
+            where += ' AND created_at <= ?'
+            params.append(end.isoformat() + 'T23:59:59.999999+08:00')
+        with self._connect() as conn:
+            conn.execute('BEGIN')
+            total = conn.execute(f'SELECT COUNT(*) FROM recordings WHERE {where}', params).fetchone()[0]
+            rows = conn.execute(
+                'SELECT recording_id, title, created_at, duration_min, has_transcript, has_summary, '
+                f'summary_md, transcript_md FROM recordings WHERE {where} '
+                'ORDER BY created_at DESC, recording_id DESC LIMIT ? OFFSET ?',
+                (*params, limit if limit is not None else -1, offset),
+            ).fetchall()
+        return RecordingBatch([
+            StoredRecording(row['recording_id'], row['title'], datetime.fromisoformat(row['created_at']),
+                            row['duration_min'], bool(row['has_transcript']), bool(row['has_summary']),
+                            row['summary_md'] or '', row['transcript_md'] or '')
+            for row in rows
+        ], total)
+
+    def create_api_key(self, name: str, key_hash: str) -> ApiKey:
+        created_at = datetime.now(timezone.utc).isoformat()
+        with self._connect() as conn:
+            cursor = conn.execute(
+                'INSERT INTO api_keys (name, key_hash, created_at) VALUES (?, ?, ?)',
+                (name, key_hash, created_at),
+            )
+            return ApiKey(cursor.lastrowid, name, created_at, None, None)
+
+    def list_api_keys(self) -> list[ApiKey]:
+        with self._connect() as conn:
+            return [ApiKey(**dict(row)) for row in conn.execute(
+                'SELECT id, name, created_at, revoked_at, last_used_at FROM api_keys ORDER BY id',
+            )]
+
+    def revoke_api_key(self, key_id: int) -> bool:
+        with self._connect() as conn:
+            cursor = conn.execute(
+                'UPDATE api_keys SET revoked_at = coalesce(revoked_at, ?) WHERE id = ?',
+                (datetime.now(timezone.utc).isoformat(), key_id),
+            )
+            return cursor.rowcount > 0
+
+    def authenticate_api_key(self, key_hash: str) -> tuple[int | None, bool]:
+        # Never cache authorization: a committed revocation affects the next
+        # call, across processes. Serialize the last-used update with revoke.
+        with self._connect() as conn:
+            conn.execute('BEGIN IMMEDIATE')
+            key_id, active = None, False
+            # Compare every fixed-length digest; no SQL string equality or
+            # early return that depends on the position of the matching key.
+            for row in conn.execute('SELECT id, key_hash, revoked_at FROM api_keys'):
+                if hmac.compare_digest(key_hash, row['key_hash']):
+                    key_id, active = row['id'], row['revoked_at'] is None
+            if active:
+                conn.execute('UPDATE api_keys SET last_used_at = ? WHERE id = ?',
+                             (datetime.now(timezone.utc).isoformat(), key_id))
+            return key_id, active
+
+    def audit_api_call(self, key_id: int | None, path: str, status_code: int) -> None:
+        with self._connect() as conn:
+            conn.execute('INSERT INTO api_audit (key_id, path, status_code, at) VALUES (?, ?, ?, ?)',
+                         (key_id, path, status_code, datetime.now(timezone.utc).isoformat()))
 
     def list_recordings(self, start: date, end: date, page: int = 1) -> RecordingPage:
         # Stored timestamps already have Shanghai wall-clock semantics. Do not

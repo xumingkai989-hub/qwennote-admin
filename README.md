@@ -1,6 +1,6 @@
 # QwenNote Admin
 
-工单 01–05：飞书登录白名单、手动同步、幂等入库、同步状态、录音列表与日期筛选、详情与 Markdown 导出、全文搜索。Python 3.11 + FastAPI + Jinja2 + 标准库 sqlite3，无 ORM、前端构建或定时任务。只读 API 和后台管理由后续工单实现。
+工单 01–06：飞书登录白名单、手动同步、幂等入库、同步状态、录音列表与日期筛选、详情与 Markdown 导出、全文搜索、对外只读 API、API Key 命令行管理与审计。Python 3.11 + FastAPI + Jinja2 + 标准库 sqlite3，无 ORM、前端构建或定时任务。白名单管理页面由工单 07 实现。
 
 ## 本地运行
 
@@ -102,7 +102,7 @@ PY
 .venv/bin/python -m pytest -q
 ```
 
-175 项测试通过，其中工单 03 新增 30 项、工单 04 新增 27 项、工单 05 新增 36 项。使用 TestClient、FakeMinutesSource、假 FeishuAuth、临时 SQLite 和 httpx.MockTransport；自动阻断 socket、DNS 及真实 HTTP transport，不需要环境密钥。覆盖已有登录与同步、MCP 握手/JSON/SSE/分页/异常，以及上海跨日默认筛选、指定日期/昨天/含首尾区间、四态与时长、创建时间排序与同时间分页、20/5 分页不重复及筛选保留、空状态、非法参数、正文不进入 HTML、静态 CSS、搜索表单和退出。保留 Starlette 对 AnyIO 别名的既有弃用警告。
+238 项测试通过，其中工单 03 新增 30 项、工单 04 新增 27 项、工单 05 新增 36 项、工单 06 新增 63 项。使用 TestClient、FakeMinutesSource、假 FeishuAuth、临时 SQLite 和 httpx.MockTransport；自动阻断 socket、DNS 及真实 HTTP transport，不需要环境密钥。覆盖已有登录与同步、MCP 握手/JSON/SSE/分页/异常，以及上海跨日默认筛选、指定日期/昨天/含首尾区间、四态与时长、创建时间排序与同时间分页、20/5 分页不重复及筛选保留、空状态、非法参数、正文不进入 HTML、静态 CSS、搜索表单和退出。API 与 CLI 的新增覆盖见下文。保留 Starlette 对 AnyIO 别名的既有弃用警告。
 
 工单 03 在本机 Chrome 对 TestClient 渲染的合成数据页面进行了独立布局检查（不加入 pytest 或项目依赖）：320/375/390px 下卡片单列、1280px 下两列；指定日期、区间、第 2 页与空状态均无横向溢出，实际文字最小 14px。长标题与长用户名也不撑宽页面。该检查不包含真实飞书、千问联调或实体手机。
 
@@ -157,3 +157,52 @@ DB_PATH=./data/qwennote.db .venv/bin/python -m app.rebuild_search
 查询计划分别包含 `SCAN recordings_fts VIRTUAL TABLE INDEX 0:M1` 和 `SCAN recordings USING INDEX recordings_created_at_idx`；后者使用时间索引按顺序扫描录音，并逐条检查搜索文本。数据量和正文长度变化会影响耗时，以上仅为本机合成数据测量。
 
 工单 05 测试先行（实现前相关测试 38 失败、46 通过），新增 36 项：中文四字/两字/单字、英数与大小写、命中字段及去重、危险 HTML 与字面操作符/通配符、片段上下文、空查询/无结果、登录与白名单、两条路径的分页/日期边界/详情返回、插入更新删除同步、重建恢复与幂等、旧库及缺失索引启动修复、重建命令缺路径。新增文件：`app/search.py`、`app/rebuild_search.py`、`scripts/benchmark_search.py`、`tests/test_search.py`。
+
+## 对外只读 API 与 Key 管理（工单 06）
+
+以下端点全部要求 `Authorization: Bearer <key>`，不依赖飞书会话。无日期筛选时读取全部日期；时间仍为 Asia/Shanghai 笔记创建时间。
+
+| GET 端点 | 返回与参数 |
+| --- | --- |
+| `/api/v1/recordings?date=2026-10-29&limit=20&offset=0` | `total/limit/offset/items`；也支持 `from/to`，与 `date` 互斥；可只指定区间一端 |
+| `/api/v1/recordings/{recording_id}` | 列表项字段加 `summary_md/transcript_md`；未知 ID 返回 404 |
+| `/api/v1/daily/2026-10-29?format=json` | 默认 json，`date/count/recordings`，包含当天全部录音 |
+| `/api/v1/daily/2026-10-29?format=md` | `text/markdown; charset=utf-8`；总数、总时长、清单表格及每条总结和原文 |
+| `/api/v1/search?q=看板&from=2026-10-01&to=2026-10-29&limit=20` | `q/total/items`，每项含 ID、标题、创建时间及命中字段 `matched`（`title/summary/transcript`） |
+
+列表项字段为 `recording_id/title/created_at/duration_min/status/has_transcript/has_summary`，状态码为 `complete/transcript_only/summary_only/empty`。列表和搜索默认 limit=20，允许 1–100；offset 默认 0，允许非负整数。`total` 为筛选后总数，超过末尾的 offset 返回空 items，排序为创建时间倒序、同时间按 ID 倒序。日期必须为 `YYYY-MM-DD`，区间不能倒置，参数无效返回通用 400。搜索复用工单 05 的 FTS5 trigram/短词字面 LIKE。
+
+当天无数据仍返回 200：JSON 为 `count=0, recordings=[]`；Markdown 显示“共 0 条录音，合计 0 分钟”和“当天没有录音”。缺转写显示“（未转录）”，未知时长显示“时长未知”，合计仅累加已知时长。标题中的换行和表格分隔符经过处理，总结与转写保留原始 Markdown。
+
+CLI 仅要求显式设置 `DB_PATH`，不读取 `.env`，不需要飞书/千问凭据。对应用所用数据库执行：
+
+```sh
+export DB_PATH=./data/qwennote.db
+.venv/bin/python -m app.apikeys create --name "codex"
+.venv/bin/python -m app.apikeys list
+.venv/bin/python -m app.apikeys revoke 1
+```
+
+`create` 的标准输出只有一次明文 Key（`qn_` + 32 位随机十六进制字符，128 位随机熵）。`list` 仅显示 id、name、created_at、last_used_at、active/revoked；`revoke` 可重复执行且保留首次吊销时间，未知 ID 返回非零退出码。
+
+`api_keys` 只存 SHA-256 哈希和管理字段，逐次使用 `hmac.compare_digest` 比较全部固定长度摘要，不缓存授权；CLI 吊销提交后，下一次调用立即失效。缺失、错误前缀、格式错误、未知、已吊销及重复 Authorization 头统一返回 `401 {"detail":"unauthorized"}`。正常返回的 API 响应禁止缓存。
+
+每个 `/api/v1` 请求写一条 `api_audit(key_id,path,status_code,at)`，包含成功、401、400、404、405 及处理异常的 500。已吊销 Key 保留可识别的 key_id，未知/缺失/格式错误为 null。只记录 URL 路径，省略 query、Authorization、正文和异常原文；不记录 Key 明文。有效 Key 认证时更新 last_used_at，已吊销 Key 不更新。API 仅注册 GET 读取端点，写入方法返回 405，Bearer Key 也不能授权网页的 `/sync`。
+
+实际 curl 验证使用独立临时 SQLite 与现有脱敏 fixture，在本机 Uvicorn 临时端口运行；测试 Key 只在内存中传给 curl，不在报告中打印。执行方式如下（`TEST_API_KEY` 为该测试库刚创建的 Key）：
+
+```sh
+curl --silent --show-error --include --header @- \
+  'http://127.0.0.1:52307/api/v1/recordings?date=2026-10-29&limit=1&offset=0' \
+  <<< "Authorization: Bearer ${TEST_API_KEY}"
+```
+
+实际返回 `HTTP/1.1 200 OK`，正文为：
+
+```json
+{"total":2,"limit":1,"offset":0,"items":[{"recording_id":"fixture-20261029-02","title":"示例：待转录笔记","created_at":"2026-10-29T20:17:00+08:00","duration_min":null,"status":"empty","has_transcript":false,"has_summary":false}]}
+```
+
+四种端点均为 200，缺 Key 和吊销后各为 401，共六次调用对应六行审计；响应头、服务日志、数据库均未发现明文 Key。临时服务已停止，测试库已删除；复测时应使用新测试库、Key 和实际监听端口。
+
+工单 06 测试先行：CLI 尚未实现时 57 项初始化错误、2 项失败；完成 CLI 后、实现 API 前为 57 失败、2 通过。新增 63 项覆盖四个契约、五种失败鉴权、重复头/会话隔离、即时吊销、分页及上海日期边界、四态、完整每日导出和空状态、字面搜索及命中字段、参数错误、只读限制、500 审计、Key 哈希及日志/响应头/数据库无明文、CLI 重复迁移和错误输入。新增文件：`app/apikeys.py`、`app/public_api.py`、`tests/test_public_api.py`。
