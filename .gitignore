@@ -12,3 +12,4 @@ __pycache__/
 data/
 .scratch/
 *.egg-info/
+*.sync.lock

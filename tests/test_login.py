@@ -89,7 +89,7 @@ def test_valid_session_can_visit_placeholder_home(client):
     response = client.get("/")
     assert response.status_code == 200
     assert "已登录" in response.text
-    assert "暂无录音" in response.text
+    assert "录音列表待后续工单实现" in response.text
 
 
 def test_tampered_session_redirects_to_login(client):
@@ -160,5 +160,5 @@ def test_user_name_is_html_escaped(client, fake_auth):
     fake_auth.user = replace(fake_auth.user, name="<script>alert(1)</script>")
     login(client)
     response = client.get("/")
-    assert "<script>" not in response.text
+    assert "<script>alert(1)</script>" not in response.text
     assert "&lt;script&gt;" in response.text

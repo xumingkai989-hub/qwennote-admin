@@ -5,13 +5,15 @@ from typing import Annotated
 from urllib.parse import urlencode
 
 from fastapi import Depends, FastAPI, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 
 from app.config import Settings
 from app.feishu import FeishuAuth, FeishuAuthError, HttpFeishuAuth
+from app.minutes import FixtureMinutesSource, HttpMinutesSource, MinutesSource
 from app.session import SESSION_MAX_AGE, STATE_MAX_AGE, SignedCookie
 from app.store import SQLiteStore, Store
+from app.sync import SyncInProgress, run_sync
 
 AUTHORIZE_URL = "https://accounts.feishu.cn/open-apis/authen/v1/authorize"
 
@@ -24,10 +26,15 @@ def get_feishu_auth(request: Request) -> FeishuAuth:
     return request.app.state.feishu_auth
 
 
+def get_minutes_source(request: Request) -> MinutesSource:
+    return request.app.state.minutes_source
+
+
 def create_app(
     *, settings: Settings | None = None,
     feishu_auth: FeishuAuth | None = None,
     store: Store | None = None,
+    minutes_source: MinutesSource | None = None,
 ) -> FastAPI:
     settings = settings if settings is not None else Settings.from_env()
     repository = store if store is not None else SQLiteStore(settings.db_path)
@@ -41,6 +48,10 @@ def create_app(
     app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
     app.state.store = repository
     app.state.feishu_auth = feishu_auth if feishu_auth is not None else HttpFeishuAuth(settings)
+    if minutes_source is None:
+        minutes_source = (FixtureMinutesSource(settings.minutes_fixture_dir)
+                          if settings.minutes_source == 'fixture' else HttpMinutesSource())
+    app.state.minutes_source = minutes_source
     templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
     sessions = SignedCookie(settings.session_secret, salt="web-session", max_age=SESSION_MAX_AGE)
     states = SignedCookie(settings.session_secret, salt="oauth-state", max_age=STATE_MAX_AGE)
@@ -71,7 +82,9 @@ def create_app(
         open_id = sessions.decode(request.cookies.get("session"))
         user = store.get_user(open_id) if open_id else None
         if user is not None and user.is_active:
-            response = templates.TemplateResponse(request=request, name="home.html", context={"user": user})
+            response = templates.TemplateResponse(request=request, name="home.html", context={
+                "user": user, "sync_run": store.latest_sync(),
+            })
             response.headers["Cache-Control"] = "no-store"
             return response
         state = secrets.token_urlsafe(32)
@@ -84,6 +97,26 @@ def create_app(
         set_cookie(response, "oauth_state", states.encode(state), STATE_MAX_AGE)
         response.headers["Cache-Control"] = "no-store"
         return response
+
+    @app.post('/sync')
+    def sync(
+        request: Request,
+        source: Annotated[MinutesSource, Depends(get_minutes_source)],
+        store: Annotated[Store, Depends(get_store)],
+    ):
+        open_id = sessions.decode(request.cookies.get('session'))
+        user = store.get_user(open_id) if open_id else None
+        if user is None or not user.is_active:
+            return JSONResponse({'detail': '请先登录'}, status_code=401)
+        origin = request.headers.get('origin')
+        if origin and origin != str(request.base_url).rstrip('/'):
+            return JSONResponse({'detail': '请求来源无效'}, status_code=403)
+        try:
+            run = run_sync(source, store, backfill_days=settings.backfill_days)
+        except SyncInProgress:
+            return JSONResponse({'detail': '同步正在进行，请稍后重试'}, status_code=409,
+                                headers={'Cache-Control': 'no-store'})
+        return JSONResponse(run.result(), headers={'Cache-Control': 'no-store'})
 
     @app.get("/auth/callback")
     def callback(

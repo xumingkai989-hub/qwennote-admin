@@ -13,7 +13,7 @@ def test_startup_migrates_only_required_tables_and_seeds_admin(client, settings)
     with sqlite3.connect(settings.db_path) as conn:
         assert conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
         tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-        assert tables == {"users", "recordings"}
+        assert tables == {"users", "recordings", "sync_runs"}
         assert conn.execute("SELECT COUNT(*) FROM recordings").fetchone()[0] == 0
         assert {r[1] for r in conn.execute("PRAGMA table_info(recordings)")} == {
             "recording_id", "title", "created_at", "duration_min", "summary_md",
@@ -57,6 +57,9 @@ def test_store_can_be_replaced_without_sqlite(settings, fake_auth):
         def update_profile(self, user):
             pass
 
+        def latest_sync(self):
+            return None
+
     with TestClient(
         create_app(settings=settings, feishu_auth=fake_auth, store=FakeStore()),
         follow_redirects=False,
@@ -86,4 +89,57 @@ def test_weak_session_secret_is_rejected(settings, monkeypatch):
 def test_invalid_redirect_uri_is_rejected(settings, monkeypatch, uri):
     monkeypatch.setenv("FEISHU_REDIRECT_URI", uri)
     with pytest.raises(ValueError, match="FEISHU_REDIRECT_URI"):
+        Settings.from_env()
+
+
+def test_migration_preserves_work_order_01_recordings(settings, fake_auth):
+    from app.store import SQLiteStore
+
+    settings.db_path.parent.mkdir(parents=True)
+    with sqlite3.connect(settings.db_path) as conn:
+        conn.execute('''CREATE TABLE recordings (
+            recording_id TEXT PRIMARY KEY NOT NULL,
+            title TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL,
+            duration_min REAL NOT NULL DEFAULT 0,
+            summary_md TEXT NOT NULL DEFAULT '', transcript_md TEXT NOT NULL DEFAULT '',
+            has_transcript INTEGER NOT NULL DEFAULT 0 CHECK (has_transcript IN (0, 1)),
+            has_summary INTEGER NOT NULL DEFAULT 0 CHECK (has_summary IN (0, 1)),
+            owner_open_id TEXT NOT NULL DEFAULT '', synced_at TEXT NOT NULL
+        )''')
+        conn.execute("INSERT INTO recordings VALUES ('legacy', '旧标题', '2026-10-01T12:00:00+08:00', 18, '旧总结', '旧原文', 1, 1, 'owner', 'previous')")
+        before = conn.execute('SELECT * FROM recordings').fetchone()
+    store = SQLiteStore(settings.db_path)
+    store.migrate()
+    store.migrate()
+    with sqlite3.connect(settings.db_path) as conn:
+        assert conn.execute('SELECT * FROM recordings').fetchone() == before
+        columns = {row[1]: row for row in conn.execute('PRAGMA table_info(recordings)')}
+        assert all(columns[field][3] == 0 for field in ('duration_min', 'summary_md', 'transcript_md'))
+    with TestClient(create_app(settings=settings, feishu_auth=fake_auth, store=store), follow_redirects=False) as client:
+        login(client)
+        result = client.post('/sync').json()
+        assert result['status'] == 'success'
+    with sqlite3.connect(settings.db_path) as conn:
+        assert conn.execute("SELECT * FROM recordings WHERE recording_id = 'legacy'").fetchone() == before
+
+
+@pytest.mark.parametrize('value', ['0', '-1', 'abc'])
+def test_invalid_backfill_is_rejected(settings, monkeypatch, value):
+    monkeypatch.setenv('BACKFILL_DAYS', value)
+    with pytest.raises(ValueError, match='BACKFILL_DAYS'):
+        Settings.from_env()
+
+
+def test_missing_http_token_fails_app_construction(settings, fake_auth, monkeypatch):
+    from dataclasses import replace
+
+    monkeypatch.delenv('QWENNOTE_MCP_TOKEN', raising=False)
+    with pytest.raises(ValueError, match='QWENNOTE_MCP_TOKEN'):
+        create_app(settings=replace(settings, minutes_source='http'), feishu_auth=fake_auth)
+
+
+@pytest.mark.parametrize('key,value', [('QWENNOTE_SOURCE', 'invalid'), ('QWENNOTE_FIXTURE_DIR', '')])
+def test_invalid_source_configuration_is_rejected(settings, monkeypatch, key, value):
+    monkeypatch.setenv(key, value)
+    with pytest.raises(ValueError, match=key):
         Settings.from_env()

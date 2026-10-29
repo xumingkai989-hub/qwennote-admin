@@ -1,0 +1,24 @@
+{
+  "recordings": [
+    {
+      "recording_id": "fixture-20261029-01",
+      "title": "示例：数据看板讨论",
+      "created_at": "2026-10-29T11:34:00+08:00",
+      "duration_min": 18,
+      "summary_md": "## 会议总结\n\n核对示例看板的展示逻辑。",
+      "transcript_md": "[00:00:26.600–00:00:30.000] 发言人 1：先核对展示口径。\n\n[00:00:30.000–00:00:32.000] 发言人 2：好的。",
+      "has_transcript": true,
+      "has_summary": true
+    },
+    {
+      "recording_id": "fixture-20261029-02",
+      "title": "示例：待转录笔记",
+      "created_at": "2026-10-29T20:17:00+08:00",
+      "duration_min": null,
+      "summary_md": null,
+      "transcript_md": null,
+      "has_transcript": false,
+      "has_summary": false
+    }
+  ]
+}

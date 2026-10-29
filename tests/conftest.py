@@ -1,5 +1,6 @@
 import secrets
 import socket
+from pathlib import Path
 from uuid import uuid4
 
 import httpx
@@ -33,6 +34,9 @@ def settings(tmp_path, monkeypatch):
         "SESSION_SECRET": secrets.token_urlsafe(32),
         "DB_PATH": str(tmp_path / "db" / "test.sqlite3"),
         "ADMIN_OPEN_ID": uuid4().hex,
+        "QWENNOTE_SOURCE": "fixture",
+        "QWENNOTE_FIXTURE_DIR": str(Path(__file__).parent / "fixtures/minutes"),
+        "BACKFILL_DAYS": "90",
     }
     for key, value in values.items():
         monkeypatch.setenv(key, value)

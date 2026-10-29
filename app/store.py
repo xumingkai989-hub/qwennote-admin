@@ -1,3 +1,4 @@
+import fcntl
 import sqlite3
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -6,6 +7,8 @@ from pathlib import Path
 from typing import Iterator, Protocol
 
 from app.feishu import FeishuUser
+from app.minutes import RecordingDetail, RecordingMeta, SHANGHAI
+from app.sync import SyncInProgress, SyncRun, SyncStore
 
 
 @dataclass(frozen=True)
@@ -17,7 +20,7 @@ class User:
     added_at: str
 
 
-class Store(Protocol):
+class Store(SyncStore, Protocol):
     def migrate(self) -> None: ...
 
     def seed_admin(self, open_id: str) -> None: ...
@@ -57,15 +60,105 @@ class SQLiteStore:
                     recording_id TEXT PRIMARY KEY NOT NULL,
                     title TEXT NOT NULL DEFAULT '',
                     created_at TEXT NOT NULL,
-                    duration_min REAL NOT NULL DEFAULT 0,
-                    summary_md TEXT NOT NULL DEFAULT '',
-                    transcript_md TEXT NOT NULL DEFAULT '',
+                    duration_min INTEGER,
+                    summary_md TEXT,
+                    transcript_md TEXT,
                     has_transcript INTEGER NOT NULL DEFAULT 0 CHECK (has_transcript IN (0, 1)),
                     has_summary INTEGER NOT NULL DEFAULT 0 CHECK (has_summary IN (0, 1)),
                     owner_open_id TEXT NOT NULL DEFAULT '',
                     synced_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS sync_runs (
+                    id INTEGER PRIMARY KEY,
+                    started_at TEXT NOT NULL,
+                    finished_at TEXT,
+                    status TEXT NOT NULL CHECK (status IN ('running', 'success', 'failed')),
+                    fetched INTEGER NOT NULL DEFAULT 0,
+                    inserted INTEGER NOT NULL DEFAULT 0,
+                    updated INTEGER NOT NULL DEFAULT 0,
+                    error TEXT
+                );
             """)
+            # Work order 01 used NOT NULL on optional values. Rebuild only that
+            # schema, preserving every existing recording and its owner.
+            columns = conn.execute("PRAGMA table_info(recordings)").fetchall()
+            if any(row['name'] == 'duration_min' and row['notnull'] for row in columns):
+                conn.execute("BEGIN IMMEDIATE")
+                conn.execute("""
+                    CREATE TABLE recordings_nullable (
+                        recording_id TEXT PRIMARY KEY NOT NULL,
+                        title TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL,
+                        duration_min INTEGER, summary_md TEXT, transcript_md TEXT,
+                        has_transcript INTEGER NOT NULL DEFAULT 0 CHECK (has_transcript IN (0, 1)),
+                        has_summary INTEGER NOT NULL DEFAULT 0 CHECK (has_summary IN (0, 1)),
+                        owner_open_id TEXT NOT NULL DEFAULT '', synced_at TEXT NOT NULL
+                    )
+                """)
+                conn.execute("INSERT INTO recordings_nullable SELECT * FROM recordings")
+                conn.execute("DROP TABLE recordings")
+                conn.execute("ALTER TABLE recordings_nullable RENAME TO recordings")
+
+    @contextmanager
+    def sync_lock(self) -> Iterator[None]:
+        # OS releases flock on process exit; works across app instances/workers.
+        # Keep the lock file: unlinking it can let a second inode bypass flock.
+        with self.db_path.with_suffix(self.db_path.suffix + '.sync.lock').open('a') as lock:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                raise SyncInProgress from None
+            try:
+                yield
+            finally:
+                fcntl.flock(lock, fcntl.LOCK_UN)
+
+    def start_sync(self, started_at: str) -> int:
+        with self._connect() as conn:
+            # With the OS lock held, any running row belongs to an interrupted
+            # process. Retain it as a failed batch so a restart can safely retry.
+            conn.execute(
+                "UPDATE sync_runs SET status = 'failed', finished_at = ?, error = ? WHERE status = 'running'",
+                (started_at, '上次同步进程中断，请重试'),
+            )
+            cursor = conn.execute(
+                "INSERT INTO sync_runs (started_at, status) VALUES (?, 'running')", (started_at,),
+            )
+            return cursor.lastrowid
+
+    def finish_sync(self, run: SyncRun) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE sync_runs SET finished_at = ?, status = ?, fetched = ?, inserted = ?, updated = ?, error = ? WHERE id = ?",
+                (run.finished_at, run.status, run.fetched, run.inserted, run.updated, run.error, run.id),
+            )
+
+    def latest_sync(self) -> SyncRun | None:
+        with self._connect() as conn:
+            row = conn.execute('SELECT * FROM sync_runs ORDER BY id DESC LIMIT 1').fetchone()
+            return SyncRun(**dict(row)) if row else None
+
+    def upsert_recording(self, meta: RecordingMeta, detail: RecordingDetail, synced_at: str) -> str:
+        if detail.recording_id != meta.recording_id or not meta.recording_id or meta.created_at.tzinfo is None:
+            raise ValueError('Invalid recording identity or timestamp')
+        fields = ('title', 'created_at', 'duration_min', 'summary_md', 'transcript_md', 'has_transcript', 'has_summary')
+        values = (meta.title, meta.created_at.astimezone(SHANGHAI).isoformat(), meta.duration_min,
+                  detail.summary_md, detail.transcript_md, int(detail.has_transcript), int(detail.has_summary))
+        with self._connect() as conn:
+            conn.execute('BEGIN IMMEDIATE')
+            old = conn.execute('SELECT * FROM recordings WHERE recording_id = ?', (meta.recording_id,)).fetchone()
+            if old is not None and tuple(old[field] for field in fields) == values:
+                conn.execute('UPDATE recordings SET synced_at = ? WHERE recording_id = ?', (synced_at, meta.recording_id))
+                return 'unchanged'
+            conn.execute(
+                'INSERT INTO recordings (recording_id, title, created_at, duration_min, summary_md, transcript_md, '
+                'has_transcript, has_summary, synced_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) '
+                'ON CONFLICT(recording_id) DO UPDATE SET '
+                'title = excluded.title, created_at = excluded.created_at, duration_min = excluded.duration_min, '
+                'summary_md = excluded.summary_md, transcript_md = excluded.transcript_md, '
+                'has_transcript = excluded.has_transcript, has_summary = excluded.has_summary, synced_at = excluded.synced_at',
+                (meta.recording_id, *values, synced_at),
+            )
+            return 'updated' if old else 'inserted'
 
     def seed_admin(self, open_id: str) -> None:
         with self._connect() as conn:

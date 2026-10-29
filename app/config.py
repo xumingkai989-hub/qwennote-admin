@@ -12,8 +12,17 @@ class Settings:
     session_secret: str = field(repr=False)
     db_path: Path
     admin_open_id: str
+    minutes_source: str = "http"
+    minutes_fixture_dir: Path | None = None
+    backfill_days: int = 90
 
     def __post_init__(self):
+        if self.minutes_source not in {"http", "fixture"}:
+            raise ValueError("QWENNOTE_SOURCE must be http or fixture")
+        if self.minutes_source == "fixture" and self.minutes_fixture_dir is None:
+            raise ValueError("QWENNOTE_FIXTURE_DIR is required for fixture mode")
+        if type(self.backfill_days) is not int or self.backfill_days < 1:
+            raise ValueError("BACKFILL_DAYS must be a positive integer")
         if len(self.session_secret.encode()) < 32:
             raise ValueError("SESSION_SECRET must contain at least 32 bytes")
         uri = urlsplit(self.feishu_redirect_uri)
@@ -34,6 +43,10 @@ class Settings:
         missing = [key for key, value in values.items() if not value]
         if missing:
             raise ValueError("Missing environment variables: " + ", ".join(missing))
+        try:
+            backfill_days = int(os.environ.get("BACKFILL_DAYS", "90"))
+        except ValueError:
+            raise ValueError("BACKFILL_DAYS must be a positive integer") from None
         return cls(
             feishu_app_id=values["FEISHU_APP_ID"],
             feishu_app_secret=values["FEISHU_APP_SECRET"],
@@ -41,4 +54,8 @@ class Settings:
             session_secret=values["SESSION_SECRET"],
             db_path=Path(values["DB_PATH"]).expanduser(),
             admin_open_id=values["ADMIN_OPEN_ID"],
+            minutes_source=os.environ.get("QWENNOTE_SOURCE", "http").strip(),
+            minutes_fixture_dir=(Path(os.environ["QWENNOTE_FIXTURE_DIR"]).expanduser()
+                                 if os.environ.get("QWENNOTE_FIXTURE_DIR", "").strip() else None),
+            backfill_days=backfill_days,
         )
