@@ -13,6 +13,7 @@ from fastapi.templating import Jinja2Templates
 from app.config import Settings
 from app.feishu import FeishuAuth, FeishuAuthError, HttpFeishuAuth
 from app.minutes import FixtureMinutesSource, HttpMinutesSource, MinutesSource, SHANGHAI
+from app.recording_content import (download_disposition, export_markdown, render_summary, transcript_segments)
 from app.session import SESSION_MAX_AGE, STATE_MAX_AGE, SignedCookie
 from app.store import SQLiteStore, Store
 from app.sync import SyncInProgress, run_sync
@@ -137,6 +138,8 @@ def create_app(
             response = templates.TemplateResponse(request=request, name="home.html", context={
                 "user": user, "sync_run": store.latest_sync(),
                 'filters': filters, 'recordings': recordings,
+                'detail_query': ('?' + urlencode({**filters['params'], 'page': recordings.page}))
+                                if filters['params'] or recordings.page > 1 else '',
                 'previous_url': page_url(recordings.page - 1) if recordings.page > 1 else None,
                 'next_url': page_url(recordings.page + 1) if recordings.page < recordings.pages else None,
             })
@@ -152,6 +155,46 @@ def create_app(
         set_cookie(response, "oauth_state", states.encode(state), STATE_MAX_AGE)
         response.headers["Cache-Control"] = "no-store"
         return response
+
+    def recording_for_request(request: Request, store: Store, recording_id: str):
+        open_id = sessions.decode(request.cookies.get('session'))
+        user = store.get_user(open_id) if open_id else None
+        if user is None or not user.is_active:
+            return None, error_page(request, 401, '请先登录', '请登录后查看录音。')
+        recording = store.get_recording(recording_id)
+        if recording is None:
+            return None, error_page(request, 404, '录音不存在', '找不到该录音，请返回列表。')
+        return recording, None
+
+    # Register the suffix route first, before the generic detail route.
+    @app.get('/recordings/{recording_id}.md')
+    def recording_markdown(request: Request, recording_id: str,
+                           store: Annotated[Store, Depends(get_store)]):
+        recording, error = recording_for_request(request, store, recording_id)
+        if error is not None:
+            return error
+        return Response(export_markdown(recording), media_type='text/markdown', headers={
+            'Content-Disposition': download_disposition(recording.title),
+            'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff',
+        })
+
+    @app.get('/recordings/{recording_id}', response_class=HTMLResponse)
+    def recording_detail(request: Request, recording_id: str,
+                         store: Annotated[Store, Depends(get_store)]):
+        recording, error = recording_for_request(request, store, recording_id)
+        if error is not None:
+            return error
+        try:
+            filters = list_filters(request)
+            back_url = '/?' + urlencode({**filters['params'], 'page': filters['page']})
+        except ValueError:
+            back_url = '/'
+        return templates.TemplateResponse(request=request, name='detail.html', context={
+            'title': recording.title or '未命名录音', 'recording': recording, 'back_url': back_url,
+            'summary_html': render_summary(recording.summary_md) if recording.has_summary else None,
+            'segments': transcript_segments(recording.transcript_md) if recording.has_transcript else [],
+            'markdown': export_markdown(recording),
+        }, headers={'Cache-Control': 'no-store'})
 
     @app.post('/auth/logout')
     def logout(request: Request):

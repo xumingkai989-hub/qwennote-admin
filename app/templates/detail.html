@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block content %}
+  {% set status, status_label = recording.status %}
+  <header class="detail-header">
+    <a id="back-to-list" href="{{ back_url }}">← 返回列表</a>
+    <div class="detail-actions">
+      <button id="copy-markdown" type="button">复制 Markdown</button>
+      <a class="filter-link" href="{{ url_for('recording_markdown', recording_id=recording.recording_id) }}">下载 .md</a>
+    </div>
+    <h1>{{ title }}</h1>
+    <div class="card-meta">
+      <time datetime="{{ recording.created_at.isoformat() }}">{{ recording.created_at.strftime('%Y-%m-%d %H:%M') }}</time>
+      <span>{{ (recording.duration_min ~ ' 分钟') if recording.duration_min is not none else '—' }}</span>
+      <span class="badge badge-{{ status }}">{{ status_label }}</span>
+    </div>
+  </header>
+  <p class="time-note">时间为笔记创建时间，非录音开始时间（Asia/Shanghai）</p>
+  <p id="copy-status" role="status" aria-live="polite"></p>
+  <div id="copy-fallback" hidden>
+    <label for="markdown-source">Markdown 原文（可全选复制）</label>
+    <textarea id="markdown-source" readonly>{{ markdown }}</textarea>
+  </div>
+  {% if not recording.has_summary and not recording.has_transcript %}
+    <p class="empty-state">该录音既无转写也无总结</p>
+  {% else %}
+    <section class="detail-section" aria-labelledby="summary-heading">
+      <h2 id="summary-heading">总结</h2>
+      {% if recording.has_summary %}
+        <div id="summary-content" class="markdown-body">{{ summary_html }}</div>
+      {% else %}<p>该录音暂无总结</p>{% endif %}
+    </section>
+    <section class="detail-section" aria-labelledby="transcript-heading">
+      <h2 id="transcript-heading">转写原文</h2>
+      {% if recording.has_transcript %}
+        {% for segment in segments %}
+          <div class="transcript-segment">
+            {% if segment.timestamp or segment.speaker %}
+              <div class="transcript-meta"><span class="timestamp">{{ segment.timestamp }}</span> <strong>{{ segment.speaker }}</strong></div>
+            {% endif %}
+            {% for paragraph in segment.paragraphs %}<p class="transcript-paragraph">{{ paragraph }}</p>{% endfor %}
+          </div>
+        {% endfor %}
+      {% else %}<p>该录音未转录</p>{% endif %}
+    </section>
+  {% endif %}
+  <script src="{{ url_for('static', path='detail.js') }}" defer></script>
+{% endblock %}

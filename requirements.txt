@@ -32,8 +32,12 @@ itsdangerous==2.2.0
     # via qwennote-admin (pyproject.toml)
 jinja2==3.1.6
     # via qwennote-admin (pyproject.toml)
+markdown-it-py==4.0.0
+    # via qwennote-admin (pyproject.toml)
 markupsafe==3.0.4
     # via jinja2
+mdurl==0.1.2
+    # via markdown-it-py
 packaging==26.3
     # via pytest
 pluggy==1.7.0

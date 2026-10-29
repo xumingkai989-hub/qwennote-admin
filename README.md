@@ -102,6 +102,17 @@ PY
 .venv/bin/python -m pytest -q
 ```
 
-112 项测试通过，其中工单 03 新增 30 项。使用 TestClient、FakeMinutesSource、假 FeishuAuth、临时 SQLite 和 httpx.MockTransport；自动阻断 socket、DNS 及真实 HTTP transport，不需要环境密钥。覆盖已有登录与同步、MCP 握手/JSON/SSE/分页/异常，以及上海跨日默认筛选、指定日期/昨天/含首尾区间、四态与时长、创建时间排序与同时间分页、20/5 分页不重复及筛选保留、空状态、非法参数、正文不进入 HTML、静态 CSS、搜索占位和退出。保留 Starlette 对 AnyIO 别名的既有弃用警告。
+139 项测试通过，其中工单 03 新增 30 项、工单 04 新增 27 项。使用 TestClient、FakeMinutesSource、假 FeishuAuth、临时 SQLite 和 httpx.MockTransport；自动阻断 socket、DNS 及真实 HTTP transport，不需要环境密钥。覆盖已有登录与同步、MCP 握手/JSON/SSE/分页/异常，以及上海跨日默认筛选、指定日期/昨天/含首尾区间、四态与时长、创建时间排序与同时间分页、20/5 分页不重复及筛选保留、空状态、非法参数、正文不进入 HTML、静态 CSS、搜索占位和退出。保留 Starlette 对 AnyIO 别名的既有弃用警告。
 
 工单 03 在本机 Chrome 对 TestClient 渲染的合成数据页面进行了独立布局检查（不加入 pytest 或项目依赖）：320/375/390px 下卡片单列、1280px 下两列；指定日期、区间、第 2 页与空状态均无横向溢出，实际文字最小 14px。长标题与长用户名也不撑宽页面。该检查不包含真实飞书、千问联调或实体手机。
+
+
+## 详情与 Markdown 导出（工单 04）
+
+登录后点击列表标题进入 `/recordings/{recording_id}`。返回列表链接保留日期筛选与页码，直接访问或筛选无效时回到默认列表。详情展示创建时间、时长、四态徽标及创建时间口径，总结在上，转写按时间戳、发言人和空行段落展示；缺少总结、转写或两者时分别提示。详情和下载都重新检查登录与白名单状态，未知 ID 返回 HTML 404。数据库按 `recording_id` 主键查询单条，不加载列表。
+
+总结使用锁定的 `markdown-it-py==4.0.0`，显式设置 `html=False`，将原始 HTML 转义并阻止危险链接协议；仅该渲染器的输出在 Python 边界标为 Markup。标题、发言人、转写正文和复制用的 textarea 均由 Jinja 自动转义，不使用 `|safe`。支持标题、列表、粗体、引用和代码块。
+
+`GET /recordings/{recording_id}.md` 下载 UTF-8 Markdown，包含 YAML frontmatter、标题、总结和转写；字符串用兼容 YAML 的 JSON 引号与转义，未知时长留空。文件名删除非法字符及控制字符，空名回退为“录音”；响应通过 RFC 5987 `filename*=UTF-8''...` 保留中文，附带百分号编码的 quoted `filename` 兼容值。导出和详情均禁止缓存。
+
+“复制 Markdown”通过 `navigator.clipboard.writeText` 复制与下载相同的内容；浏览器不支持或拒绝剪贴板时展开只读原文并全选，提示手动复制，无前端框架。新增离线 TestClient 测试覆盖安全渲染及危险链接、转写段落、缺内容分支、登录/白名单失效、404、筛选返回、复制源、导出字段与特殊字符和文件名清洗。

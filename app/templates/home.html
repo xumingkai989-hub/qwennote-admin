@@ -43,7 +43,7 @@
     {% set status, status_label = recording.status %}
     <article class="recording-card" data-recording-id="{{ recording.recording_id }}">
       <span class="badge badge-{{ status }}">{{ status_label }}</span>
-      <h2><a href="/recordings/{{ recording.recording_id | urlencode }}">{{ recording.title or '未命名录音' }}</a></h2>
+      <h2><a href="/recordings/{{ recording.recording_id | urlencode }}{{ detail_query }}">{{ recording.title or '未命名录音' }}</a></h2>
       <div class="card-meta"><time datetime="{{ recording.created_at.isoformat() }}">{{ recording.created_at.strftime('%Y-%m-%d %H:%M') }}</time><span aria-label="录音时长">{{ (recording.duration_min ~ ' 分钟') if recording.duration_min is not none else '—' }}</span></div>
     </article>
     {% else %}

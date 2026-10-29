@@ -40,6 +40,12 @@ class RecordingCard:
 
 
 @dataclass(frozen=True)
+class StoredRecording(RecordingCard):
+    summary_md: str
+    transcript_md: str
+
+
+@dataclass(frozen=True)
 class RecordingPage:
     items: list[RecordingCard]
     total: int
@@ -48,6 +54,8 @@ class RecordingPage:
 
 
 class Store(SyncStore, Protocol):
+    def get_recording(self, recording_id: str) -> StoredRecording | None: ...
+
     def migrate(self) -> None: ...
 
     def seed_admin(self, open_id: str) -> None: ...
@@ -213,6 +221,22 @@ class SQLiteStore:
                 (meta.recording_id, *values, synced_at),
             )
             return 'updated' if old else 'inserted'
+
+    def get_recording(self, recording_id: str) -> StoredRecording | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                'SELECT recording_id, title, created_at, duration_min, has_transcript, has_summary, '
+                'summary_md, transcript_md FROM recordings WHERE recording_id = ?', (recording_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return StoredRecording(
+            recording_id=row['recording_id'], title=row['title'],
+            created_at=datetime.fromisoformat(row['created_at']).astimezone(SHANGHAI),
+            duration_min=row['duration_min'], has_transcript=bool(row['has_transcript']),
+            has_summary=bool(row['has_summary']), summary_md=row['summary_md'] or '',
+            transcript_md=row['transcript_md'] or '',
+        )
 
     def seed_admin(self, open_id: str) -> None:
         with self._connect() as conn:
