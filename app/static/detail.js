@@ -52,6 +52,15 @@ for (const eventName of ['click', 'focusin']) {
 document.getElementById('download-markdown').addEventListener('click', () => closeExport(true));
 let copyPending = false;
 let copyTimer;
+function selectCopySource(source, text) {
+  source.textContent = text;
+  source.focus();
+  const range = document.createRange();
+  range.selectNodeContents(source);
+  const selection = window.getSelection();
+  selection.removeAllRanges();
+  selection.addRange(range);
+}
 copyButton.addEventListener('click', async () => {
   closeExport(true);
   if (copyPending) return;
@@ -67,17 +76,15 @@ copyButton.addEventListener('click', async () => {
     if (!response.ok || !response.headers.get('content-type')?.startsWith('text/markdown')) {
       throw new Error('Markdown unavailable');
     }
-    source.value = await response.text();
+    source.textContent = await response.text();
     try {
-      await navigator.clipboard.writeText(source.value);
+      await navigator.clipboard.writeText(source.textContent);
       document.getElementById('copy-fallback').hidden = true;
       copyButton.textContent = '已复制';
       copyTimer = setTimeout(() => { copyButton.textContent = '复制 Markdown'; }, 800);
     } catch (error) {
       document.getElementById('copy-fallback').hidden = false;
-      source.focus();
-      source.select();
-      source.setSelectionRange(0, source.value.length);
+      selectCopySource(source, source.textContent);
       status.textContent = '自动复制失败，已全选 Markdown，请按 Ctrl+C 或 ⌘C 复制。';
     }
   } catch (error) {
@@ -89,8 +96,8 @@ copyButton.addEventListener('click', async () => {
 });
 
 const transcript = document.getElementById('transcript-segments');
-if (transcript) {
-  const segments = Array.from(transcript.querySelectorAll('.transcript-segment'));
+if (transcript && document.getElementById('transcript-search')) {
+  const segments = () => Array.from(transcript.querySelectorAll('.transcript-segment'));
   const toast = document.getElementById('transcript-toast');
   let toastTimer;
   function notify(message) {
@@ -116,36 +123,35 @@ if (transcript) {
     } catch (error) {
       fallback.hidden = false;
       const source = document.getElementById('transcript-source');
-      source.value = text;
-      source.focus();
-      source.select();
-      source.setSelectionRange(0, text.length);
+      selectCopySource(source, text);
       notify('自动复制失败，已全选文字，请按 Ctrl+C 或 ⌘C 复制。');
     }
   }
-  for (const segment of segments) {
-    const copy = () => copyTranscript(copyText(segment),
+  function copySegment(event) {
+    if (transcript.isContentEditable) return;
+    const segment = event.target.closest('.transcript-segment');
+    if (!segment) return;
+    return copyTranscript(copyText(segment),
       segment.dataset.timestamp ? `已复制 ${segment.dataset.timestamp}` : '已复制该段');
-    segment.addEventListener('click', copy);
-    segment.addEventListener('keydown', event => {
-      if (event.key === 'Enter' || event.key === ' ') {
-        event.preventDefault();
-        if (!event.repeat) copy();
-      }
-    });
   }
+  transcript.addEventListener('click', copySegment);
+  transcript.addEventListener('keydown', event => {
+    if (!transcript.isContentEditable && (event.key === 'Enter' || event.key === ' ')) {
+      event.preventDefault();
+      if (!event.repeat) copySegment(event);
+    }
+  });
   document.getElementById('copy-transcript').addEventListener('click', () => {
-    copyTranscript(segments.map(copyText).join('\n\n'), '已复制全文');
+    copyTranscript(segments().map(copyText).join('\n\n'), '已复制全文');
   });
   const searchStatus = document.getElementById('transcript-search-status');
-  const searchable = segments.map(segment =>
-    `${segment.dataset.speaker}\n${segment.dataset.timestamp}\n${segmentText(segment)}`.toLocaleLowerCase());
   document.getElementById('transcript-search').addEventListener('input', event => {
     const query = event.target.value.trim().toLocaleLowerCase();
     let firstMatch;
     let count = 0;
-    segments.forEach((segment, index) => {
-      const matches = !query || searchable[index].includes(query);
+    segments().forEach(segment => {
+      const searchable = `${segment.dataset.speaker}\n${segment.dataset.timestamp}\n${segmentText(segment)}`.toLocaleLowerCase();
+      const matches = !query || searchable.includes(query);
       segment.hidden = !matches;
       segment.classList.toggle('is-match', Boolean(query) && matches);
       if (matches) {

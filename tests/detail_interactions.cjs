@@ -38,15 +38,21 @@ function setup({ failClipboard = false, empty = false, failFetch = false } = {})
   ids['export-menu'].querySelectorAll = () => [ids['copy-markdown'], ids['download-markdown']];
   ids['detail-export'].contains = target => ['detail-export', 'export-button', 'export-menu',
     'copy-markdown', 'download-markdown'].some(id => ids[id] === target);
-  const document = { activeElement: null, listeners: {}, getElementById: id => ids[id] || null,
+  const selection = { removeAllRanges() {}, addRange(range) { range.node.selected = true; } };
+  const document = { createRange: () => ({selectNodeContents(node) { this.node = node; }}), activeElement: null, listeners: {}, getElementById: id => ids[id] || null,
     addEventListener(name, handler) { this.listeners[name] = handler; } };
   for (const el of Object.values(ids)) el.focus = () => { el.focused = true; document.activeElement = el; };
   const timers = new Map();
   let timerId = 0;
   if (!empty) ids['transcript-segments'] = element({ querySelectorAll: () => segments });
+  for (const row of segments) {
+    row.closest = () => row;
+    row.listeners.click = () => ids['transcript-segments'].listeners.click({target:row});
+    row.listeners.keydown = event => ids['transcript-segments'].listeners.keydown({...event,target:row});
+  }
   let requests = 0;
   vm.runInNewContext(source, {
-    document,
+    document, window: {getSelection: () => selection},
     navigator: { clipboard: { writeText: async text => {
       if (failClipboard) throw Error('Clipboard denied');
       copied.push(text);
@@ -114,7 +120,7 @@ test('clipboard rejection offers selected text and reports failure honestly', as
   const app = setup({ failClipboard: true });
   await app.segments[1].listeners.click();
   assert.equal(app.ids['transcript-copy-fallback'].hidden, false);
-  assert.equal(app.ids['transcript-source'].value, '00:26 alice\n安排验收');
+  assert.equal(app.ids['transcript-source'].textContent, '00:26 alice\n安排验收');
   assert.ok(app.ids['transcript-source'].focused && app.ids['transcript-source'].selected);
   assert.match(app.ids['transcript-toast'].textContent, /自动复制失败/);
 });
@@ -214,7 +220,7 @@ test('Markdown clipboard failure selects fallback and keeps the honest menu labe
   await ids['copy-markdown'].click();
   assert.ok(ids['export-menu'].hidden);
   assert.equal(ids['copy-fallback'].hidden, false);
-  assert.equal(ids['markdown-source'].value, 'original markdown');
+  assert.equal(ids['markdown-source'].textContent, 'original markdown');
   assert.equal(document.activeElement, ids['markdown-source']);
   assert.ok(ids['markdown-source'].selected);
   assert.match(ids['copy-status'].textContent, /自动复制失败/);

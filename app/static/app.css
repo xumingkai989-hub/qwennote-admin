@@ -407,9 +407,21 @@ p.assistant-note { margin: 12px 0 0; }
 .detail-export { display: flex; align-items: center; gap: 8px; }
 .edit-trace { display: flex; align-items: center; gap: 8px; margin-top: 16px; font-size: 12px; color: var(--secondary); }
 .edit-trace .text-button { font-size: inherit; padding: 2px 4px; }
-#edit-content { display: block; width: 100%; min-height: 360px; resize: vertical; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; line-height: 1.6; }
+.detail-section.is-editing { box-shadow: inset 0 0 0 1px var(--accent); }
+[contenteditable="true"] { outline: none; overflow-wrap: anywhere; }
+[contenteditable="true"] .transcript-segment { cursor: text; }
+[contenteditable="true"] .transcript-segment:hover { background: transparent; }
+[contenteditable="true"]:empty { min-height: 1.75em; }
+.summary-toolbar { display: flex; align-items: center; justify-content: space-between; padding-bottom: 16px; border-bottom: 1px solid var(--separator); margin-bottom: 12px; font-size: 14px; }
+.edit-icon { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; min-height: 36px; padding: 7px; }
+.edit-icon svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.edit-icon svg[hidden], #cancel-edit[hidden] { display: none; }
+.inline-edit-controls { display: inline-flex; flex: 0 0 92px; width: 92px; align-items: center; gap: 4px; }
+#cancel-edit { min-height: 36px; height: 36px; padding: 4px 6px; }
+.transcript-tools { flex-wrap: nowrap; }
+#transcript-search { min-width: 0; }
+.transcript-tools > button { flex-shrink: 0; }
 .edit-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
-.saved-preview { white-space: pre-wrap; }
 #edit-status:empty, #hotword-status:empty { display: none; }
 #hotword-suggestions { width: min(560px, calc(100% - 32px)); max-height: calc(100dvh - 32px); overflow: auto; box-sizing: border-box; border: 1px solid var(--separator); border-radius: 12px; padding: 24px; color: var(--text); background: var(--surface); }
 #hotword-suggestions::backdrop { background: rgb(0 0 0 / 35%); }

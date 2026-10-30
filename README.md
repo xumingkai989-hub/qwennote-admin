@@ -440,3 +440,9 @@ systemctl list-timers --all qwennote-tag-maintenance.timer
 本单验收 **749 项 Python + 19 项 JavaScript 通过**，新增 59 项 Python 用例；4 组浏览器场景通过。离线回归：`.venv/bin/python -m pytest -q`（原 690 项全部保留）；`node --test tests/detail_interactions.cjs tests/home_interactions.cjs`。本地浏览器验收先运行 `.venv/bin/python tests/recording_edit_preview.py`，再用本机 Playwright / Chrome 运行 `node --test tests/recording_edit_browser.cjs`（环境变量 `PLAYWRIGHT_MODULE`、`CHROME_PATH` 指定已安装依赖）。预览仅绑定 127.0.0.1，合成数据库退出即删，浏览器阻断所有外部 URL；覆盖总结/转写、取消、保存失败重试、勾选数量、忽略询问、批量失败重试、还原与纯标点不询问，以及 1440/390/320px 浅深色截图。
 
 发布沿用 `python3 scripts/deploy.py --app-only`，不改 nginx 或其他站点。验收报告、截图和部署日志放仓库外 `../qwennote-admin-artifacts/edit-11-20261030/`；不公开业务资料。
+
+### 三个界面修正（工单 12）
+
+本单以卡片正文就地 contenteditable 替代工单 11 的 textarea；编辑入口改为工具条铅笔，支持对勾完成、取消、Cmd/Ctrl+Enter 和 Esc。保存沿用 override 与热词询问。展示管线先剥离 `{origin:...}`，再应用热词，五个出口保持一致，数据库原始内容不变。左侧去掉搜索入口，首页搜索框和 `/search` 路由保留。
+
+验收 **777 项 Python + 19 项 JavaScript + 2 项编辑浏览器 + 8 项布局浏览器通过**。实现约定、验证范围与命令见 [工单 12](docs/ui-fixes-12.md)。报告、截图与部署证据放仓库外 `../qwennote-admin-artifacts/ui-12-20261030/`。

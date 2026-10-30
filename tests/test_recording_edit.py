@@ -100,8 +100,8 @@ def test_fields_are_independent_and_second_save_diffs_previous_override(editing,
 def test_editor_starts_with_hotword_display_and_override_is_authoritative(editing, store):
     store.add_hotword('小红直播', '小鹿直播')
     html = editing.get(PATH).text
-    textarea = unescape(re.search(r'<textarea id="edit-content"[^>]*>\n(.*?)</textarea>', html, re.S)[1])
-    assert textarea == '小鹿直播\n\nAI 助手'
+    source = json.loads(re.search(r'<script id="edit-source"[^>]*>(.*?)</script>', html, re.S)[1])
+    assert source == '小鹿直播\n\nAI 助手'
     result = post(editing, content='小鹿直播\n\nAI Tutor').json()
     assert result['suggestions'] == [{'source': 'AI 助手', 'target': 'AI Tutor'}]
     store.add_hotword('小鹿直播', '再次替换')
@@ -125,7 +125,8 @@ def test_empty_base_can_gain_override_and_safe_editor_content(editing, store):
     assert post(editing, content=value).status_code == 200
     html = editing.get(PATH).text
     assert 'aria-current="page">总结' in html
-    assert '\n\n&lt;/textarea&gt;&lt;script&gt;' in html
+    assert '&lt;/textarea&gt;&lt;script&gt;' in html
+    assert json.loads(re.search(r'<script id="edit-source"[^>]*>(.*?)</script>', html, re.S)[1]) == value
     assert '<script>alert(1)</script>' not in html
 
 

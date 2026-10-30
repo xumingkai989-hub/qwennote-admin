@@ -28,15 +28,40 @@ SPEAKER_PALETTE = (
 )
 
 
-def apply_recording_hotwords(recording: StoredRecording, apply_hotwords: Callable[[str], str],
+def strip_origin_markers(text: str) -> str:
+    """Remove provider provenance only; retain Markdown indentation and body text."""
+    if not re.search(r'\{origin:[^}]*\}', text):
+        return text
+    value = re.sub(r'\{origin:[^}]*\}', '', text).replace('\r\n', '\n').replace('\r', '\n')
+    cleaned = []
+    for paragraph in re.split(r'\n(?:[ \t]*\n)+', value):
+        if not paragraph.strip():
+            continue
+        lines = []
+        for line in paragraph.split('\n'):
+            indent = re.match(r'^[ \t]*', line)[0]
+            lines.append((indent + re.sub(r' {2,}', ' ', line[len(indent):])).rstrip(' \t'))
+        cleaned.append('\n'.join(lines))
+    return '\n\n'.join(cleaned)
+
+
+def apply_hotwords(text: str, substitute: Callable[[str], str]) -> str:
+    """The display pipeline always strips provenance before substitutions."""
+    return substitute(strip_origin_markers(text))
+
+
+def apply_recording_hotwords(recording: StoredRecording, substitute: Callable[[str], str],
                             *, fields=('summary', 'transcript'), overrides=None) -> StoredRecording:
     """Project overrides and hotwords onto a copy; never write the original back."""
     changes = {}
-    for field, item in (overrides or {}).items():
-        changes.update({field + '_md': item['content_md'], 'has_' + field: bool(item['content_md'].strip())})
-    for field in fields:
-        if not (overrides and field in overrides) and getattr(recording, 'has_' + field):
-            changes[field + '_md'] = apply_hotwords(getattr(recording, field + '_md'))
+    for field in ('summary', 'transcript'):
+        overridden = overrides and field in overrides
+        value = overrides[field]['content_md'] if overridden else getattr(recording, field + '_md')
+        if value is not None:
+            value = (apply_hotwords(value, substitute) if field in fields and not overridden
+                     and getattr(recording, 'has_' + field) else strip_origin_markers(value))
+            changes[field + '_md'] = value
+            changes['has_' + field] = bool(value.strip()) and (bool(overridden) or getattr(recording, 'has_' + field))
     return replace(recording, **changes)
 
 

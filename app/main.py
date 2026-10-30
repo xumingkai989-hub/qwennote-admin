@@ -25,6 +25,7 @@ from app.search import search_snippets
 from app.session import SESSION_MAX_AGE, STATE_MAX_AGE, SignedCookie
 from app.store import SQLiteStore, Store
 from app.sync import SyncInProgress, run_sync
+from app.summary import MARKDOWN
 
 AUTHORIZE_URL = "https://accounts.feishu.cn/open-apis/authen/v1/authorize"
 logger = logging.getLogger(__name__)
@@ -291,10 +292,14 @@ def create_app(
             recording, lambda text: store.apply_hotwords(text, markdown=view != 'transcript'), fields=(view,), overrides=overrides)
         can_edit = navigation_context(request)['navigation_admin']
         token = edit_token(request) if can_edit else ''
+        edit_content = getattr(recording, view + '_md') if getattr(recording, 'has_' + view) else ''
+        source_lines = edit_content.splitlines(keepends=True)
+        edit_blocks = [''.join(source_lines[token.map[0]:token.map[1]]).rstrip('\n')
+                       for token in MARKDOWN.parse(edit_content) if token.level == 0 and token.map]
         response = templates.TemplateResponse(request=request, name='detail.html', context={
             'title': recording.title or '未命名录音', 'recording': recording, 'back_url': back_url,
             'view': view, 'can_edit': can_edit, 'edit_csrf': token,
-            'edit_content': getattr(recording, view + '_md') if getattr(recording, 'has_' + view) else '',
+            'edit_content': edit_content, 'edit_blocks': edit_blocks,
             'edited_at': edit_timestamp(overrides[view]['updated_at']) if view in overrides else None,
             'view_urls': {name: request.url.include_query_params(view=name) for name in ('summary', 'transcript')},
             'summary_html': render_summary(recording.summary_md) if view == 'summary' and recording.has_summary else None,

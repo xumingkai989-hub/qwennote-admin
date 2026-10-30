@@ -62,7 +62,8 @@ def test_user_html_is_escaped_everywhere(detail_client, payload, view):
     html = detail_client.get('/recordings/detail?view=' + view).text
     assert payload not in html
     assert '&lt;script&gt;' in html or '&lt;img' in html
-    assert unescape(re.search(r'<textarea[^>]*>(.*?)</textarea>', html, re.S)[1]) == ''
+    assert '<textarea' not in html
+    assert '<pre id="markdown-source"' in html
     assert detail_client.get('/recordings/detail.md').text.endswith(payload + '\n')
 
 
@@ -81,7 +82,11 @@ def test_dangerous_markdown_links_are_not_executable(detail_client):
 def test_empty_content_branches(detail_client, summary, transcript, view, message, absent):
     detail_client.add(summary=summary, transcript=transcript)
     html = detail_client.get('/recordings/detail?view=' + view).text
-    assert message in html and absent not in html
+    assert message in html
+    if view == "summary":
+        assert re.search(r'<div id="summary-content"[^>]*></div>', html)
+    else:
+        assert absent not in html
     assert re.search(r'class="view-option is-empty" aria-current="page"', html)
     assert 'aria-disabled=' not in html
     assert 'id="transcript-toolbar"' not in html
@@ -156,11 +161,11 @@ def test_export_empty_sections(detail_client):
 
 def test_copy_has_clipboard_and_selection_fallback(detail_client):
     html = detail_client.get('/recordings/detail').text
-    textarea = re.search(r'<textarea[^>]*>(.*?)</textarea>', html, re.S)
-    assert textarea and textarea[1] == ''
+    assert '<textarea' not in html
+    assert re.search(r'<pre id="markdown-source"[^>]*></pre>', html)
     assert 'data-markdown-url="http://testserver/recordings/detail.md"' in html
     js = detail_client.get('/static/detail.js').text
-    assert 'navigator.clipboard.writeText' in js and '.select()' in js
+    assert 'navigator.clipboard.writeText' in js and 'selectNodeContents(source)' in js
 
 
 def test_list_detail_return_drops_ignored_dates(detail_client):

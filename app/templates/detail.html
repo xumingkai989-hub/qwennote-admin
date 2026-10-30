@@ -1,6 +1,17 @@
 {% extends "base.html" %}
 {% block main_attributes %} class="detail-layout"{% endblock %}
 {% block content %}
+  {% macro edit_controls() %}
+    {% if can_edit %}
+      <span class="inline-edit-controls">
+      <button id="edit-button" class="text-button edit-icon" type="button" aria-label="编辑" aria-pressed="false" title="编辑">
+        <svg class="pencil-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m16 3 5 5M3 21l5-1L21 7a2 2 0 0 0-5-5L3 15Z"/></svg>
+        <svg class="check-icon" viewBox="0 0 24 24" aria-hidden="true" hidden><path d="m5 12 4 4L19 6"/></svg>
+      </button>
+      <button id="cancel-edit" class="text-button" type="button" hidden>取消</button>
+      </span>
+    {% endif %}
+  {% endmacro %}
   {% set status, status_label = recording.status %}
   <header class="detail-header">
     <a id="back-to-list" href="{{ back_url }}" aria-label="返回列表"><span aria-hidden="true">←</span></a>
@@ -11,7 +22,6 @@
       </div>
     </div>
     <div id="detail-export" class="detail-export">
-      {% if can_edit %}<button id="edit-button" class="text-button" type="button">编辑</button>{% endif %}
       <button id="export-button" class="secondary" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="export-menu">导出 <span aria-hidden="true">▾</span></button>
       <div id="export-menu" class="export-menu" role="menu" aria-labelledby="export-button" hidden>
         <button id="copy-markdown" type="button" role="menuitem" tabindex="-1" data-markdown-url="{{ url_for('recording_markdown', recording_id=recording.recording_id) }}">复制 Markdown</button>
@@ -34,23 +44,20 @@
   <p id="copy-status" role="status" aria-live="polite"></p>
   <div id="copy-fallback" hidden>
     <label for="markdown-source">Markdown 原文</label>
-    <textarea id="markdown-source" readonly></textarea>
+    <pre id="markdown-source" tabindex="0" aria-label="Markdown 原文"></pre>
   </div>
   <div id="edit-trace" class="edit-trace"{% if not edited_at %} hidden{% endif %}>
     <span id="edit-trace-label">{% if edited_at %}已手动编辑 · {{ edited_at }}{% endif %}</span>
     {% if can_edit %}<button id="revert-button" class="text-button" type="button">还原</button>{% endif %}
   </div>
   {% if can_edit %}
-    <form id="recording-editor" class="detail-section" action="{{ url_for('edit', recording_id=recording.recording_id) }}" method="post" hidden>
+    <form id="recording-editor" action="{{ url_for('edit', recording_id=recording.recording_id) }}" method="post" hidden>
       <input name="csrf_token" type="hidden" value="{{ edit_csrf }}">
       <input name="field" type="hidden" value="{{ view }}">
-      <label for="edit-content" class="visually-hidden">编辑{{ '总结' if view == 'summary' else '转写原文' }}</label>
-      <textarea id="edit-content" name="content" maxlength="200000">
-{{ edit_content }}</textarea>
-      <div class="edit-actions"><button id="save-edit" type="submit">保存</button><button id="cancel-edit" class="secondary" type="button">取消</button></div>
     </form>
+    <script id="edit-source" type="application/json">{{ edit_content | tojson }}</script>
+    <script id="edit-blocks" type="application/json">{{ edit_blocks | tojson }}</script>
     <p id="edit-status" role="status" aria-live="polite"></p>
-    <div id="saved-preview" class="detail-section saved-preview" hidden></div>
     <dialog id="hotword-suggestions" aria-labelledby="hotword-suggestion-title">
       <h2 id="hotword-suggestion-title"></h2>
       <div id="hotword-options"></div>
@@ -62,10 +69,11 @@
   {% if view == 'summary' %}
     <section class="detail-section summary-document" aria-labelledby="summary-heading">
       <h2 id="summary-heading" class="visually-hidden">总结</h2>
+      {% if can_edit %}<div class="summary-toolbar"><span></span><div class="transcript-tools">{{ edit_controls() }}</div></div>{% endif %}
       <p class="summary-disclaimer">智能纪要由 AI 生成，可能不准确，请谨慎甄别后使用</p>
       {% if recording.has_summary %}
-        <div id="summary-content" class="markdown-body">{{ summary_html }}</div>
-      {% else %}<p class="empty-state">这条录音还没有 AI 总结</p>{% endif %}
+        <div id="summary-content" class="markdown-body" contenteditable="false" aria-label="总结内容">{{ summary_html }}</div>
+      {% else %}<p class="empty-state">这条录音还没有 AI 总结</p><div id="summary-content" class="markdown-body" contenteditable="false" aria-label="总结内容"></div>{% endif %}
     </section>
   {% else %}
     <section class="detail-section transcript-section" aria-labelledby="transcript-heading">
@@ -74,15 +82,19 @@
         <div id="transcript-toolbar" class="transcript-toolbar">
           <span class="transcript-count">{{ segments | length }} 段</span>
           <div class="transcript-tools">
+            {{ edit_controls() }}
             <input id="transcript-search" type="search" placeholder="搜索本场" aria-label="搜索本场" aria-controls="transcript-segments" autocomplete="off">
             <button id="copy-transcript" type="button" class="text-button">复制全文</button>
           </div>
         </div>
-        <div id="transcript-segments" class="transcript-segments">
+      {% elif can_edit %}<div class="summary-toolbar"><span></span><div class="transcript-tools">{{ edit_controls() }}</div></div>{% endif %}
+        {% if not recording.has_transcript %}<p class="empty-state">这条录音还没有转写内容</p>{% endif %}
+        <div id="transcript-segments" class="transcript-segments" contenteditable="false" aria-label="转写内容">
           {% for segment in segments %}
             <div class="transcript-segment" tabindex="0" role="button"
                  aria-label="复制 {{ segment.speaker }} {{ segment.short_timestamp }} 的段落"
                  data-speaker="{{ segment.speaker }}" data-timestamp="{{ segment.short_timestamp }}"
+                 data-source-header="{{ (segment.timestamp ~ ' ' ~ segment.speaker) if segment.timestamp else '' }}"
                  style="--speaker-bg: {{ segment.colors[0] }}; --speaker-color: {{ segment.colors[1] }}; --speaker-night: {{ segment.colors[2] }};">
               {% if not segment.continuation %}
                 <span class="speaker-avatar" aria-hidden="true">{{ segment.initial }}</span>
@@ -98,13 +110,12 @@
         <p id="transcript-search-status" class="transcript-search-status" role="status" aria-live="polite" hidden></p>
         <div id="transcript-copy-fallback" hidden>
           <label for="transcript-source">转写原文</label>
-          <textarea id="transcript-source" readonly></textarea>
+          <pre id="transcript-source" tabindex="0" aria-label="转写原文"></pre>
         </div>
-      {% else %}<p class="empty-state">这条录音还没有转写内容</p>{% endif %}
     </section>
   {% endif %}
   </div>
   <div id="transcript-toast" class="transcript-toast" role="status" aria-live="polite" hidden></div>
-  <script src="{{ url_for('static', path='detail.js') }}?v=20261030-04e" defer></script>
-  {% if can_edit %}<script src="{{ url_for('static', path='recording-edit.js') }}?v=20261030-11" defer></script>{% endif %}
+  <script src="{{ url_for('static', path='detail.js') }}?v=20261030-12" defer></script>
+  {% if can_edit %}<script src="{{ url_for('static', path='recording-edit.js') }}?v=20261030-12" defer></script>{% endif %}
 {% endblock %}

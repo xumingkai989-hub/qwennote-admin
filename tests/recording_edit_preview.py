@@ -36,6 +36,19 @@ def preview(db_path):
                 store.upsert_recording(
                     RecordingMeta('preview-' + suffix, '产品例会：内容修订验收', datetime(2026, 10, 30, 16, 12, tzinfo=SHANGHAI), 25),
                     RecordingDetail('preview-' + suffix, body, body, True, True), '2026-10-30T16:12:00+08:00')
+            rich_summary = ('# 项目例会\n\n## 讨论结论\n\n小红直播与 **AI 助手** 进入本周试用。{origin:1,2}\n\n'
+                            '- 第一项\n- 第二项\n  - 子任务\n\n> 引用结论\n\n'
+                            '| 事项 | 状态 |\n| --- | --- |\n| 试用 | 进行中 |\n\n'
+                            '```python\nprint("ok")\n```\n\n[方案](https://example.com)\n\n## 待办\n\n- [ ] 确认时间\n')
+            rich_transcript = '\n\n'.join(
+                f'[{index:02d}:00.000–{index:02d}:59.000] 发言人 {index % 2 + 1}\n\n'
+                f'第 {index + 1} 段：小红直播与 AI 助手进入本周试用。{{origin:1,2}}\n\n记录讨论结论与行动事项。'
+                for index in range(12))
+            for suffix in ['rich-summary', 'rich-transcript', 'rich-mobile', 'rich-dark', 'empty-summary', 'empty-transcript']:
+                summary, transcript = ('', '') if suffix.startswith('empty-') else (rich_summary, rich_transcript)
+                store.upsert_recording(
+                    RecordingMeta('preview-' + suffix, '产品例会：就地编辑与导航验收', datetime(2026, 10, 30, 16, 12, tzinfo=SHANGHAI), 25),
+                    RecordingDetail('preview-' + suffix, summary, transcript, bool(summary), bool(transcript)), '2026-10-30T16:12:00+08:00')
             yield
     app.router.lifespan_context = lifespan
 
