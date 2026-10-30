@@ -372,3 +372,42 @@ python -m app.tag --all --force  # 全量覆盖；失败的录音最终为空标
 现有 `scripts/deploy.py --app-only` 保持不修改 nginx 或 systemd 单元的约定。本工单发布后须单独安装仓库中 `qwennote.service`、`qwennote-sync.service` 两个单元，再 `systemctl daemon-reload` 和重启 `qwennote.service`，让新增 EnvironmentFile 生效。
 
 离线验证：`python -m pytest -q`；`tests/test_tags.py` 通过假 HTTP transport 覆盖 API、持久化、同步与页面。`tests/tags_layout.cjs` 检查 1440/390/320 宽度与浅深色模式，读取 `tests/render_detail_layout.py` 生成的 `home-tags.html`，不请求外网。
+
+## 工单 08：标签词表治理与每日自动迭代
+
+`app.tag_vocabulary` 在首次迁移种入原有 11 词（AI Tutor、模考系统、导师中心、师资匹配、中台与数据看板、AI Passport、市场与投放、组织与培训、述职、周会/例会、客户沟通），来源为 `seed`。随后迁移保留合并状态、反馈指令及人工清空的词表，不会重新种入。新增 `tags`、`tag_aliases`、`assistant_config`、`tag_change_log`、`tag_merge_proposals`；辅助表 `tag_semantic_checks` 记住成功检查（包括 null），避免每天重复调用和再次提出已拒绝建议。
+
+执行 `python -m app.tag_maintenance`（只要求 `DB_PATH`）扫描所有录音标签，自动收录新名为 `model`。只按全角 ASCII 转半角、英文小写、删除空白和 Unicode 标点、反复移除末尾“相关/类/项目”归一化，不做语义猜测。归一化相等的组按**当前实际使用次数降序、id 升序**选保留项；即使是 seed，也可能被使用更多的写法替代。旧项保留为 `merged`，记录指向和归一化 alias。
+
+选择**直接改写 `recording_tags`**：事务内替换旧名，若同一录音已有新名则去重并保留较早位置；使用次数按去重后的实际录音数重算，merged 项为 0。批次与打标/确认共用数据库旁 `.tag.lock`，数据库变更使用事务，模型请求期间不持有 SQLite 写事务。
+
+语义检查条件：`source=model`、至少两条录音使用、与其他 active 名称的**归一化长度差不超过 3**。该范围包含“AI教学 / AI Tutor”。一次请求带入所有合格候选，固定模型 `deepseek-flash`，严格验证 `{"duplicate_of":"候选名"或null}`，只写 `pending` 建议，绝不据模型结果自动合并。首次仅出现一次的标签在后续达到两次时也会被检查；缺认证或请求失败留待下次重试，失败响应不入日志。成功 null 答案不再调用；已拒绝建议不复活。
+
+内部接口（下周配置页可直接复用，不新增公网管理端点）：
+
+```python
+from app.tag_maintenance import accept_proposal, reject_proposal
+accept_proposal(proposal_id, store=store)
+reject_proposal(proposal_id, store=store)
+```
+
+省略 store 时使用环境变量 `DB_PATH`。确认合并按提案明确的 from → to 方向执行，事务内更新录音、alias、计数和审计；拒绝只更新状态。重复操作返回 False，缺失 ID/端点抛出 ValueError。历史 alias 继续解析到人工确认后的保留项。
+
+`app/tagging.py` 每个打标批次从数据库动态读取 active 名称和 `assistant_config.instructions`，保留指令原文；空指令默认“按业务线归类，不按会议形式”。词表空时提示自由输出，解析时最多保留一个 `其他:` 加最多 6 字。非空词表继续沿用工单 07 的兼容策略：词表外输出记录安全 WARNING 并保留，供每日自动收录；提示词要求严格从词表选择、每条 1–5 标签、最多一个其他标签。
+
+审计：新增/合并使用 `add` / `merge`，detail 含 from/to/reason；为满足无变化运行也留痕，`action` 额外使用 `run`，detail 记录 added/merged/proposed/checked/deferred/failed、status 和完成时间。`added` 是本轮新进入 active 词表的名称数，`merged` 是本轮转为 merged 的名称数，`proposed` 是本轮新增待确认行数；11 条初始化 seed 日志单独记录，不计入每日新增。进程中断时保留 running 事件，不伪造成功。HTTP/JSON 失败记录 partial，CLI 非零；缺认证记录 deferred，不影响确定性收录与归并。
+
+部署仍使用 `python3 scripts/deploy.py --app-only`，然后在服务器运行：
+
+```sh
+bash /opt/qwennote/current/scripts/install_tag_maintenance.sh
+systemctl start qwennote-tag-maintenance.service
+journalctl -u qwennote-tag-maintenance.service -n 20 --no-pager
+systemctl list-timers --all qwennote-tag-maintenance.timer
+```
+
+安装脚本仅注册本次两份单元。timer 每天 **05:00 Asia/Shanghai**，`Persistent=true`；service 以 qwennote 用户运行，使用当前 release、原有两份 EnvironmentFile 和 SQLite 动态库，写权限限于应用数据目录。无需修改 nginx 或其他站点。回滚到不包含模块的旧 release 前，先停用本 timer：`systemctl disable --now qwennote-tag-maintenance.timer`；数据库迁移为增量，不删除原表或录音。
+
+离线测试新增 41 项，覆盖归一化、迁移幂等、使用量与 id 决胜、录音改写去重、语义建议与 null 去重、认证缺失/异常重试、接受/拒绝/合并链、提示词原文与空词表、事务回滚及调度合同。沿用全套测试的网络阻断 fixture；原有测试不删除。
+
+本次全量离线验收：**527 项 Python + 19 项 JavaScript 通过**（原有 486 项 Python 保留，新增 41 项；仅更新启动测试的必需表名单）。部署与首次实际维护结果单独保存到仓库外 `../qwennote-admin-artifacts/tags-08-20261030/`，不公开业务数据。

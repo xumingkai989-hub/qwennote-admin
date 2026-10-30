@@ -13,7 +13,9 @@ def test_startup_migrates_only_required_tables_and_seeds_admin(client, settings)
     with sqlite3.connect(settings.db_path) as conn:
         assert conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
         tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-        required = {"users", "recordings", "sync_runs", "api_keys", "api_audit", "recording_tags", "tag_runs"}
+        required = {"users", "recordings", "sync_runs", "api_keys", "api_audit", "recording_tags", "tag_runs",
+                    "tags", "tag_aliases", "assistant_config", "tag_change_log",
+                    "tag_merge_proposals", "tag_semantic_checks"}
         assert required | {"recordings_fts"} <= tables
         assert all(t in required or t.startswith("recordings_fts") for t in tables)
         assert conn.execute("SELECT COUNT(*) FROM recordings").fetchone()[0] == 0

@@ -233,6 +233,8 @@ class SQLiteStore:
                     cache_creation_input_tokens INTEGER NOT NULL DEFAULT 0
                 )
             """)
+            from app.tag_vocabulary import migrate as migrate_vocabulary
+            migrate_vocabulary(conn)
             if 'media_type' not in {row['name'] for row in conn.execute('PRAGMA table_info(recordings)')}:
                 conn.execute('ALTER TABLE recordings ADD COLUMN media_type TEXT')
             if 'refreshed_token' not in {row['name'] for row in conn.execute('PRAGMA table_info(sync_runs)')}:
