@@ -16,7 +16,7 @@ test('hotword trace, undo and pending state on desktop/mobile/dark',async()=>{
    await page.route('**/*',r=>new URL(r.request().url()).origin===base?r.continue():r.abort());
    await page.goto(`${base}/hotwords`);
    const form = page.locator('form[action="/hotwords"]');
-   assert.deepEqual(await form.locator('label').allTextContents(), ['标准词（必填）','别名提示（选填，逗号分隔）','备注（选填）']);
+   assert.deepEqual(await form.locator('label').allTextContents(), ['标准词（必填）','备注（选填）']);
    assert.equal(await form.locator('input[required]').count(), 1);
    assert.equal(await page.locator('input[name="source"], input[name="target"]').count(), 0);
    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth), false);

@@ -1,6 +1,5 @@
-"""Explicit, one-way hotword publishing. Planning is entirely local and read-only."""
+"""Explicit, one-way hotword publishing. Each append contains exactly one standard term."""
 import fcntl
-import hashlib
 import json
 import re
 import unicodedata
@@ -12,9 +11,10 @@ from app.minutes import HttpMinutesSource, MinutesSourceError
 
 
 REASONS = {
-    'already_synced': '已同步，标准词未变', 'invalid_chars': '含中英文、数字、空格以外的字符',
+    'already_synced': '已推送，标准词未变', 'invalid_chars': '含中英文、数字、空格以外的字符',
     'too_long': '超过千问长度限制', 'disabled': '热词已停用',
-    'upstream_failed': '千问调用失败；请先从千问导入核对，勿盲目重试',
+    'upstream_failed': '千问调用失败，请检查连接后重试',
+    'quota_full': '千问热词配额已满', 'not_found': '热词不存在',
 }
 HAN = '\u3400-\u4dbf\u4e00-\u9fff'
 
@@ -31,6 +31,8 @@ def migrate(conn):
     conn.execute("""CREATE TABLE IF NOT EXISTS hotword_upstream_sync (
         hotword_id INTEGER PRIMARY KEY, upstream_value TEXT NOT NULL, synced_at TEXT NOT NULL,
         status TEXT NOT NULL CHECK(status IN ('ok','skipped','failed')))""")
+    conn.execute("""CREATE TABLE IF NOT EXISTS hotword_upstream_errors (
+        hotword_id INTEGER PRIMARY KEY, message TEXT NOT NULL)""")
     # Keep an append-only attempt history: the per-word table alone loses earlier results.
     conn.execute("""CREATE TABLE IF NOT EXISTS hotword_upstream_runs (
         id INTEGER PRIMARY KEY, started_at TEXT NOT NULL, finished_at TEXT,
@@ -52,6 +54,10 @@ def sync_lock(store):
 class HotwordTools:
     TOOLS = {'list_hot_words', 'add_personal_hot_word'}
 
+    def _rpc_error_message(self, error):
+        message = error.get('message') if isinstance(error, dict) else None
+        return error_summary(message if isinstance(message, str) else REASONS['upstream_failed'], self)
+
     def list_hot_words(self):
         try:
             self._initialize()
@@ -68,9 +74,47 @@ class HotwordTools:
     def add_personal_hot_word(self, terms):
         try:
             self._initialize()
-            self._call('add_personal_hot_word', {'hotWordList': terms})
-        except (MinutesSourceError, KeyError, TypeError, ValueError, OSError):
+            # Use the existing transport (including its non-retry rule), but retain
+            # the tool's actual error message for this explicit administrator action.
+            result = self._rpc('tools/call', {'name': 'add_personal_hot_word',
+                                             'arguments': {'hotWordList': terms}})
+            blocks = result.get('content', [])
+            text = '\n'.join(b['text'] for b in blocks if isinstance(b, dict)
+                             and b.get('type') == 'text' and isinstance(b.get('text'), str))
+            payload = result.get('structuredContent')
+            if result.get('isError'):
+                raise MinutesSourceError(error_summary(text or str(payload or REASONS['upstream_failed']), self))
+            if payload is None:
+                payload = json.loads(text)
+            if not isinstance(payload, dict):
+                raise ValueError()
+            if payload.get('success') is False:
+                raise MinutesSourceError(error_summary(str(payload.get('message') or payload.get('error')
+                                                         or REASONS['upstream_failed']), self))
+        except MinutesSourceError as exc:
+            raise MinutesSourceError(error_summary(str(exc), self)) from None
+        except (KeyError, TypeError, ValueError, OSError):
             raise MinutesSourceError(REASONS['upstream_failed']) from None
+
+
+def error_summary(message, source=None):
+    # Redact actual transport credentials and common credential-shaped fields
+    # before persistence or display; ordinary tool errors remain visible.
+    if source is not None:
+        values = [getattr(source, '_token', '')]
+        if getattr(source, 'tokens', None):
+            try:
+                values += [v for k, v in source.tokens._read().items()
+                           if k in ('access_token', 'refresh_token', 'client_id')]
+            except (OSError, MinutesSourceError):
+                pass
+        for value in values:
+            if isinstance(value, str) and value:
+                message = message.replace(value, '[已隐藏]')
+    message = re.sub(r'(?i)(bearer\s+)[^\s,;]+', r'\1[已隐藏]', message)
+    message = re.sub(r'(?i)((?:access_token|refresh_token|api_key|password|secret)\s*[=:]\s*)[^\s,;]+',
+                     r'\1[已隐藏]', message)
+    return ' '.join(message.split())[:200] or REASONS['upstream_failed']
 
 
 class HttpHotwordSource(HotwordTools, HttpMinutesSource):
@@ -128,22 +172,11 @@ def plan(store, quota=None):
     for word in store.list_hotwords():
         reason = skip_reason(word, previous.get(word.id))
         row = {'hotword_id': word.id, 'term': word.term}
-        if reason:
-            skipped.append({**row, 'reason': reason, 'message': REASONS[reason]})
-        else:
-            eligible.append(row)
-    count = quota['currentCount'] if quota else None
-    maximum = quota['maxCount'] if quota else 200
-    after = count + len(eligible) if count is not None else None
-    error = 'quota_unknown' if count is None else 'quota_insufficient' if after > maximum else None
-    result = dict(to_push=eligible, skipped=skipped, currentCount=count, maxCount=maximum,
-                  afterCount=after, quota_checked_at=quota.get('checked_at') if quota else None,
-                  error=error, can_confirm=not error and bool(eligible))
-    # Bind browser confirmation to the actual reviewed list and quota, never silently add new words.
-    result['plan_hash'] = hashlib.sha256(json.dumps(
-        {k: v for k, v in result.items() if k != 'quota_checked_at'},
-        ensure_ascii=False, sort_keys=True).encode()).hexdigest()
-    return result
+        (skipped if reason else eligible).append(
+            {**row, 'reason': reason, 'message': REASONS[reason]} if reason else row)
+    return dict(to_push=eligible, skipped=skipped,
+                currentCount=quota['currentCount'] if quota else None,
+                maxCount=quota['maxCount'] if quota else 200)
 
 
 def refresh(store, source):
@@ -153,51 +186,76 @@ def refresh(store, source):
         return value
 
 
-def execute(store, source, expected_hash=''):
+def error_rows(store):
+    with store._connect() as conn:
+        return {r['hotword_id']: r['message'] for r in conn.execute('SELECT * FROM hotword_upstream_errors')}
+
+
+def _push_one(store, source, identifier, force=False):
+    word = next((w for w in store.list_hotwords() if w.id == identifier), None)
+    if word is None:
+        return dict(hotword_id=identifier, status='failed', error='not_found', message=REASONS['not_found'])
+    reason = skip_reason(word, None if force else sync_rows(store).get(identifier))
+    if reason == 'already_synced':
+        return dict(hotword_id=identifier, term=word.term, status='skipped', error=None,
+                    message=REASONS[reason])
+    message = REASONS.get(reason, '')
+    quota = None
+    if not reason:
+        try:
+            quota = source.list_hot_words()
+            save_snapshot(store, quota)
+            if quota['currentCount'] >= quota['maxCount']:
+                reason, message = 'quota_full', REASONS['quota_full']
+            else:
+                source.add_personal_hot_word([word.term])
+        except (MinutesSourceError, ValueError, OSError) as exc:
+            reason, message = 'upstream_failed', error_summary(str(exc), source)
+    status = 'failed' if reason else 'ok'
+    at = now()
+    result = dict(hotword_id=identifier, term=word.term, status=status, error=reason,
+                  message=message or '已推送')
+    with store._connect() as conn:
+        conn.execute('BEGIN IMMEDIATE')
+        conn.execute('INSERT INTO hotword_upstream_sync VALUES (?,?,?,?) '
+                     'ON CONFLICT(hotword_id) DO UPDATE SET upstream_value=excluded.upstream_value, '
+                     'synced_at=excluded.synced_at,status=excluded.status', (identifier, word.term, at, status))
+        conn.execute('DELETE FROM hotword_upstream_errors WHERE hotword_id=?', (identifier,))
+        if reason:
+            conn.execute('INSERT INTO hotword_upstream_errors VALUES (?,?)', (identifier, message))
+        conn.execute('INSERT INTO hotword_upstream_runs(started_at,finished_at,status,plan_json) VALUES (?,?,?,?)',
+                     (at, now(), status, json.dumps(result, ensure_ascii=False)))
+        if status == 'ok':
+            words = quota['hotWords'] if word.term in quota['hotWords'] else quota['hotWords'] + [word.term]
+            quota = {**quota, 'hotWords': words, 'currentCount': len(words), 'checked_at': now()}
+            conn.execute('UPDATE hotword_upstream_state SET snapshot_json=? WHERE id=1',
+                         (json.dumps(quota, ensure_ascii=False),))
+    if quota is not None:
+        result.update(currentCount=quota['currentCount'], maxCount=quota['maxCount'])
+    return result
+
+
+def execute_one(store, source, hotword_id, force=False):
     with sync_lock(store):
-        quota = source.list_hot_words()  # Refresh immediately before the irreversible call.
-        result = plan(store, quota)
-        if result['error']:
-            return result
-        if expected_hash and expected_hash != result['plan_hash']:
-            return {**result, 'error': 'plan_changed', 'can_confirm': False}
-        save_snapshot(store, quota)
-        at = now()
-        with store._connect() as conn:
-            run_id = conn.execute('INSERT INTO hotword_upstream_runs(started_at,status,plan_json) '
-                                  "VALUES (?,'running',?)", (at, json.dumps(result, ensure_ascii=False))).lastrowid
-        status = 'ok'
-        if result['to_push']:
-            try:
-                source.add_personal_hot_word([r['term'] for r in result['to_push']])
-            except MinutesSourceError:
-                status = 'failed'
-        # All local results are committed together, never a partially recorded batch.
-        with store._connect() as conn:
-            for row in result['to_push'] + result['skipped']:
-                if row.get('reason') == 'already_synced':
-                    continue  # Preserve successful deduplication evidence.
-                state = 'skipped' if 'reason' in row else status
-                conn.execute('INSERT INTO hotword_upstream_sync VALUES (?,?,?,?) '
-                             'ON CONFLICT(hotword_id) DO UPDATE SET upstream_value=excluded.upstream_value, '
-                             'synced_at=excluded.synced_at,status=excluded.status',
-                             (row['hotword_id'], row['term'], at, state))
-            conn.execute('UPDATE hotword_upstream_runs SET status=?,finished_at=? WHERE id=?',
-                         (status, now(), run_id))
-            if status == 'ok':
-                quota = {**quota, 'hotWords': quota['hotWords'] + [r['term'] for r in result['to_push']],
-                         'currentCount': result['afterCount'], 'checked_at': now()}
-                conn.execute('UPDATE hotword_upstream_state SET snapshot_json=? WHERE id=1',
-                             (json.dumps(quota, ensure_ascii=False),))
-        return {**result, 'status': status, 'run_id': run_id,
-                'error': 'upstream_failed' if status == 'failed' else None}
+        return _push_one(store, source, hotword_id, force)
+
+
+def execute(store, source):
+    with sync_lock(store):
+        results = [_push_one(store, source, w.id) for w in store.list_hotwords()]
+    successful = sum(r['status'] == 'ok' for r in results)
+    failed = sum(r['status'] == 'failed' for r in results)
+    return dict(results=results, success=successful, failed=failed,
+                skipped=sum(r['status'] == 'skipped' for r in results),
+                status='failed' if failed else 'ok', error='upstream_failed' if failed else None,
+                message=f'成功 {successful} / 失败 {failed}')
 
 
 def import_preview(store, source):
     upstream = source.list_hot_words()
     existing = set()
     for word in store.list_hotwords():
-        existing.update(normalize(v) for v in [word.term, *re.split('[,，]', word.aliases)] if v.strip())
+        existing.add(normalize(word.term))
     candidates = []
     for term in upstream['hotWords']:
         key = normalize(term)
@@ -214,8 +272,8 @@ def import_selected(store, term):
     with store._connect() as conn:
         conn.execute('BEGIN IMMEDIATE')
         key = normalize(term)
-        for row in conn.execute('SELECT term,aliases FROM hotwords'):
-            if key in {normalize(v) for v in [row['term'], *re.split('[,，]', row['aliases'])] if v.strip()}:
+        for row in conn.execute('SELECT term FROM hotwords'):
+            if key == normalize(row['term']):
                 return False
         at = now()
         conn.execute('INSERT INTO hotwords(term,created_at,updated_at) VALUES (?,?,?)', (term, at, at))

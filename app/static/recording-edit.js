@@ -199,7 +199,7 @@
         checkbox.value = String(index);
         checkbox.checked = true;
         const text = document.createElement('span');
-        text.textContent = `${item.aliases} → ${item.term}`;
+        text.textContent = item.term;
         label.append(checkbox, text);
         options.append(label);
       });

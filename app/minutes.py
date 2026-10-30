@@ -170,6 +170,8 @@ class HttpMinutesSource:
                                     break
                     else:
                         payload = json.loads(response.read())
+                    if isinstance(payload, dict) and 'error' in payload:
+                        raise MinutesSourceError(self._rpc_error_message(payload['error']))
                     if (not isinstance(payload, dict) or payload.get('jsonrpc') != '2.0'
                             or payload.get('id') != message['id'] or 'error' in payload
                             or not isinstance(payload.get('result'), dict)):
@@ -203,6 +205,9 @@ class HttpMinutesSource:
         if not self.TOOLS <= names:
             raise MinutesSourceError('千问 MCP 缺少必需的只读工具')
         self._initialized = True
+
+    def _rpc_error_message(self, error):
+        return '千问 MCP 请求失败或响应无效'
 
     def _call(self, name: str, arguments: dict) -> dict:
         result = self._rpc('tools/call', {'name': name, 'arguments': arguments})

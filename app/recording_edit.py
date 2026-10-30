@@ -10,7 +10,7 @@ from fastapi import Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from starlette.concurrency import run_in_threadpool
 
-from app.hotwords import validate_hotword, clean_aliases
+from app.hotwords import validate_hotword
 from app.minutes import SHANGHAI
 from app.recording_content import apply_recording_hotwords
 
@@ -88,7 +88,7 @@ def diff_suggestions(original: str, content: str) -> list[dict[str, str]]:
                 old, new = old_unit, new_unit
         if normalized(old) == normalized(new):
             continue
-        item = {'aliases': old, 'term': new}
+        item = {'term': new}
         try:
             validate_hotword(**item)
         except ValueError:
@@ -179,25 +179,19 @@ def install_recording_edit(app, *, sessions, authorize, csrf, valid_csrf, sessio
         fields = await fields_for(request)
         if not isinstance(fields, dict):
             return fields
-        skipped = []
         try:
             items = json.loads(fields.get('items', [''])[0])
             if not isinstance(items, list) or not 1 <= len(items) <= 3:
                 raise ValueError
             for index, item in enumerate(items):
-                if (not isinstance(item, dict) or set(item) != {'term', 'aliases'}
-                        or not all(isinstance(value, str) for value in item.values())):
+                if (not isinstance(item, dict) or set(item) != {'term'}
+                        or not isinstance(item['term'], str)):
                     raise ValueError
-                if len(item['aliases']) > 1000:
-                    raise ValueError('别名提示最多 1000 字。')
-                item['aliases'], invalid = clean_aliases(item['aliases'])
-                skipped.extend({'index': index, **row} for row in invalid)
                 validate_hotword(**item)
         except (ValueError, TypeError) as exc:
             return result({'detail': str(exc) or '请提供 1–3 条有效热词。'}, 400)
         counts = await run_in_threadpool(app.state.store.bulk_add_hotwords, items)
         message = f'已存入 {counts["added"]} 条，已存在 {counts["existing"]} 条'
-        return result({**counts, 'message': message + (f'；已跳过 {len(skipped)} 条非法别名' if skipped else ''),
-                       **({'skipped_aliases': skipped} if skipped else {})})
+        return result({**counts, 'message': message})
 
     return token_for

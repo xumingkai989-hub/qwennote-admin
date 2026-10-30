@@ -23,11 +23,11 @@ def build(db_path):
             body = '本次会议中小鹅直播的转化率'
             store.upsert_recording(RecordingMeta('word-preview', '热词粒度验收（合成数据）', datetime.now(SHANGHAI), 5),
                                    RecordingDetail('word-preview', body, body, True, True), 'now')
-            store.add_hotword('小鹿直播', '小鹅直播')
+            store.add_hotword('小鹿直播')
             # Simulate a pre-existing sentence, then run the real startup migration.
             with store._connect() as conn:
-                conn.execute("INSERT INTO hotwords(term,aliases,created_at,updated_at) VALUES (?,?,'now','now')",
-                             ('本次会议中小鹿直播的转化率，后续还要复盘。', '历史别名'))
+                conn.execute("INSERT INTO hotwords(term,created_at,updated_at) VALUES (?,'now','now')",
+                             ('本次会议中小鹿直播的转化率，后续还要复盘。',))
             store.migrate()
             yield
     app.router.lifespan_context = lifespan

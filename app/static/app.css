@@ -551,3 +551,6 @@ p.assistant-note { margin: 12px 0 0; }
 #qwen-feedback:empty, #qwen-dialog-feedback:empty { display: none; }
 
 .qwen-skipped { color: var(--warning-text); }
+
+.hotword-list-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 16px; }
+.hotword-list-heading h2 { margin: 0; }

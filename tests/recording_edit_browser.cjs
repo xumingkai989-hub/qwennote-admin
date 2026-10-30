@@ -60,7 +60,8 @@ test('edit, cancel, save, opt-in suggestions, failures, and revert in four brows
       await page.locator('#edit-button').click();
       await page.locator('#hotword-suggestions').waitFor({state:'visible'});
       assert.equal(await page.locator('#hotword-options input:checked').count(), 2);
-      assert.match(await page.locator('#hotword-options').innerText(), /小红直播 → 小鹿直播/);
+      assert.match(await page.locator('#hotword-options').innerText(), /小鹿直播/);
+      assert.ok(!(await page.locator('#hotword-options').innerText()).includes('小红直播'));
       await page.locator('#hotword-options input').last().uncheck();
       assert.equal(await page.locator('#save-hotwords').innerText(), '存入选中的 1 条');
       await page.locator('#hotword-options input').first().uncheck();
@@ -176,7 +177,7 @@ test('rich layout stays fixed, Markdown and timestamps survive edits, mobile scr
       const response=page.waitForResponse(r=>r.url().endsWith('/edit'));
       await content.press('Meta+Enter');
       const result=await (await response).json();assert.equal(result.saved,true);
-      assert.deepEqual(result.suggestions,[{aliases:'小红直播',term:'小鹿直播'}]);
+      assert.deepEqual(result.suggestions,[{term:'小鹿直播'}]);
       await page.locator('#hotword-suggestions').waitFor({state:'visible'});
       await Promise.all([page.waitForNavigation(),page.locator('#dismiss-hotwords').click()]);
       const saved=await page.locator('#edit-source').textContent().then(JSON.parse);

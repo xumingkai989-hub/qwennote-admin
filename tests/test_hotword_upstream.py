@@ -1,3 +1,4 @@
+from hotword_fixtures import seed_rule
 """Ticket 19: no live network, including real MCP JSON-RPC and OAuth transports."""
 import json
 from concurrent.futures import ThreadPoolExecutor
@@ -7,7 +8,7 @@ import httpx
 import pytest
 
 from app.hotword_upstream import (HttpHotwordSource, McpHotwordSource, execute, import_preview,
-                                  plan, refresh, save_snapshot, sync_rows)
+                                  plan, refresh, save_snapshot, sync_rows, execute_one, error_rows)
 from app.minutes import MinutesSourceError
 from test_hotwords import csrf
 from test_login import login
@@ -20,6 +21,8 @@ class Server:
         self.words = []
         self.maximum = 200
         self.failure = None
+        self.failing_terms = set()
+        self.error_text = "千问拒绝：该词暂不可添加"
         self.payload = None
         self.sse = False
         self.entered = None
@@ -51,9 +54,12 @@ class Server:
                     raise httpx.ReadTimeout('sensitive provider text must not escape', request=request)
                 if self.failure == '500':
                     return httpx.Response(500, text='sensitive provider text')
-                if self.failure == 'tool':
+                if self.failure == 'rpc':
+                    return httpx.Response(200, json={'jsonrpc':'2.0','id':data['id'],
+                        'error':{'code':-32000,'message':self.error_text}})
+                if self.failure == 'tool' or args['hotWordList'][0] in self.failing_terms:
                     return httpx.Response(200, json={'jsonrpc':'2.0', 'id':data['id'], 'result':{
-                        'isError':True, 'content':[{'type':'text', 'text':'sensitive provider text'}]}})
+                        'isError':True, 'content':[{'type':'text', 'text':self.error_text}]}})
                 self.words.extend(args['hotWordList'])
                 payload = {'success': True}
             result = {'content': [{'type': 'text', 'text': json.dumps(payload)}]}
@@ -88,46 +94,44 @@ def post(client, path='/hotwords/sync-qwennote', **fields):
     return client.post(path, data={'csrf_token':csrf(client), **fields})
 
 
-def test_preview_sends_zero_transport_requests_and_writes_nothing(client, store, upstream):
-    server, _ = upstream
+def push(client, identifier, **fields):
+    return post(client, f'/hotwords/{identifier}/push-qwennote', **fields).json()
+
+
+def writes(server):
+    return [args for name, args in server.calls if name == 'add_personal_hot_word']
+
+
+def test_page_standard_fields_and_no_automatic_push(client, store, upstream):
     login(client)
-    store.add_hotword('小鹿直播', '小鹅直播')
-    save_snapshot(store, dict(hotWords=[], currentCount=0, maxCount=200, checked_at='test'))
+    store.add_hotword('标准词', note='备注')
+    text = client.get('/hotwords').text
+    assert 'name="aliases"' not in text and '别名' not in text and '替换原词' not in text
+    assert '标准词（必填）' in text and '备注（选填）' in text
+    assert re_columns(text) == ['标准词', '备注', '命中次数', '千问', '操作']
+    assert '全部推送' in text and '推送到千问' in text and '未推送' in text
+    assert not upstream[0].requests
+
+
+def re_columns(text):
+    import re
+    return re.findall(r'<th scope="col">(.*?)</th>', text)
+
+
+@pytest.mark.parametrize('term', ['标准词', 'AI Tutor', '㐀词', '词2026'])
+def test_single_calls_once_with_only_term_and_ok(client, store, upstream, term):
+    login(client)
+    identifier = seed(store, term)
     before = rows(store, 'hotwords')
-    result = post(client, confirm='0').json()
-    assert [r['term'] for r in result['to_push']] == ['小鹿直播']
-    assert result['afterCount'] == 1 and result['can_confirm']
-    assert server.requests == []
+    result = push(client, identifier)
+    assert result['status'] == 'ok'
+    assert writes(upstream[0]) == [{'hotWordList': [term]}]
+    assert sync_rows(store)[identifier]['status'] == 'ok'
+    assert sync_rows(store)[identifier]['upstream_value'] == term
+    assert sync_rows(store)[identifier]['synced_at']
     assert rows(store, 'hotwords') == before
-    assert not sync_rows(store) and not rows(store, 'hotword_upstream_runs')
-
-
-def test_unknown_quota_never_assumes_empty_upstream(client, store, upstream):
-    login(client)
-    store.add_hotword('标准词')
-    result = post(client, confirm='0').json()
-    assert result['error'] == 'quota_unknown' and result['afterCount'] is None
-    assert not result['can_confirm'] and upstream[0].requests == []
-
-
-def test_confirm_batches_terms_only_and_persists_all_results(client, store, upstream):
-    login(client)
-    store.add_hotword('小鹿直播', '小鹅直播,别名')
-    store.add_hotword('AI Tutor', '人工智能')
-    result = post(client, confirm='1').json()
-    assert result['status'] == 'ok' and result['afterCount'] == 2
-    writes = [args for name, args in upstream[0].calls if name == 'add_personal_hot_word']
-    assert writes == [{'hotWordList':['AI Tutor', '小鹿直播']}]
-    assert {r['upstream_value'] for r in sync_rows(store).values()} == {'小鹿直播','AI Tutor'}
-    assert {r['status'] for r in sync_rows(store).values()} == {'ok'}
-    assert all(r['synced_at'] for r in sync_rows(store).values())
-    run, = rows(store, 'hotword_upstream_runs')
-    assert run['status'] == 'ok' and run['finished_at']
-    result = post(client, confirm='1').json()
-    assert not result['to_push'] and {r['reason'] for r in result['skipped']} == {'already_synced'}
-    assert len([1 for name, _ in upstream[0].calls if name == 'add_personal_hot_word']) == 1
-    assert {r['status'] for r in sync_rows(store).values()} == {'ok'}
-    assert len(rows(store, 'hotword_upstream_runs')) == 2
+    assert '已推送' in client.get('/hotwords').text
+    assert not error_rows(store)
 
 
 @pytest.mark.parametrize('term,enabled,reason', [
@@ -137,173 +141,138 @@ def test_confirm_batches_terms_only_and_persists_all_results(client, store, upst
     ('中'*21,1,'too_long'), ('A'*41,1,'too_long'), ('1'*41,1,'too_long'),
     ('已停用',0,'disabled'),
 ])
-def test_each_skip_reason_with_no_write_call(client, store, upstream, term, enabled, reason):
+def test_invalid_or_disabled_rejected_before_any_mcp(client, store, upstream, term, enabled, reason):
     login(client)
     identifier = seed(store, term, enabled=enabled)
-    result = post(client, confirm='1').json()
-    skipped, = result['skipped']
-    assert skipped['reason'] == reason and skipped['term'] == term and skipped['message']
-    assert not result['to_push']
-    assert not [1 for name, _ in upstream[0].calls if name == 'add_personal_hot_word']
-    assert sync_rows(store)[identifier]['status'] == 'skipped'
+    result = push(client, identifier)
+    assert result['error'] == reason and result['status'] == 'failed'
+    assert upstream[0].requests == []
     assert rows(store, 'hotwords')[0]['term'] == term
 
 
-@pytest.mark.parametrize('term', ['中'*20, 'A'*40, 'AI Tutor 2026', '㐀词'])
-def test_upstream_length_boundaries_are_inclusive(client, store, upstream, term):
+@pytest.mark.parametrize('term', ['中'*20, 'A'*40, 'AI Tutor 2026', '㐀词', '中'*20+'A'*40])
+def test_upstream_length_boundaries(client, store, upstream, term):
     login(client)
-    seed(store, term)
-    result = post(client, confirm='1').json()
-    assert result['status'] == 'ok' and len(result['to_push']) == 1
+    assert push(client, seed(store, term))['status'] == 'ok'
+    assert writes(upstream[0]) == [{'hotWordList':[term]}]
 
 
-def test_changed_term_is_unsynced_and_alias_change_is_not(client, store, upstream):
+@pytest.mark.parametrize('maximum', [0, 1, 200])
+def test_full_quota_refuses_without_append(client, store, upstream, maximum):
     login(client)
-    store.add_hotword('旧标准词', '旧别名')
-    post(client, confirm='1')
-    word, = store.list_hotwords()
-    store.update_hotword(word.id, word.term, '新别名', '')
-    assert plan(store)['skipped'][0]['reason'] == 'already_synced'
-    store.update_hotword(word.id, '新标准词', '新别名', '')
-    assert [r['term'] for r in plan(store)['to_push']] == ['新标准词']
-    post(client, confirm='1')
-    assert sync_rows(store)[word.id]['upstream_value'] == '新标准词'
-    assert len(rows(store, 'hotword_upstream_runs')) == 2
+    upstream[0].maximum = maximum
+    upstream[0].words = [str(i) for i in range(maximum)]
+    identifier = seed(store, '标准词')
+    assert push(client, identifier)['error'] == 'quota_full'
+    assert writes(upstream[0]) == []
+    assert '配额已满' in client.get('/hotwords').text
 
 
-def test_insufficient_quota_aborts_entire_batch_without_local_writes(client, store, upstream):
-    login(client)
-    server, source = upstream
-    server.words = [str(i) for i in range(199)]
-    refresh(store, source)
-    store.add_hotword('甲词')
-    store.add_hotword('乙词')
-    before = rows(store, 'hotword_upstream_state')
-    for confirm in ['0','1']:
-        result = post(client, confirm=confirm).json()
-        assert result['error'] == 'quota_insufficient' and result['afterCount'] == 201
-    assert not sync_rows(store) and not rows(store, 'hotword_upstream_runs')
-    assert rows(store, 'hotword_upstream_state') == before
-    assert not [1 for name, _ in server.calls if name == 'add_personal_hot_word']
-
-
-def test_confirmation_rechecks_real_quota_before_writing(client, store, upstream):
-    login(client)
-    server, source = upstream
-    refresh(store, source)
-    store.add_hotword('甲词')
-    preview = post(client, confirm='0').json()
-    server.words = [str(i) for i in range(200)]
-    result = post(client, confirm='1', plan_hash=preview['plan_hash']).json()
-    assert result['error'] == 'quota_insufficient'
-    assert len(server.calls) == 2 and not sync_rows(store)
-
-
-def test_changed_plan_requires_another_preview(client, store, upstream):
-    login(client)
-    refresh(store, upstream[1])
-    store.add_hotword('甲词')
-    preview = post(client, confirm='0').json()
-    store.add_hotword('乙词')
-    result = post(client, confirm='1', plan_hash=preview['plan_hash']).json()
-    assert result['error'] == 'plan_changed' and not sync_rows(store)
-    assert not [1 for name, _ in upstream[0].calls if name == 'add_personal_hot_word']
-
-
-@pytest.mark.parametrize('failure', ['timeout','500','tool'])
-def test_failure_is_safe_recorded_and_does_not_mark_words_synced(client, store, upstream, failure):
+@pytest.mark.parametrize('failure', ['timeout', '500', 'tool', 'rpc'])
+def test_failure_persists_visible_reason_no_retry(client, store, upstream, failure):
     login(client)
     upstream[0].failure = failure
-    store.add_hotword('甲词')
-    store.add_hotword('乙词')
-    response = post(client, confirm='1')
-    assert response.json()['error'] == 'upstream_failed'
-    assert {r['status'] for r in sync_rows(store).values()} == {'failed'}
-    assert rows(store, 'hotword_upstream_runs')[0]['status'] == 'failed'
-    assert len([1 for name, _ in upstream[0].calls if name == 'add_personal_hot_word']) == 1
-    assert 'sensitive' not in response.text
+    identifier = seed(store, '标准词')
+    result = push(client, identifier)
+    assert result['status'] == 'failed' and result['message']
+    assert sync_rows(store)[identifier]['status'] == 'failed'
+    assert len(writes(upstream[0])) == 1
+    assert result['message'] in client.get('/hotwords').text
+    if failure in ('tool','rpc'):
+        assert result['message'] == upstream[0].error_text
+    else:
+        assert 'sensitive' not in result['message']
 
 
-def test_import_preview_is_read_only_and_selection_deduplicates_aliases(client, store, upstream):
+def test_error_summary_truncated_escaped_and_credentials_redacted(client, store, upstream):
     login(client)
-    store.add_hotword('AI Tutor', '小鹿直播')
+    upstream[0].failure = 'tool'
+    upstream[0].error_text = '<script>oops</script> fake-offline-only ' + '原因'*300
+    identifier = seed(store, '标准词')
+    result = push(client, identifier)
+    assert len(result['message']) == 200 and 'fake-offline-only' not in result['message']
+    assert len(error_rows(store)[identifier]) == 200
+    text = client.get('/hotwords').text
+    assert '<script>oops</script>' not in text and '&lt;script&gt;oops&lt;/script&gt;' in text
+
+
+def test_batch_three_one_fails_continues_and_correct_summary(client, store, upstream):
+    login(client)
+    for term in ['甲词', '乙词', '丙词']: store.add_hotword(term)
+    upstream[0].failing_terms = {'乙词'}
+    result = post(client).json()
+    assert (result['success'], result['failed'], result['skipped']) == (2, 1, 0)
+    assert result['message'] == '成功 2 / 失败 1'
+    assert writes(upstream[0]) == [{'hotWordList':[t]} for t in ['甲词', '乙词', '丙词']]
+    assert [r['status'] for r in result['results']] == ['ok', 'failed', 'ok']
+    assert [r['status'] for r in sync_rows(store).values()] == ['ok', 'failed', 'ok']
+
+
+def test_partial_quota_batch_keeps_first_success(client, store, upstream):
+    login(client)
+    upstream[0].maximum = 1
+    for term in ['甲词','乙词']: store.add_hotword(term)
+    result = post(client).json()
+    assert (result['success'],result['failed']) == (1,1)
+    assert len(writes(upstream[0])) == 1
+
+
+def test_repeat_is_deduplicated_explicit_repush_works_and_error_clears(client, store, upstream):
+    login(client)
+    identifier = seed(store, '标准词')
+    assert push(client, identifier)['status'] == 'ok'
+    assert push(client, identifier)['status'] == 'skipped'
+    assert len(writes(upstream[0])) == 1
+    upstream[0].failure = 'tool'
+    assert push(client, identifier, force='1')['status'] == 'failed'
+    upstream[0].failure = None
+    assert push(client, identifier)['status'] == 'ok'
+    assert len(writes(upstream[0])) == 3 and not error_rows(store)
+
+
+def test_term_change_needs_new_push_note_change_does_not(client, store, upstream):
+    login(client)
+    identifier = seed(store, '旧词')
+    push(client, identifier)
+    store.update_hotword(identifier, '旧词', '新备注')
+    assert push(client, identifier)['status'] == 'skipped'
+    store.update_hotword(identifier, '新词', '')
+    assert push(client, identifier)['status'] == 'ok'
+    assert sync_rows(store)[identifier]['upstream_value'] == '新词'
+
+
+def test_import_uses_standard_terms_only_and_is_read_only(client, store, upstream):
+    login(client)
+    store.add_hotword('AI Tutor')
     upstream[0].words = ['ＡＩ tutor', '小 鹿 直播', '候选词', '候 选 词', '另一个词']
     before = rows(store, 'hotwords')
     result = post(client, '/hotwords/import-preview').json()
-    assert result['candidates'] == ['候选词', '另一个词']
-    assert rows(store, 'hotwords') == before
-    assert not rows(store, 'hotword_upstream_state')
-    assert not sync_rows(store) and not rows(store, 'hotword_upstream_runs')
+    assert result['candidates'] == ['小 鹿 直播','候选词','另一个词']
+    assert rows(store, 'hotwords') == before and not writes(upstream[0])
     assert post(client, '/hotwords', from_upstream='1', term='候选词').json()['added']
     assert post(client, '/hotwords', from_upstream='1', term='候 选 词').json()['existing']
-    assert post(client, '/hotwords', from_upstream='1', term='小鹿直播').json()['existing']
-    assert {r.term for r in store.list_hotwords()} == {'AI Tutor','候选词'}
 
 
-def test_invalid_import_selection_has_inline_safe_error_and_no_write(client, store, upstream):
+def test_invalid_import_no_write(client, store, upstream):
     login(client)
     assert post(client, '/hotwords', from_upstream='1', term='长'*21).status_code == 400
     assert store.list_hotwords() == []
 
 
-@pytest.mark.parametrize('path', ['/hotwords/sync-qwennote','/hotwords/import-preview','/hotwords/qwennote-status'])
-def test_admin_and_csrf_boundaries(client, settings, store, upstream, path):
-    assert client.post(path, data={'confirm':'1'}).status_code == 403
-    login(client)
-    token = csrf(client)
-    assert client.post(path, data={'confirm':'1','csrf_token':'wrong'}).status_code == 403
-    from app.feishu import FeishuUser
-    store.add_user(FeishuUser('not-admin', '普通用户', ''))
-    from app.session import SignedCookie, SESSION_MAX_AGE
-    client.cookies.set('session', SignedCookie(settings.session_secret, salt='web-session',
-                       max_age=SESSION_MAX_AGE).encode('not-admin'))
-    assert client.post(path, data={'confirm':'1','csrf_token':token}).status_code == 403
-    assert upstream[0].requests == []
-
-
-@pytest.mark.parametrize('confirm', ['', 'true', '2'])
-def test_invalid_confirm_has_no_effect(client, store, upstream, confirm):
-    login(client)
-    assert post(client, confirm=confirm).status_code == 400
-    assert upstream[0].requests == []
-
-
-def test_migration_is_idempotent_and_preserves_history(client, store, upstream):
-    login(client)
-    store.add_hotword('标准词')
-    post(client, confirm='1')
-    before = [rows(store, table) for table in ['hotwords','hotword_upstream_sync','hotword_upstream_runs']]
-    store.migrate()
-    store.migrate()
-    assert [rows(store, table) for table in ['hotwords','hotword_upstream_sync','hotword_upstream_runs']] == before
-
-
-def test_serialized_confirmations_only_publish_once(client, store, upstream):
-    server, source = upstream
-    store.add_hotword('标准词')
-    server.entered, server.release = Event(), Event()
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        first = pool.submit(execute, store, source)
-        assert server.entered.wait(5)
-        second = pool.submit(execute, store, HttpHotwordSource('fake', transport=httpx.MockTransport(server)))
-        server.release.set()
-        assert first.result()['status'] == second.result()['status'] == 'ok'
-    assert len([1 for name, _ in server.calls if name == 'add_personal_hot_word']) == 1
-    assert len(rows(store, 'hotword_upstream_runs')) == 2
-
-
-@pytest.mark.parametrize('failure', ['timeout', '500'])
-def test_oauth_mutation_does_not_retry_non_idempotent_call(client, store, tmp_path, failure):
-    path = tmp_path / 'token.json'
-    path.write_text(json.dumps(dict(client_id='offline',access_token='offline',refresh_token='offline',
-                                    obtained_at=9999999999,expires_in=3600)))
-    server = Server()
-    server.failure = failure
-    source = McpHotwordSource(token_file=path, transport=httpx.MockTransport(server),
-                             sleep=lambda _: pytest.fail('append must not back off or retry'))
-    store.add_hotword('标准词')
-    assert execute(store, source)['error'] == 'upstream_failed'
-    assert len([1 for name, _ in server.calls if name == 'add_personal_hot_word']) == 1
+@pytest.mark.parametrize('path', ['/hotwords/1/push-qwennote','/hotwords/sync-qwennote',
+                                   '/hotwords/import-preview','/hotwords/qwennote-status'])
+@pytest.mark.parametrize('role', ['anonymous','member','csrf'])
+def test_admin_and_csrf(client, settings, store, upstream, path, role):
+    seed(store, '标准词')
+    if role == 'anonymous':
+        response = client.post(path)
+    else:
+        login(client)
+        token = csrf(client)
+        if role == 'member':
+            store.remove_user(settings.admin_open_id)
+        response = client.post(path, data={'csrf_token':'wrong' if role == 'csrf' else token})
+    assert response.status_code == 403 and upstream[0].requests == []
 
 
 @pytest.mark.parametrize('payload', [
@@ -311,24 +280,67 @@ def test_oauth_mutation_does_not_retry_non_idempotent_call(client, store, tmp_pa
     {'hotWords':[], 'currentCount':1, 'maxCount':200},
     {'hotWords':[], 'currentCount':0, 'maxCount':201},
     {'hotWords':[{}], 'currentCount':1, 'maxCount':200},
-    {'hotWords':[], 'currentCount':-1, 'maxCount':200},
-    {},
+    {'hotWords':[], 'currentCount':-1, 'maxCount':200}, {},
 ])
 def test_malformed_quota_fails_closed(client, store, upstream, payload):
     login(client)
     upstream[0].payload = payload
-    store.add_hotword('标准词')
-    result = post(client, confirm='1')
-    assert result.status_code == 502 and result.json()['error'] == 'upstream_unavailable'
-    assert not sync_rows(store) and not rows(store, 'hotword_upstream_runs')
-    assert not [1 for name, _ in upstream[0].calls if name == 'add_personal_hot_word']
+    result = push(client, seed(store, '标准词'))
+    assert result['status'] == 'failed' and not writes(upstream[0])
 
 
-def test_sse_transport_and_status_cache(client, store, upstream):
+@pytest.mark.parametrize('failure', ['timeout','500'])
+def test_oauth_does_not_retry_append(client, store, tmp_path, failure):
+    path = tmp_path/'token.json'
+    path.write_text(json.dumps(dict(client_id='offline',access_token='offline',refresh_token='offline',
+                                   obtained_at=9999999999,expires_in=3600)))
+    server = Server(); server.failure = failure
+    source = McpHotwordSource(token_file=path, transport=httpx.MockTransport(server),
+                             sleep=lambda _: pytest.fail('must not retry'))
+    identifier = seed(store, '标准词')
+    assert execute_one(store,source,identifier)['status'] == 'failed'
+    assert len(writes(server)) == 1
+
+
+def test_serialized_single_requests_publish_once(client, store, upstream):
+    server, source = upstream
+    identifier = seed(store, '标准词')
+    server.entered, server.release = Event(), Event()
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(execute_one, store, source, identifier)
+        assert server.entered.wait(5)
+        second = pool.submit(execute_one, store, source, identifier)
+        server.release.set()
+        assert first.result()['status'] == 'ok' and second.result()['status'] == 'skipped'
+    assert len(writes(server)) == 1
+
+
+def test_migration_idempotent_retains_sync(client, store, upstream):
+    identifier = seed(store, '标准词')
+    execute_one(store,upstream[1],identifier)
+    before = [rows(store,t) for t in ['hotwords','hotword_upstream_sync','hotword_upstream_runs']]
+    store.migrate();store.migrate()
+    assert before == [rows(store,t) for t in ['hotwords','hotword_upstream_sync','hotword_upstream_runs']]
+
+
+def test_sse_status_and_cache(client, store, upstream):
     login(client)
-    upstream[0].sse = True
-    upstream[0].words = ['上游词']
-    response = post(client, '/hotwords/qwennote-status')
-    assert response.status_code == 200 and response.json()['currentCount'] == 1
-    assert 'hotWords' not in response.json()
+    upstream[0].sse = True; upstream[0].words = ['上游词']
+    result = post(client, '/hotwords/qwennote-status')
+    assert result.status_code == 200 and result.json()['currentCount'] == 1
+    assert 'hotWords' not in result.json()
     assert '千问热词：已用 1 / 200' in client.get('/hotwords').text
+
+
+def test_missing_word_no_mcp(client, store, upstream):
+    login(client)
+    assert push(client, 999)['error'] == 'not_found' and not upstream[0].requests
+
+
+@pytest.mark.parametrize('confirm', ['0','1','','true'])
+def test_old_preview_client_rejected_without_any_mcp(client, store, upstream, confirm):
+    login(client)
+    store.add_hotword('标准词')
+    response = post(client, confirm=confirm)
+    assert response.status_code == 400 and response.json()['error'] == 'stale_client'
+    assert not upstream[0].requests and not sync_rows(store)

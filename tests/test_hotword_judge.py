@@ -1,3 +1,4 @@
+from hotword_fixtures import seed_rule
 """Offline standard-term identification, exact locations, conservative failures and undo."""
 import json
 import re
@@ -23,7 +24,8 @@ def response(rows):
 
 def answer(request, decision='apply', reason='确指该产品'):
     prompt = json.loads(request.content)['messages'][0]['content']
-    hint = prompt.split('不完整）：', 1)[1].split('\n', 1)[0]
+    term = prompt.split('标准词：', 1)[1].split('\n', 1)[0]
+    hint = {'AI导师': 'AI Tutor', '人工智能': 'AI'}.get(term, '不存在')
     fragment = prompt.split('---\n', 1)[1]
     matches = list(re.finditer(re.escape(hint), fragment, re.I)) if hint != '无' else []
     return response([{'span': m.group(), 'reason': reason} for m in matches] if decision == 'apply' else [])
@@ -41,7 +43,7 @@ def test_context_limit_and_literal_case():
     chunks = contexts('a.b a.b a.b a.b axb', 'a.b')
     assert all(c['text'].count('a.b') <= 1 for c in chunks)
     assert len(contexts('文本' * 1000, '标准词')) == 5
-    assert '不确定' in SYSTEM and '没有别名也要识别' in SYSTEM
+    assert '不确定' in SYSTEM and '自行识别' in SYSTEM
 
 
 @pytest.mark.parametrize('path', EXITS)
@@ -61,8 +63,8 @@ def test_apply_skip_and_missing_compare_same_raw_text(populated, store, path):
 
 def test_one_request_packs_fields_rules_contexts_and_disabled_excluded(populated, store):
     clear(store)
-    store.add_hotword('别的词', '不存在')
-    store.add_hotword('不要发送', '禁用词')
+    seed_rule(store, '别的词', '不存在')
+    seed_rule(store, '不要发送', '禁用词')
     disabled = next(r for r in store.list_hotwords() if r.term == '不要发送')
     store.toggle_hotword(disabled.id)
     requests = []
@@ -71,8 +73,9 @@ def test_one_request_packs_fields_rules_contexts_and_disabled_excluded(populated
         return answer(request)
     before = recording_rows(store)
     result, = run_judgments(store, settings=SETTINGS, transport=httpx.MockTransport(handler))
-    assert result['apply'] == 10 and result['skip'] == 2 and not result['request_failed']
-    assert all(r['system'] == SYSTEM for r in requests)
+    assert result['apply'] == 6 and result['skip'] == 2 and result['request_failed']
+    assert result['judge_failed'] == 2  # Repeated ambiguous AI spans are conservatively rejected.
+    assert all(r['system'].startswith(SYSTEM) for r in requests)
     assert all('不要发送' not in r['messages'][0]['content'] for r in requests)
     assert len(store.hotword_checks('hotword')) == 6
     assert not any(d['hotword_id'] == disabled.id for d in store.hotword_decisions('hotword'))
@@ -190,7 +193,7 @@ def test_in_flight_stale_judgment_does_not_overwrite_content_rules_or_revoke(pop
                 store.upsert_recording(RecordingMeta(r.recording_id, r.title, r.created_at, r.duration_min), RecordingDetail('hotword', '新文本', BODY, True, True), 'later')
             elif change == 'rule':
                 word = store.list_hotwords()[0]
-                store.update_hotword(word.id, '不同事物', word.aliases, '')
+                store.update_hotword(word.id, '不同事物', '')
             else: revoke(store, store.list_hotwords()[0].id)
         return answer(request)
     result, = run_judgments(store, settings=SETTINGS, transport=httpx.MockTransport(handler), force=True)
@@ -275,7 +278,7 @@ def test_trace_counts_actual_replacements_and_escapes_reason(populated, store):
 
 def test_rule_change_invalidates_approval_and_delete_cleans_rows(populated, store):
     word = store.list_hotwords()[0]
-    assert store.update_hotword(word.id, '新指代', word.aliases, '')
+    assert store.update_hotword(word.id, '新指代', '')
     assert all(d['hotword_id'] != word.id for d in store.hotword_decisions('hotword'))
     assert '新指代' not in populated.get('/recordings/hotword').text
     approve_rules(store)

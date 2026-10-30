@@ -1,3 +1,4 @@
+from hotword_fixtures import seed_rule
 """Offline integration checks for opt-in edits, synchronization and CSRF."""
 import hashlib
 import json
@@ -56,7 +57,7 @@ def test_save_display_trace_and_revert(editing, store, field):
     assert response.status_code == 200
     data = response.json()
     assert data['saved'] is True and data['suggestions'] == [
-        {'aliases': '小红直播', 'term': '小鹿直播'}, {'aliases': 'AI 助手', 'term': 'AI Tutor'}]
+        {'term': '小鹿直播'}, {'term': 'AI Tutor'}]
     saved = store.get_overrides('edit-test')[field]
     assert saved['content_md'] == NEW and saved['updated_at'] == data['updated_at']
     html = editing.get(PATH + '?view=' + field).text
@@ -90,7 +91,7 @@ def test_actual_sync_preserves_override_then_revert_uses_latest_base(editing, st
 def test_fields_are_independent_and_second_save_diffs_previous_override(editing, store):
     post(editing, field='summary')
     result = post(editing, field='summary', content='小鹿直播\n\nAI Mentor').json()
-    assert result['suggestions'] == [{'aliases': 'AI Tutor', 'term': 'AI Mentor'}]
+    assert result['suggestions'] == [{'term': 'AI Mentor'}]
     post(editing, field='transcript', content='人工修改转写')
     assert len(store.get_overrides('edit-test')) == 2
     post(editing, action='revert')
@@ -98,15 +99,15 @@ def test_fields_are_independent_and_second_save_diffs_previous_override(editing,
 
 
 def test_editor_starts_with_hotword_display_and_override_is_authoritative(editing, store):
-    store.add_hotword('小鹿直播', '小红直播')
+    seed_rule(store, '小鹿直播', '小红直播')
     from test_hotwords import approve_rules
     approve_rules(store, 'edit-test')
     html = editing.get(PATH).text
     aliases = json.loads(re.search(r'<script id="edit-source"[^>]*>(.*?)</script>', html, re.S)[1])
     assert aliases == '小鹿直播\n\nAI 助手'
     result = post(editing, content='小鹿直播\n\nAI Tutor').json()
-    assert result['suggestions'] == [{'aliases': 'AI 助手', 'term': 'AI Tutor'}]
-    store.add_hotword('再次替换', '小鹿直播')
+    assert result['suggestions'] == [{'term': 'AI Tutor'}]
+    seed_rule(store, '再次替换', '小鹿直播')
     assert '小鹿直播' in visible(editing.get(PATH).text)
     assert '再次替换' not in visible(editing.get(PATH).text)
 
@@ -146,10 +147,10 @@ def test_exports_and_body_api_use_overrides(editing, store, path):
 
 
 @pytest.mark.parametrize('old,new,expected', [
-    ('abcdef错ghijkl', 'abcdef对ghijkl', [{'aliases': '错', 'term': '对'}]),
+    ('abcdef错ghijkl', 'abcdef对ghijkl', [{'term': '对'}]),
     ('abcXYZdef', 'abcNEWXYZdef', []),
-    ('小红直播', '小鹿直播', [{'aliases': '小红直播', 'term': '小鹿直播'}]),
-    ('AI 助手', 'AI Tutor', [{'aliases': 'AI 助手', 'term': 'AI Tutor'}]),
+    ('小红直播', '小鹿直播', [{'term': '小鹿直播'}]),
+    ('AI 助手', 'AI Tutor', [{'term': 'AI Tutor'}]),
     ('相同', '相同', []), ('你好，世界！', '你好 世界。', []),
     ('AI 助手', 'AI  助手', []), ('a,b,a', 'ab,a', []),
     ('删除词', '', []), ('', '新增全文没有可替换原词', []),
@@ -162,7 +163,7 @@ def test_diff_caps_three_and_ignores_punctuation_before_valid_changes():
     old = '，\n' + '\n'.join('abcdefghijkl' + char + 'mnopqrstuvwx' for char in '甲乙丙丁戊')
     new = '。\n' + '\n'.join('abcdefghijkl' + char + 'mnopqrstuvwx' for char in '一二三四五')
     assert diff_suggestions(old, new) == [
-        {'aliases': a, 'term': b}
+        {'term': b}
         for a, b in zip('甲乙丙', '一二三')]
 
 
@@ -170,19 +171,19 @@ def test_bulk_confirmation_skips_existing_and_is_idempotent(editing, store):
     response = post(editing)
     assert store.list_hotwords() == []  # Closing/ignoring suggestions cannot insert.
     items = response.json()['suggestions']
-    store.add_hotword(items[0]['term'], '已有提示')
+    seed_rule(store, items[0]['term'], '已有提示')
     data = {'csrf_token': token(editing), 'items': json.dumps(items)}
     counts = editing.post('/hotwords/bulk', data=data).json()
     assert counts == {'added': 1, 'existing': 1, 'message': '已存入 1 条，已存在 1 条'}
     assert editing.post('/hotwords/bulk', data=data).json()['existing'] == 2
-    assert next(word for word in store.list_hotwords() if word.term == items[0]['term']).aliases == '已有提示'
+    assert not hasattr(next(word for word in store.list_hotwords() if word.term == items[0]['term']), 'aliases')
     assert store.get_overrides('edit-test')['summary']['content_md'] == NEW
 
 
-@pytest.mark.parametrize('items', [[], [{}], [{'aliases': 'a', 'term': ''}],
-                                   [{'aliases': 'a', 'term': 'c\nd'}],
-                                   [{'aliases': 'a', 'term': 1}], ['a'],
-                                   [{'aliases': 'a', 'term': 'b'}] * 4])
+@pytest.mark.parametrize('items', [[], [{}], [{'term': ''}],
+                                   [{'term': 'c\nd'}],
+                                   [{'term': 1}], ['a'],
+                                   [{'term': 'b'}] * 4])
 def test_invalid_bulk_is_atomic(editing, store, items):
     assert editing.post('/hotwords/bulk', data={'csrf_token': token(editing), 'items': json.dumps(items)}).status_code == 400
     assert store.list_hotwords() == []
@@ -245,4 +246,4 @@ def test_detail_csrf_coexists_with_other_admin_pages(editing):
 def test_diff_preserves_corrections_inside_repetitive_long_transcript():
     old = '甲' * 1000 + '错' + '甲' * 1000
     new = '甲' * 1000 + '对' + '甲' * 1000
-    assert diff_suggestions(old, new) == [{'aliases': '错', 'term': '对'}]
+    assert diff_suggestions(old, new) == [{'term': '对'}]

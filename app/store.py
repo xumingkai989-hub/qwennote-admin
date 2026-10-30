@@ -77,7 +77,6 @@ class ApiKey:
 class Hotword:
     id: int
     term: str
-    aliases: str
     note: str
     enabled: bool
     hits: int
@@ -104,9 +103,9 @@ class Store(SyncStore, Protocol):
 
     def list_hotwords(self) -> list[Hotword]: ...
 
-    def add_hotword(self, term: str, aliases: str = '', note: str = '') -> None: ...
+    def add_hotword(self, term: str, note: str = '') -> None: ...
 
-    def update_hotword(self, hotword_id: int, term: str, aliases: str, note: str) -> bool: ...
+    def update_hotword(self, hotword_id: int, term: str, note: str) -> bool: ...
 
     def delete_hotword(self, hotword_id: int) -> bool: ...
 
@@ -411,9 +410,9 @@ class SQLiteStore:
             if current is None or any((current[key] or '') != (getattr(recording, key) or '')
                     for key in ('title', 'summary_md', 'transcript_md', 'has_summary', 'has_transcript')):
                 return False
-            active = [(r['id'], r['term'], r['aliases'], r['updated_at']) for r in conn.execute(
+            active = [(r['id'], r['term'], r['updated_at']) for r in conn.execute(
                 'SELECT * FROM hotwords WHERE enabled=1 ORDER BY length(term) DESC, id')]
-            if active != [(r.id, r.term, r.aliases, r.updated_at) for r in rules]:
+            if active != [(r.id, r.term, r.updated_at) for r in rules]:
                 return False
             existing = [dict(row) for row in conn.execute(
                 'SELECT * FROM recording_hotword_decisions WHERE recording_id=? ORDER BY hotword_id, field, start_offset, id',
@@ -497,30 +496,30 @@ class SQLiteStore:
             conn.execute('BEGIN IMMEDIATE')
             for item in items:
                 added += conn.execute(
-                    'INSERT INTO hotwords (term,aliases,created_at,updated_at) VALUES (?,?,?,?) '
+                    'INSERT INTO hotwords (term,created_at,updated_at) VALUES (?,?,?) '
                     'ON CONFLICT(term) DO NOTHING',
-                    (item['term'], item.get('aliases', ''), now, now)).rowcount
+                    (item['term'], now, now)).rowcount
         return {'added': added, 'existing': len(items) - added}
 
-    def add_hotword(self, term: str, aliases: str = '', note: str = '') -> None:
+    def add_hotword(self, term: str, note: str = '') -> None:
         from app.hotwords import validate_hotword
-        validate_hotword(term, aliases, note)
+        validate_hotword(term, note)
         now = datetime.now(timezone.utc).isoformat()
         with self._connect() as conn:
-            conn.execute('INSERT INTO hotwords (term, aliases, note, created_at, updated_at) '
-                         'VALUES (?, ?, ?, ?, ?)', (term, aliases, note, now, now))
+            conn.execute('INSERT INTO hotwords (term, note, created_at, updated_at) '
+                         'VALUES (?, ?, ?, ?)', (term, note, now, now))
 
-    def update_hotword(self, hotword_id: int, term: str, aliases: str, note: str) -> bool:
+    def update_hotword(self, hotword_id: int, term: str, note: str) -> bool:
         from app.hotwords import validate_hotword
-        validate_hotword(term, aliases, note)
+        validate_hotword(term, note)
         with self._connect() as conn:
             conn.execute('BEGIN IMMEDIATE')
-            old = conn.execute('SELECT term, aliases FROM hotwords WHERE id=?', (hotword_id,)).fetchone()
-            if old and (old['term'], old['aliases']) != (term, aliases):
+            old = conn.execute('SELECT term FROM hotwords WHERE id=?', (hotword_id,)).fetchone()
+            if old and old['term'] != term:
                 conn.execute('DELETE FROM recording_hotword_decisions WHERE hotword_id=?', (hotword_id,))
                 conn.execute('DELETE FROM recording_hotword_checks WHERE hotword_id=?', (hotword_id,))
-            return conn.execute('UPDATE hotwords SET term=?, aliases=?, note=?, updated_at=?, needs_review=0 WHERE id=?',
-                                (term, aliases, note, datetime.now(timezone.utc).isoformat(), hotword_id)).rowcount > 0
+            return conn.execute('UPDATE hotwords SET term=?, note=?, updated_at=?, needs_review=0 WHERE id=?',
+                                (term, note, datetime.now(timezone.utc).isoformat(), hotword_id)).rowcount > 0
 
     def delete_hotword(self, hotword_id: int) -> bool:
         with self._connect() as conn:

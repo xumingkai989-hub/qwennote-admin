@@ -1,3 +1,4 @@
+from hotword_fixtures import seed_rule
 """Work order 17: real migration, occurrence isolation and alias-independent discovery."""
 import json
 import re
@@ -37,11 +38,11 @@ def test_legacy_migration_merges_targets_accumulates_hits_and_removes_columns(st
     rows = {r.term: r for r in store.list_hotwords()}
     assert set(rows) == {'小鹿直播', '人工智能'}
     word = rows['小鹿直播']
-    assert (word.id, word.aliases, word.hits, word.enabled) == (7, '小鹅直播,小路直播', 17, True)
+    assert (word.id, word.hits, word.enabled) == (7, 17, True)
     assert word.note == '首条；次条' and (word.created_at, word.updated_at) == ('2026-01', '2026-03')
     with store._connect() as c:
         assert {r['name'] for r in c.execute('PRAGMA table_info(hotwords)')} == {
-            'id', 'term', 'aliases', 'note', 'enabled', 'hits', 'created_at', 'updated_at', 'needs_review'}
+            'id', 'term', 'note', 'enabled', 'hits', 'created_at', 'updated_at', 'needs_review'}
     assert store.hotword_decisions('legacy') == []
     store.migrate()
     assert {r.term: r for r in store.list_hotwords()} == rows
@@ -67,7 +68,7 @@ def test_failed_migration_rolls_back_all_hotword_changes(store, monkeypatch, fai
 def isolated(store, text='产品用小鹅直播；人名叫小鹅直播。'):
     clear(store)
     for w in store.list_hotwords(): store.delete_hotword(w.id)
-    store.add_hotword('小鹿直播', '小鹅直播')
+    seed_rule(store, '小鹿直播', '小鹅直播')
     with store._connect() as c:
         c.execute("UPDATE recordings SET summary_md=?,transcript_md=? WHERE recording_id='hotword'", (text, text))
     rule, = store.list_hotwords()
@@ -128,7 +129,7 @@ def test_span_validation_and_unlisted_alias_discovery(populated, store, kind):
     rule = isolated(store, text='产品用小路直播。') if kind == 'unlisted' else isolated(store)
     clear(store)
     if kind == 'unlisted':
-        store.update_hotword(rule.id, rule.term, '', '')  # Discover an unlisted spelling without any alias.
+        store.update_hotword(rule.id, rule.term, '')  # Discover an unlisted spelling without any alias.
     original = recording_rows(store)
     def handler(request):
         if kind == 'unlisted':
@@ -182,10 +183,10 @@ def test_only_standard_term_is_required_in_form(client, store):
     assert '替换为' not in page and 'name="source"' not in page and 'name="target"' not in page
     assert '还没有热词。添加后，AI 会在新内容里识别可能的其它写法并替换成你的标准词' in page
     form = re.search(r'<form method="post" action="/hotwords".*?</form>', page, re.S)[0]
-    assert re.findall(r'<label>(.*?)<input', form) == ['标准词（必填）', '别名提示（选填，逗号分隔）', '备注（选填）']
+    assert re.findall(r'<label>(.*?)<input', form) == ['标准词（必填）', '备注（选填）']
     assert post(client, term='小鹿直播').status_code == 303
     word, = store.list_hotwords()
-    assert word.term == '小鹿直播' and word.aliases == word.note == ''
+    assert word.term == '小鹿直播' and word.note == ''
 
 
 def test_missing_decision_id_cannot_revoke_entire_field(populated, store):
@@ -211,7 +212,8 @@ def test_legacy_apply_appearing_during_deployment_is_archived_before_rule_merge(
     store.migrate()
     with store._connect() as c:
         row = dict(c.execute('SELECT * FROM recording_hotword_legacy_decisions').fetchone())
-        assert (row['hotword_id'], row['source'], row['target'], row['decision'], row['reason']) == (7, '小鹅直播', '小鹿直播', 'apply', '旧判断')
+        assert (row['hotword_id'], row['target'], row['decision'], row['reason']) == (7, '小鹿直播', 'apply', '旧判断')
+        assert 'source' not in row
         assert row['archived_at'] and row['decided_at'] == '2026-01'
         assert c.execute('SELECT count(*) FROM recording_hotword_decisions').fetchone()[0] == 0
     store.migrate()

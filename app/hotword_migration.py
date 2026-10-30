@@ -2,7 +2,7 @@
 
 HOTWORDS = """CREATE TABLE {table} (
     id INTEGER PRIMARY KEY, term TEXT NOT NULL UNIQUE,
-    aliases TEXT NOT NULL DEFAULT '', note TEXT NOT NULL DEFAULT '',
+    note TEXT NOT NULL DEFAULT '',
     enabled INTEGER NOT NULL DEFAULT 1, hits INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL, updated_at TEXT NOT NULL)"""
 DECISIONS = """CREATE TABLE recording_hotword_decisions (
@@ -29,11 +29,11 @@ def migrate_hotwords(conn):
             id INTEGER PRIMARY KEY, recording_id TEXT NOT NULL, hotword_id INTEGER NOT NULL,
             field TEXT NOT NULL, decision TEXT NOT NULL, reason TEXT NOT NULL, decided_at TEXT NOT NULL,
             source TEXT NOT NULL, target TEXT NOT NULL, archived_at TEXT NOT NULL)""")
-        source, target = ('h.source', 'h.target') if 'source' in old else ('h.aliases', 'h.term')
+        target = 'h.target' if 'source' in old else 'h.term'
         conn.execute(f"""INSERT INTO recording_hotword_legacy_decisions
             (recording_id,hotword_id,field,decision,reason,decided_at,source,target,archived_at)
             SELECT d.recording_id,d.hotword_id,d.field,d.decision,d.reason,d.decided_at,
-            coalesce({source},''),coalesce({target},''),strftime('%Y-%m-%dT%H:%M:%fZ','now')
+            '',coalesce({target},''),strftime('%Y-%m-%dT%H:%M:%fZ','now')
             FROM recording_hotword_decisions d LEFT JOIN hotwords h ON h.id=d.hotword_id""")
     if 'source' in old:
         conn.execute(HOTWORDS.format(table='hotwords_standard'))
@@ -42,12 +42,9 @@ def migrate_hotwords(conn):
             row = dict(row)
             term = row['target']
             if term not in merged:
-                merged[term] = dict(id=row['id'], term=term, aliases=[], note=[], enabled=0,
+                merged[term] = dict(id=row['id'], term=term, note=[], enabled=0,
                                     hits=0, created_at=row['created_at'], updated_at=row['updated_at'])
             item = merged[term]
-            # Preserve every distinct original spelling and note, including commas in legacy sources.
-            if row['source'] not in item['aliases']:
-                item['aliases'].append(row['source'])
             if row['note'] and row['note'] not in item['note']:
                 item['note'].append(row['note'])
             item['enabled'] = max(item['enabled'], row['enabled'])
@@ -55,16 +52,27 @@ def migrate_hotwords(conn):
             item['created_at'] = min(item['created_at'], row['created_at'])
             item['updated_at'] = max(item['updated_at'], row['updated_at'])
         for item in merged.values():
-            conn.execute('INSERT INTO hotwords_standard VALUES (?,?,?,?,?,?,?,?)',
-                         (item['id'], item['term'], ','.join(item['aliases']), '；'.join(item['note']),
+            conn.execute('INSERT INTO hotwords_standard VALUES (?,?,?,?,?,?,?)',
+                         (item['id'], item['term'], '；'.join(item['note']),
                           item['enabled'], item['hits'], item['created_at'], item['updated_at']))
         conn.execute('DROP TABLE hotwords')
         conn.execute('ALTER TABLE hotwords_standard RENAME TO hotwords')
     elif not old:
         conn.execute(HOTWORDS.format(table='hotwords'))
+    # Rebuild inside the caller's transaction. Discard obsolete content directly;
+    # never copy it into audit, notes, or another table.
+    if 'aliases' in columns(conn, 'hotwords'):
+        conn.execute(HOTWORDS.format(table='hotwords_clean'))
+        conn.execute('ALTER TABLE hotwords_clean ADD COLUMN needs_review INTEGER NOT NULL DEFAULT 0 CHECK(needs_review IN (0,1))')
+        review = 'needs_review' if 'needs_review' in old else '0'
+        conn.execute('INSERT INTO hotwords_clean SELECT id,term,note,enabled,hits,created_at,updated_at,' + review + ' FROM hotwords')
+        conn.execute('DROP TABLE hotwords')
+        conn.execute('ALTER TABLE hotwords_clean RENAME TO hotwords')
+    if 'source' in columns(conn, 'recording_hotword_legacy_decisions'):
+        conn.execute('ALTER TABLE recording_hotword_legacy_decisions DROP COLUMN source')
     if 'needs_review' not in columns(conn, 'hotwords'):
         conn.execute('ALTER TABLE hotwords ADD COLUMN needs_review INTEGER NOT NULL DEFAULT 0 CHECK(needs_review IN (0,1))')
-    # Only flag legacy data. Never normalize or overwrite a user's term/aliases.
+    # Only flag legacy data. Never normalize or overwrite a user's term.
     from app.hotwords import SENTENCE_PUNCTUATION
     for row in conn.execute('SELECT id,term FROM hotwords'):
         if len(row['term']) > 20 or any(c in SENTENCE_PUNCTUATION for c in row['term']):

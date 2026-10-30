@@ -156,6 +156,8 @@ class McpMinutesSource(HttpMinutesSource):
                             break
                 else:
                     payload = response.json()
+                if isinstance(payload, dict) and 'error' in payload:
+                    raise MinutesSourceError(self._rpc_error_message(payload['error']))
                 if (not isinstance(payload, dict) or payload.get('jsonrpc') != '2.0'
                         or payload.get('id') != message['id'] or 'error' in payload
                         or not isinstance(payload.get('result'), dict)):

@@ -16,6 +16,7 @@ from app.hotword_upstream import HttpHotwordSource
 def build(db_path):
     app = preview(db_path)
     server = Server()
+    server.failing_terms = {'失败词'}
     server.words = ['上游候选', '另一个词', '小 鹅 直播', '已同步词']
     app.state.hotword_source = HttpHotwordSource('offline-only', transport=httpx.MockTransport(server))
     base = app.router.lifespan_context
@@ -24,8 +25,9 @@ def build(db_path):
     async def lifespan(application):
         async with base(application):
             store = app.state.store
-            store.add_hotword('小鹿直播', '小鹅直播')
-            store.add_hotword('AI Tutor')
+            store.add_hotword('小鹿直播')
+            store.add_hotword('AI Tutor', note='英文标准词')
+            store.add_hotword('失败词')
             seed(store, '停用词', enabled=0)
             seed(store, 'bad-word')
             seed(store, '字'*21)

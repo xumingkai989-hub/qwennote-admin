@@ -1,3 +1,4 @@
+from hotword_fixtures import seed_rule
 """Presentation-only provenance cleanup, shared exits and inline editing contract."""
 import hashlib
 import secrets
@@ -38,8 +39,8 @@ def provenance(client, store):
     body = '小{origin:1}红直播  {origin:2}  内容\n\n{origin:3}\n\n最后一句{origin:4}   '
     meta = RecordingMeta('origin-test', '展示测试', datetime(2026, 10, 30, 10, tzinfo=SHANGHAI), 5)
     store.upsert_recording(meta, RecordingDetail('origin-test', body, body, True, True), 'original')
-    store.add_hotword('小鹿直播', '小红直播')
-    store.add_hotword('标记不能先变热词', 'origin')
+    seed_rule(store, '小鹿直播', '小红直播')
+    seed_rule(store, '标记不能先变热词', 'origin')
     from test_hotwords import approve_rules
     approve_rules(store, 'origin-test')
     login(client)

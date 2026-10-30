@@ -30,29 +30,12 @@ def word_error(value: str) -> str:
     return ''
 
 
-def clean_aliases(aliases: str) -> tuple[str, list[dict[str, str]]]:
-    """Commas delimit hints; validate each hint without silently rewriting it."""
-    valid, skipped = [], []
-    for raw in re.split('[,，]', aliases):
-        if not raw:
-            continue
-        error = word_error(raw)
-        if error:
-            skipped.append({'alias': raw, 'error': error})
-        elif raw.strip() not in valid:
-            valid.append(raw.strip())
-    return ','.join(valid), skipped
-
-
-def validate_hotword(term: str, aliases: str = '', note: str = '') -> None:
+def validate_hotword(term: str, note: str = '') -> None:
     error = word_error(term)
     if error:
         raise ValueError(error)
-    if (len(aliases) > 1000 or len(note) > 1000
-            or any(ord(c) < 32 or ord(c) == 127 for c in note)):
-        raise ValueError('别名提示和备注最多 1000 字；备注须为单行。')
-    if clean_aliases(aliases)[1]:
-        raise ValueError('别名须逐条符合词语规则。')
+    if len(note) > 1000 or any(ord(c) < 32 or ord(c) == 127 for c in note):
+        raise ValueError('备注最多 1000 字，须为单行。')
 
 
 def valid_judge_span(span: str) -> bool:

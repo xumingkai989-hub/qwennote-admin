@@ -1,3 +1,4 @@
+from hotword_fixtures import seed_rule
 """Synthetic approved/skipped/pending records for hotword browser acceptance."""
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -18,7 +19,7 @@ def build(directory):
     async def lifespan(application):
         async with base(application):
             store = app.state.store
-            store.add_hotword('小鹿直播', '小红直播')
+            seed_rule(store, '小鹿直播', '小红直播')
             for suffix in ['summary', 'transcript', 'mobile', 'dark']:
                 approve_rules(store, 'preview-' + suffix)
             yield

@@ -19,16 +19,16 @@ from test_recording_edit import editing, token
 
 
 @pytest.mark.parametrize('old,new,expected', [
-    ('本次会议中小鹅直播的转化率', '本次会议中小鹿直播的转化率', [{'aliases': '小鹅直播', 'term': '小鹿直播'}]),
-    ('讨论：小鹅直播，今天上线', '讨论：小鹿直播，今天上线', [{'aliases': '小鹅直播', 'term': '小鹿直播'}]),
+    ('本次会议中小鹅直播的转化率', '本次会议中小鹿直播的转化率', [{'term': '小鹿直播'}]),
+    ('讨论：小鹅直播，今天上线', '讨论：小鹿直播，今天上线', [{'term': '小鹿直播'}]),
     ('原文', '原文新增文字', []),
     ('AI Tutor', 'ai tutor', []),
     ('AI Tutor', 'AI  Tutor', []),
     ('小 鹅直播', '小鹅直播', []),
     ('甲' * 13, '乙' * 13, []),
     ('A' * 25, 'B' * 25, []),
-    ('「甲词」', '「乙词」', [{'aliases': '甲词', 'term': '乙词'}]),
-    ('原词\n丢弃', '新词\n', [{'aliases': '原词', 'term': '新词'}]),
+    ('「甲词」', '「乙词」', [{'term': '乙词'}]),
+    ('原词\n丢弃', '新词\n', [{'term': '新词'}]),
 ])
 def test_word_diff(old, new, expected):
     assert diff_suggestions(old, new) == expected
@@ -52,26 +52,26 @@ def test_term_boundaries_pass(client, store, term):
 
 
 @pytest.mark.parametrize('alias', ['甲。乙', '甲\n乙', '甲  乙', '<标签>', '字' * 21])
-def test_invalid_alias_skipped_and_reported(client, store, alias):
+def test_obsolete_field_is_ignored_without_persisting(client, store, alias):
     login(client)
     result = post(client, term='标准词', aliases='好词,' + alias + ',另一个词')
-    assert result.status_code == 200 and '已跳过' in result.text
-    assert store.list_hotwords()[0].aliases == '好词,另一个词'
+    assert result.status_code == 303
+    assert not hasattr(store.list_hotwords()[0], 'aliases')
 
 
 def test_bulk_rejects_invalid_term_atomically(editing, store):
     result = editing.post('/hotwords/bulk', data={'csrf_token': token(editing), 'items': json.dumps([
-        {'term': '标准词', 'aliases': '旧词'}, {'term': '整句，词', 'aliases': '旧词'}])})
+        {'term': '标准词'}, {'term': '整句，词'}])})
     assert result.status_code == 400 and '标点' in result.json()['detail']
     assert store.list_hotwords() == []
 
 
-def test_bulk_reports_skipped_aliases(editing, store):
+def test_bulk_stores_only_standard_term(editing, store):
     result = editing.post('/hotwords/bulk', data={'csrf_token': token(editing), 'items': json.dumps([
-        {'term': '标准词', 'aliases': '好词,整句。词,<标签>'}])})
+        {'term': '标准词'}])})
     assert result.status_code == 200
-    assert result.json()['added'] == 1 and len(result.json()['skipped_aliases']) == 2
-    assert store.list_hotwords()[0].aliases == '好词'
+    assert result.json()['added'] == 1
+    assert not hasattr(store.list_hotwords()[0], 'aliases')
 
 
 @pytest.mark.parametrize('term', ['整句话，包含标点。', '甲' * 21])
@@ -84,7 +84,7 @@ def test_startup_flags_legacy_without_rewriting(settings, fake_auth, store, term
         conn.execute("INSERT INTO hotwords VALUES (7,?,'旧别名','原备注',1,17,'old','old')", (term,))
     with TestClient(create_app(settings=settings, store=store, feishu_auth=fake_auth), follow_redirects=False) as client:
         word, = store.list_hotwords()
-        assert word.needs_review == 1 and (word.term, word.aliases, word.note, word.hits) == (term, '旧别名', '原备注', 17)
+        assert word.needs_review == 1 and (word.term, word.note, word.hits) == (term, '原备注', 17)
         login(client)
         page = client.get('/hotwords').text
         assert '这条像是整句，建议改成词语本身' in page and '/hotwords/7/update' in page
