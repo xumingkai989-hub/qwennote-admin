@@ -338,3 +338,5 @@ LD_LIBRARY_PATH=/opt/qwennote/current/.sqlite/lib \
 回归 **428 项 Python + 14 项 JavaScript 测试**。保留原有 412 项 Python 用例，更新与本次删改相关的展示断言，新增 16 项；删除项和指定保留项逐条验证。Chrome 对 20 种正常/空/错误状态分别检查 1440、1024、390px，共 60 组，无页面或管理表格横向溢出、可见空说明、孤立标点，空状态无无内容分隔线。
 
 1440px 的 home/detail/admin 新旧对比截图、390px 截图、测量 JSON、完整 HTML 报告保存于仓库外 `../qwennote-admin-artifacts/04g-20261030/`。截图使用同一组合成数据；上线经 `scripts/deploy.py --app-only`，发布目录与线上哈希核验记录在该交付目录。
+
+工单 04h 将详情版心恢复为与主页一致的 **1120px 外框 / 固定 16px 页边距**，1440px 视口的 section 宽 1088px；总结和转写正文行高 1.75，转写段间距 24px。该规格替代上文 04d / 04f 的窄版参数。六视口实测表与浏览器回归运行方式见 [04h 版心验收](docs/detail-layout-04h.md)。

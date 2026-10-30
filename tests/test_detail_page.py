@@ -479,14 +479,24 @@ def test_detail_views_share_one_layout_container(detail_client, view):
 def test_detail_layout_width_and_gutter_contract(detail_client):
     css = detail_client.get('/static/app.css').text
     frame = re.search(r'\.detail-layout \{([^}]+)\}', css)[1]
-    assert '--content-max: 760px;' in frame
-    assert '--gutter: 24px;' in frame
+    assert '--content-max: 1120px;' in frame
+    assert '--gutter: 16px;' in frame
     assert 'max-width: var(--content-max);' in frame
     assert 'padding: 0 var(--gutter) 48px;' in frame
     assert 'margin-inline: auto;' in frame
-    for query, gutter in [('min-width: 900px', 32), ('max-width: 639.98px', 16)]:
-        assert re.search(r'@media \(' + re.escape(query) + r'\)\s*\{\s*\.detail-layout \{ --gutter: ' + str(gutter) + r'px;', css)
+    assert css.count('--gutter:') == 1
     assert '.detail-view-switch { margin-top: 16px;' in css
     assert '.transcript-segments { width: 100%; }' in css
     summary = re.search(r'\.detail-section\.summary-document \{([^}]+)\}', css)[1]
     assert 'max-width' not in summary and 'padding' not in summary
+
+
+def test_detail_long_text_readability(detail_client):
+    css = detail_client.get('/static/app.css').text
+    for selector in ['.transcript-body', '.detail-section.summary-document',
+                     '.summary-document .markdown-body p']:
+        rule = re.search(re.escape(selector) + r' \{([^}]+)\}', css)[1]
+        assert 'line-height: 1.75;' in rule
+    for selector in ['.transcript-segment + .transcript-segment',
+                     '.transcript-paragraph + .transcript-paragraph']:
+        assert selector + ' { margin-top: 24px; }' in css

@@ -120,13 +120,7 @@ h1 { margin: 0; font-size: 34px; line-height: 1.2; font-weight: 700; letter-spac
 .pagination a, .pagination > span { display: inline-flex; align-items: center; justify-content: center; min-width: 44px; min-height: 44px; }
 [aria-disabled="true"] { color: var(--secondary); }
 /* One border-box frame owns every detail view's width and gutters. */
-.detail-layout { --content-max: 760px; --gutter: 24px; width: 100%; max-width: var(--content-max); margin-inline: auto; padding: 0 var(--gutter) 48px; }
-@media (min-width: 900px) {
-  .detail-layout { --gutter: 32px; }
-}
-@media (max-width: 639.98px) {
-  .detail-layout { --gutter: 16px; }
-}
+.detail-layout { --content-max: 1120px; --gutter: 16px; width: 100%; max-width: var(--content-max); margin-inline: auto; padding: 0 var(--gutter) 48px; }
 .detail-header { position: sticky; top: 0; z-index: 3; display: grid; grid-template-columns: 46px minmax(0, 1fr) auto; gap: 8px; align-items: center; background: var(--background); }
 #back-to-list { display: inline-flex; align-items: center; justify-content: center; width: 46px; height: 46px; border-radius: 10px; font-size: 24px; }
 #back-to-list:hover { background: var(--hover); text-decoration: none; }
@@ -166,15 +160,15 @@ h1 { margin: 0; font-size: 34px; line-height: 1.2; font-weight: 700; letter-spac
 .transcript-segments { width: 100%; }
 .transcript-segment { display: grid; grid-template-columns: 36px 72px minmax(0, 1fr); column-gap: 12px; row-gap: 6px; align-items: start; position: relative; margin-inline: -8px; padding: 0 8px; border-radius: 8px; cursor: pointer; transition: background-color 120ms; scroll-margin-top: 80px; }
 .transcript-segment[hidden] { display: none; }
-.transcript-segment + .transcript-segment { margin-top: 20px; }
+.transcript-segment + .transcript-segment { margin-top: 24px; }
 .transcript-segment:hover { background: var(--transcript-hover); }
 .transcript-segment:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .speaker-avatar { grid-column: 1; grid-row: 1 / 3; display: flex; justify-content: center; align-items: center; width: 36px; height: 36px; border-radius: 50%; background: var(--speaker-bg); color: var(--speaker-color); font-size: 16px; font-weight: 500; }
 .speaker-name { grid-column: 2; grid-row: 1 / 3; padding-top: 6px; color: var(--speaker-color); font-size: 14px; font-weight: 500; }
 .timestamp { grid-column: 3; grid-row: 1; justify-self: start; padding: 2px 6px; border-radius: 6px; background: var(--timestamp-bg); font-size: 12px; line-height: 20px; color: var(--timestamp-text); }
-.transcript-body { grid-column: 3; grid-row: 2; min-width: 0; color: var(--transcript-text); font-size: 16px; line-height: 1.7; }
+.transcript-body { grid-column: 3; grid-row: 2; min-width: 0; color: var(--transcript-text); font-size: 16px; line-height: 1.75; }
 .transcript-paragraph { margin: 0; white-space: pre-wrap; }
-.transcript-paragraph + .transcript-paragraph { margin-top: 20px; }
+.transcript-paragraph + .transcript-paragraph { margin-top: 24px; }
 .transcript-segment.is-match { background: #FFF9E6; --transcript-text: #1C1C1E; --timestamp-bg: #F2F2F7; --timestamp-text: #636366; }
 .transcript-segment.is-match .speaker-name { color: var(--speaker-color); }
 .transcript-search-status { text-align: center; color: var(--secondary); font-size: 14px; }
@@ -255,7 +249,7 @@ mark { background: var(--mark); color: var(--text); border-radius: 2px; }
   --document-code: #F2F2F7;
   --document-rule: #E5E5EA;
   --document-quote: #D1D1D6;
-  background: #FFFFFF; color: var(--document-text); font-size: 16px; line-height: 1.8;
+  background: #FFFFFF; color: var(--document-text); font-size: 16px; line-height: 1.75;
 }
 .summary-disclaimer { margin: 8px 0 0; font-size: 12px; color: #8E8E93; }
 .summary-document .markdown-body { margin-top: 12px; }
@@ -267,7 +261,7 @@ mark { background: var(--mark); color: var(--text); border-radius: 2px; }
 .summary-document .summary-h2 { font-size: 19px; font-weight: 600; margin: 24px 0 8px; }
 .summary-document .summary-h3 { font-size: 17px; font-weight: 600; margin: 20px 0 6px; }
 .summary-document .markdown-body > :first-child { margin-top: 0; }
-.summary-document .markdown-body p { margin: 0 0 12px; font-size: 16px; line-height: 1.8; }
+.summary-document .markdown-body p { margin: 0 0 12px; font-size: 16px; line-height: 1.75; }
 .summary-document .markdown-body ul,
 .summary-document .markdown-body ol { margin: 12px 0; padding-left: 24px; }
 .summary-document .markdown-body ul { list-style-type: disc; }
