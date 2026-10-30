@@ -16,3 +16,4 @@ data/
 *.tag.lock
 *.scheduler.lock
 *.hotword-judge.lock
+*.hotword-upstream.lock

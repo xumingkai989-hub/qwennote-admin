@@ -542,3 +542,12 @@ p.assistant-note { margin: 12px 0 0; }
   .hotword-field-error { color: #fda29b; }
   .hotword-review { color: #fde68a; background: #422f0c; }
 }
+#qwen-dialog { width: min(600px, calc(100vw - 32px)); max-height: 85vh; overflow: auto; border-radius: 12px; padding: 24px; background: var(--surface); color: var(--text); border: 1px solid var(--separator); }
+#qwen-dialog::backdrop { background: #0008; }
+#qwen-plan { overflow-wrap: anywhere; }
+#qwen-plan label { display: flex; align-items: center; gap: 10px; margin: 12px 0; min-height: 44px; }
+#qwen-plan input { width: 18px; min-height: 18px; height: 18px; padding: 0; flex: 0 0 auto; }
+.hotword-upstream { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 12px; }
+#qwen-feedback:empty, #qwen-dialog-feedback:empty { display: none; }
+
+.qwen-skipped { color: var(--warning-text); }

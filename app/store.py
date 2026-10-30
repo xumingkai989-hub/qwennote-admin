@@ -250,6 +250,8 @@ class SQLiteStore:
             conn.execute('BEGIN IMMEDIATE')
             from app.hotword_migration import migrate_hotwords
             migrate_hotwords(conn)
+            from app.hotword_upstream import migrate as migrate_upstream
+            migrate_upstream(conn)
             user_columns = {row['name'] for row in conn.execute('PRAGMA table_info(users)')}
             if 'subject' not in user_columns:
                 conn.execute("""

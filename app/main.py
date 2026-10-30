@@ -103,6 +103,7 @@ def create_app(
     feishu_auth: FeishuAuth | None = None,
     store: Store | None = None,
     minutes_source: MinutesSource | None = None,
+    hotword_source=None,
 ) -> FastAPI:
     settings = settings if settings is not None else Settings.from_env()
     repository = store if store is not None else SQLiteStore(settings.db_path)
@@ -124,6 +125,7 @@ def create_app(
                           if settings.minutes_source == 'fixture' else
                           McpMinutesSource() if settings.minutes_source == 'mcp' else HttpMinutesSource())
     app.state.minutes_source = minutes_source
+    app.state.hotword_source = hotword_source
     templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
     sessions = SignedCookie(settings.session_secret, salt="web-session", max_age=SESSION_MAX_AGE)
     states = SignedCookie(settings.session_secret, salt="oauth-state", max_age=STATE_MAX_AGE)

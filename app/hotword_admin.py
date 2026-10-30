@@ -3,11 +3,13 @@ import secrets
 import sqlite3
 
 from fastapi import Request
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, JSONResponse
 from starlette.concurrency import run_in_threadpool
 
 from app.session import SESSION_MAX_AGE
 from app.hotwords import validate_hotword, clean_aliases, word_error
+from app import hotword_upstream as upstream
+from app.minutes import MinutesSourceError
 
 
 def install_hotwords(app, *, settings, templates, sessions, authorize, valid_csrf,
@@ -25,6 +27,7 @@ def install_hotwords(app, *, settings, templates, sessions, authorize, valid_csr
             'title': '热词中心', 'hotwords': app.state.store.list_hotwords(),
             'csrf_token': token, 'error': error, 'draft': draft or {},
             'editing_id': editing_id, 'errors': errors or {}, 'notice': notice,
+            'upstream_plan': upstream.plan(app.state.store),
         }, status_code=status, headers={'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer'})
         response.set_cookie('admin_csrf', token, max_age=SESSION_MAX_AGE, httponly=True,
                             secure=settings.secure_cookies, samesite='lax', path='/hotwords')
@@ -35,6 +38,49 @@ def install_hotwords(app, *, settings, templates, sessions, authorize, valid_csr
         denied = access(request)
         return denied if denied is not None else render(request)
 
+    def source():
+        return app.state.hotword_source or upstream.source_for(settings)
+
+    async def upstream_request(request, action):
+        denied = access(request)
+        if denied is not None:
+            return denied
+        fields = await parse_form(request)
+        if not isinstance(fields, dict):
+            return fields
+        store = app.state.store
+        try:
+            if action == 'sync':
+                confirm = fields.get('confirm', [''])[0]
+                if confirm not in ('0', '1'):
+                    return JSONResponse({'error': 'invalid_confirm'}, status_code=400)
+                if confirm == '0':
+                    result = await run_in_threadpool(upstream.plan, store)
+                else:
+                    result = await run_in_threadpool(upstream.execute, store, source(),
+                                                    fields.get('plan_hash', [''])[0])
+            elif action == 'status':
+                result = await run_in_threadpool(upstream.refresh, store, source())
+                result = {k: v for k, v in result.items() if k != 'hotWords'}
+            else:
+                result = await run_in_threadpool(upstream.import_preview, store, source())
+        except (MinutesSourceError, ValueError, OSError):
+            return JSONResponse({'error': 'upstream_unavailable', 'message': '千问热词读取失败，请检查连接后重试。'},
+                                status_code=502, headers={'Cache-Control': 'no-store'})
+        return JSONResponse(result, headers={'Cache-Control': 'no-store'})
+
+    @app.post('/hotwords/sync-qwennote')
+    async def sync_qwennote(request: Request):
+        return await upstream_request(request, 'sync')
+
+    @app.post('/hotwords/import-preview')
+    async def import_preview(request: Request):
+        return await upstream_request(request, 'import')
+
+    @app.post('/hotwords/qwennote-status')
+    async def qwennote_status(request: Request):
+        return await upstream_request(request, 'status')
+
     async def mutate(request, action, hotword_id=None):
         denied = access(request)
         if denied is not None:
@@ -43,6 +89,12 @@ def install_hotwords(app, *, settings, templates, sessions, authorize, valid_csr
         if not isinstance(fields, dict):
             return fields
         values = {name: fields.get(name, [''])[0] for name in ('term', 'aliases', 'note')}
+        if action == 'add' and fields.get('from_upstream', [''])[0] == '1':
+            try:
+                added = await run_in_threadpool(upstream.import_selected, app.state.store, values['term'])
+            except ValueError as exc:
+                return JSONResponse({'error': str(exc)}, status_code=400)
+            return JSONResponse({'added': added, 'existing': not added}, headers={'Cache-Control': 'no-store'})
         skipped = []
         if action in ('add', 'update'):
             errors = {}

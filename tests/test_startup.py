@@ -17,7 +17,8 @@ def test_startup_migrates_only_required_tables_and_seeds_admin(client, settings)
                     "tags", "tag_aliases", "assistant_config", "tag_change_log",
                     "tag_merge_proposals", "tag_semantic_checks", "hotwords", "recording_overrides",
                     "settings", "scheduler_state", "models", "recording_hotword_decisions",
-                    "recording_hotword_checks", "recording_hotword_decision_history", "recording_hotword_check_history", "sqlite_sequence"}
+                    "recording_hotword_checks", "recording_hotword_decision_history", "recording_hotword_check_history", "sqlite_sequence",
+                    "hotword_upstream_sync", "hotword_upstream_runs", "hotword_upstream_state"}
         assert required | {"recordings_fts"} <= tables
         assert all(t in required or t.startswith("recordings_fts") for t in tables)
         assert conn.execute("SELECT COUNT(*) FROM recordings").fetchone()[0] == 0

@@ -8,6 +8,12 @@
 {% block main_attributes %} class="assistant-layout hotwords-layout"{% endblock %}
 {% block content %}
 <header class="assistant-heading"><h1>热词中心</h1></header>
+<div class="hotword-upstream" data-csrf="{{ csrf_token }}">
+  <span id="qwen-usage">千问热词：{% if upstream_plan.currentCount is not none %}已用 {{ upstream_plan.currentCount }} / {{ upstream_plan.maxCount }}{% else %}配额未读取{% endif %}</span>
+  <button type="button" id="qwen-sync" class="secondary">同步到千问</button>
+  <button type="button" id="qwen-import" class="secondary">从千问导入</button>
+</div>
+<p id="qwen-feedback" class="assistant-note" aria-live="polite"></p>
 {% if error %}<p class="assistant-error" role="alert">{{ error }}</p>{% endif %}
 {% if notice %}<p class="assistant-note" role="status">{{ notice }}</p>{% endif %}
 <section class="assistant-section" aria-labelledby="hotword-add-heading">
@@ -24,10 +30,11 @@
   {% if hotwords %}
   <p class="assistant-note hotwords-scroll-note">左右滑动可查看状态与操作。</p>
   <div class="assistant-table-scroll"><table class="assistant-table hotwords-table">
-    <thead><tr><th scope="col">标准词</th><th scope="col">别名提示</th><th scope="col">命中次数</th><th scope="col">状态</th><th scope="col">操作</th></tr></thead>
+    <thead><tr><th scope="col">标准词</th><th scope="col">别名提示</th><th scope="col">命中次数</th><th scope="col">状态</th><th scope="col">千问</th><th scope="col">操作</th></tr></thead>
     <tbody>{% for word in hotwords %}<tr>
       <th scope="row">{{ word.term }}{% if word.needs_review %}<p class="hotword-review">这条像是整句，建议改成词语本身</p>{% endif %}</th><td>{{ word.aliases }}</td><td>{{ word.hits }}</td>
       <td><span class="badge badge-{{ 'complete' if word.enabled else 'empty' }}">{{ '启用' if word.enabled else '停用' }}</span></td>
+      <td>{% set skipped = upstream_plan.skipped | selectattr('hotword_id', 'equalto', word.id) | first %}{% if skipped and skipped.reason == 'already_synced' %}<span title="已同步" aria-label="已同步">✓</span>{% elif skipped %}<span class="qwen-skipped" title="{{ skipped.message }}" aria-label="{{ skipped.message }}">!</span>{% else %}<span title="未同步" aria-label="未同步">—</span>{% endif %}</td>
       <td><div class="tag-actions">
         <details {% if editing_id == word.id %}open{% endif %}><summary>编辑</summary>
           <form method="post" action="/hotwords/{{ word.id }}/update" class="hotword-form hotword-edit" novalidate>
@@ -43,5 +50,11 @@
   </table></div>
   {% else %}<p class="assistant-note">还没有热词。添加后，AI 会在新内容里识别可能的其它写法并替换成你的标准词</p>{% endif %}
 </section>
+<dialog id="qwen-dialog" aria-labelledby="qwen-dialog-title">
+  <h2 id="qwen-dialog-title">同步预演</h2>
+  <div id="qwen-plan"></div>
+  <p id="qwen-dialog-feedback" class="assistant-note" aria-live="polite"></p>
+  <div class="tag-actions"><button type="button" id="qwen-confirm">确认推送</button><button type="button" class="secondary" id="qwen-close">取消</button></div>
+</dialog>
 <script src="/static/hotwords.js" defer></script>
 {% endblock %}

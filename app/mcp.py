@@ -167,7 +167,11 @@ class McpMinutesSource(HttpMinutesSource):
                 retryable = (not isinstance(exc, httpx.HTTPStatusError)
                              or exc.response.status_code in (408, 429)
                              or exc.response.status_code >= 500)
-                if retryable and retries < 2:
+                # An append-only write may have succeeded before the connection failed.
+                # It has no idempotency key, so never retry it automatically.
+                append_hotwords = (method == 'tools/call' and params
+                                   and params.get('name') == 'add_personal_hot_word')
+                if retryable and not append_hotwords and retries < 2:
                     self._sleep(2 ** retries)
                     retries += 1
                     continue
