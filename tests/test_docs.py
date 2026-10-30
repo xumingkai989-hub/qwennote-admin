@@ -26,6 +26,28 @@ def first_column_names(text, pattern):
 
 
 class DocumentationTests(unittest.TestCase):
+    def assert_repository_excludes(self, forbidden):
+        paths = subprocess.check_output(
+            ['git', 'ls-files', '--cached', '--others', '--exclude-standard', '-z'],
+            cwd=ROOT).split(b'\0')
+        for name in filter(None, paths):
+            path = ROOT / name.decode('utf-8')
+            with self.subTest(file=str(path.relative_to(ROOT))):
+                self.assertNotIn(forbidden, path.read_bytes(),
+                                 '仓库含生产环境信息，须改用环境变量或占位符')
+
+    def test_repository_does_not_contain_production_domain(self):
+        # 拆分构造，检测器本身也必须通过全仓库扫描。
+        self.assert_repository_excludes(b'mingkai' + b'.xin')
+
+    def test_repository_does_not_contain_unrelated_service(self):
+        self.assert_repository_excludes(b'dashboard' + b'-shell')
+
+    def test_repository_has_mit_license(self):
+        license_path = ROOT / 'LICENSE'
+        self.assertTrue(license_path.is_file())
+        self.assertIn('MIT License', license_path.read_text())
+
     def test_repository_does_not_contain_fixed_instance_id(self):
         # 拆分构造，避免检测器自身保留完整实例标识。
         instance_id = ''.join(('74ee', '3f09', '792c', '4864',
@@ -82,7 +104,7 @@ class DocumentationTests(unittest.TestCase):
         self.assertTrue(150 <= len(text.splitlines()) <= 200)
         self.assertEqual(re.findall(r'^## (.+)$', text, re.MULTILINE), [
             '它解决什么问题', '功能', '技术栈与取舍', '快速开始', '配置',
-            '部署', '测试', '目录结构', '开发记录',
+            '部署', '测试', '目录结构', '开发记录', '许可证',
         ])
         self.assertIn('把千问笔记里的会议录音同步到自建服务，可搜索、可编辑、可导出，并按热词自动校正。',
                       text.split('## ', 1)[0])

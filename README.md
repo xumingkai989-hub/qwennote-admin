@@ -133,7 +133,7 @@ Uvicorn 的 `--env-file` 加载本地文件；生产由 systemd 注入，应用�
 发布目录在 `/opt/qwennote/releases/`，`current` 指向当前版本，`previous` 用于回滚。
 首次部署、域名替换、密钥权限、备份恢复及定时任务命令见 [运维手册](docs/OPERATIONS.md)。
 
-`scripts/deploy.py` 的目标实例由 `QWENNOTE_SWAS_INSTANCE_ID` 指定，未设置时拒绝执行；站点域名仍由 `install_release.sh` 的模板决定，跨环境按运维手册替换。
+`scripts/deploy.py` 的目标实例由 `QWENNOTE_SWAS_INSTANCE_ID` 指定，站点域名由 `QWENNOTE_DOMAIN` 指定；缺少任一变量时拒绝执行。安装脚本要求显式设置 `QWENNOTE_DOMAIN`，并自动替换 nginx 模板中的 `<domain>`，详见运维手册。
 
 ## 测试
 
@@ -190,3 +190,7 @@ JS 层验证同步按钮、搜索、复制和菜单等交互；浏览器层验�
 - [词级粒度（18）](docs/hotword-granularity-18.md)
 - [上游热词（19）](docs/hotword-upstream-19.md)
 - [热词交互（20）](docs/hotwords-20.md)
+
+## 许可证
+
+MIT，见 [LICENSE](LICENSE)。

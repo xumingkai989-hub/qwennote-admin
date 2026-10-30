@@ -11,7 +11,7 @@
 服务器流程面向提供 `dnf` 的 Linux，需 root、systemd、nginx、curl、openssl、gcc、tar、ACL 工具和 `/usr/bin/python3.11`。
 `install_release.sh` 不安装 Python，也不替换系统解释器；`build_sqlite.sh` 编译 release 内私有 SQLite，需能下载官方源包。
 DNS 的 `<domain>` 须指向 `<server-ip>`，防火墙开放 80/443；8090 仅本机使用。飞书应用回调配置为 `https://<domain>/auth/callback`。
-云控制台若用于排障，人工选择 `<instance-id>`；下列流程走 SSH。若使用 `scripts/deploy.py`，须先设置 `QWENNOTE_SWAS_INSTANCE_ID='<instance-id>'`，未设置时脚本拒绝执行；站点域名仍由 `install_release.sh` 的模板决定，跨环境须按本手册替换。
+云控制台若用于排障，人工选择 `<instance-id>`；下列流程走 SSH。若使用 `scripts/deploy.py`，须先设置 `QWENNOTE_SWAS_INSTANCE_ID='<instance-id>'` 和 `QWENNOTE_DOMAIN='<domain>'`，缺少任一变量时脚本拒绝执行；域名会传入远端安装脚本。
 
 ### 1.2 本地打包与传输
 
@@ -42,20 +42,12 @@ cd "$release_dir"
 
 ### 1.3 适配域名并准备 release
 
-现有安装脚本与 nginx 模板固化了原站点域名。只在解包后的发布副本统一替换，包含证书路径和健康检查 URL；不修改源仓库业务代码。
-以下命令从模板提取原域名，不需要在文档中写入原环境信息：
+在服务器终端显式设置站点域名；所有安装阶段都要求该变量，未设置或格式无效时立即退出。
+安装脚本渲染 nginx 模板中的 `<domain>`，并用于回调地址、证书路径及本站健康检查；无需修改仓库模板。
+已有 `/etc/qwennote/qwennote.env` 不会被覆盖。
 
 ```sh
-/usr/bin/python3.11 - <<'PY'
-from pathlib import Path
-import re
-files = [Path('scripts/install_release.sh'), *Path('deploy/nginx').glob('qwennote*.conf')]
-old = re.search(r'server_name\s+([^;\s]+);', Path('deploy/nginx/qwennote.conf').read_text()).group(1)
-new = '<domain>'
-assert '<' not in new and re.fullmatch(r'[A-Za-z0-9.-]+', new), '请先替换域名占位符'
-for path in files:
-    path.write_text(path.read_text().replace(old, new))
-PY
+export QWENNOTE_DOMAIN='<domain>'
 bash scripts/install_release.sh prepare "$release_dir"
 ```
 
@@ -107,7 +99,7 @@ readlink -f /opt/qwennote/current
 
 ## 2. 日常发布与回滚
 
-发布前完成 Python/JS 回归，并记录提交 SHA；按 1.2 打包传输、1.3 在新 release 替换域名。
+发布前完成 Python/JS 回归，并记录提交 SHA；按 1.2 打包传输、1.3 显式设置 `QWENNOTE_DOMAIN`。
 先在服务器执行一次数据库备份（见第 3 节），prepare 新版本后用应用更新模式激活，保留现有 nginx、证书和 unit：
 
 ```sh

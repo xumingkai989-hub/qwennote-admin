@@ -1,6 +1,15 @@
 #!/usr/bin/env bash
 # Run as root on the server, after the archive's SHA-256 has been verified.
 set -euo pipefail
+if [[ -z "${QWENNOTE_DOMAIN:-}" ]]; then
+    echo '缺少 QWENNOTE_DOMAIN；请显式设置站点域名后再执行部署。' >&2
+    exit 1
+fi
+# Accept a DNS hostname only; never echo caller input in validation errors.
+if [[ ${#QWENNOTE_DOMAIN} -gt 253 || ! "$QWENNOTE_DOMAIN" =~ ^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+$ ]]; then
+    echo 'QWENNOTE_DOMAIN 格式无效；请提供不含协议、端口或路径的域名。' >&2
+    exit 1
+fi
 phase=${1:?prepare|certificate|activate}
 release=${2:?absolute release directory}
 [[ "$release" =~ ^/opt/qwennote/releases/[0-9]{8}T[0-9]{6}Z$ ]]
@@ -8,6 +17,14 @@ test "$(id -u)" = 0
 exec 9>/run/lock/qwennote-deploy.lock
 flock -n 9
 cd "$release"
+
+install_nginx_template() {
+    local rendered
+    rendered=$(mktemp)
+    sed "s/<domain>/${QWENNOTE_DOMAIN}/g" "$1" > "$rendered"
+    install -m 644 "$rendered" /etc/nginx/conf.d/qwennote.conf
+    rm -f "$rendered"
+}
 
 case "$phase" in
 prepare)
@@ -22,7 +39,7 @@ prepare)
         cat > /etc/qwennote/qwennote.env <<EOF
 FEISHU_APP_ID=
 FEISHU_APP_SECRET=
-FEISHU_REDIRECT_URI=https://qwennote.mingkai.xin/auth/callback
+FEISHU_REDIRECT_URI=https://${QWENNOTE_DOMAIN}/auth/callback
 SESSION_SECRET=$(openssl rand -hex 32)
 DB_PATH=/opt/qwennote/data/qwennote.db
 ADMIN_OPEN_ID=
@@ -54,12 +71,12 @@ EOF
 certificate)
     install -d -m 755 /var/www/acme/.well-known/acme-challenge
     # Only this dedicated nginx file is ever written.
-    if [[ ! -s /etc/letsencrypt/live/qwennote.mingkai.xin/fullchain.pem ]]; then
-        install -m 644 deploy/nginx/qwennote-http.conf /etc/nginx/conf.d/qwennote.conf
+    if [[ ! -s /etc/letsencrypt/live/${QWENNOTE_DOMAIN}/fullchain.pem ]]; then
+        install_nginx_template deploy/nginx/qwennote-http.conf
         nginx -t
         systemctl reload nginx
         if command -v certbot >/dev/null || dnf install -y certbot; then
-            certbot certonly --webroot -w /var/www/acme -d qwennote.mingkai.xin \
+            certbot certonly --webroot -w /var/www/acme -d "${QWENNOTE_DOMAIN}" \
                 --non-interactive --agree-tos --register-unsafely-without-email
         else
             # Isolated acme home avoids altering any existing acme installation.
@@ -67,11 +84,11 @@ certificate)
             sh /tmp/qwennote-acme-install.sh --home /opt/qwennote/acme --nocron
             acme=/opt/qwennote/acme/acme.sh
             "$acme" --register-account --server letsencrypt
-            "$acme" --issue --server letsencrypt --webroot /var/www/acme -d qwennote.mingkai.xin
-            install -d -m 700 /etc/letsencrypt/live/qwennote.mingkai.xin
-            "$acme" --install-cert -d qwennote.mingkai.xin \
-                --key-file /etc/letsencrypt/live/qwennote.mingkai.xin/privkey.pem \
-                --fullchain-file /etc/letsencrypt/live/qwennote.mingkai.xin/fullchain.pem \
+            "$acme" --issue --server letsencrypt --webroot /var/www/acme -d "${QWENNOTE_DOMAIN}"
+            install -d -m 700 "/etc/letsencrypt/live/${QWENNOTE_DOMAIN}"
+            "$acme" --install-cert -d "${QWENNOTE_DOMAIN}" \
+                --key-file "/etc/letsencrypt/live/${QWENNOTE_DOMAIN}/privkey.pem" \
+                --fullchain-file "/etc/letsencrypt/live/${QWENNOTE_DOMAIN}/fullchain.pem" \
                 --reloadcmd 'nginx -t && systemctl reload nginx'
             cat > /etc/systemd/system/qwennote-acme.service <<'EOF'
 [Unit]
@@ -93,12 +110,12 @@ EOF
             systemctl enable --now qwennote-acme.timer
         fi
     fi
-    test -s /etc/letsencrypt/live/qwennote.mingkai.xin/fullchain.pem
-    if command -v certbot >/dev/null && [[ -f /etc/letsencrypt/renewal/qwennote.mingkai.xin.conf ]]; then
+    test -s "/etc/letsencrypt/live/${QWENNOTE_DOMAIN}/fullchain.pem"
+    if command -v certbot >/dev/null && [[ -f /etc/letsencrypt/renewal/${QWENNOTE_DOMAIN}.conf ]]; then
         install -d -m 755 /etc/letsencrypt/renewal-hooks/deploy
-        cat > /etc/letsencrypt/renewal-hooks/deploy/qwennote-reload.sh <<'EOF'
+        cat > /etc/letsencrypt/renewal-hooks/deploy/qwennote-reload.sh <<EOF
 #!/bin/sh
-if [ "$RENEWED_LINEAGE" = /etc/letsencrypt/live/qwennote.mingkai.xin ]; then
+if [ "\$RENEWED_LINEAGE" = /etc/letsencrypt/live/${QWENNOTE_DOMAIN} ]; then
     nginx -t && systemctl reload nginx
 fi
 EOF
@@ -107,7 +124,7 @@ EOF
     fi
     ;;
 activate)
-    test -s /etc/letsencrypt/live/qwennote.mingkai.xin/fullchain.pem
+    test -s "/etc/letsencrypt/live/${QWENNOTE_DOMAIN}/fullchain.pem"
     old=$(readlink -e /opt/qwennote/current || true)
     # readlink -f on a nonexistent link can return the link's own path.
     # Accept only a real, complete release, never current itself or a symlink loop.
@@ -145,14 +162,14 @@ activate)
         exit 1
     fi
     if [[ "${QWENNOTE_APP_ONLY:-0}" != 1 ]]; then
-        install -m 644 deploy/nginx/qwennote.conf /etc/nginx/conf.d/qwennote.conf
+        install_nginx_template deploy/nginx/qwennote.conf
         nginx -t
         systemctl reload nginx
     fi
     # nginx reload returns before new workers necessarily accept TLS connections.
     tls_healthy=false
     for attempt in {1..20}; do
-        if [[ "$(curl --max-time 10 -sS https://qwennote.mingkai.xin/ -o /dev/null -w '%{http_code} %{ssl_verify_result}' || true)" = '302 0' ]]; then
+        if [[ "$(curl --max-time 10 -sS "https://${QWENNOTE_DOMAIN}/" -o /dev/null -w '%{http_code} %{ssl_verify_result}' || true)" = '302 0' ]]; then
             tls_healthy=true
             break
         fi

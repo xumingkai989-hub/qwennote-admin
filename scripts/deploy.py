@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 import hashlib
 import importlib.util
 import os
+import re
 from pathlib import Path
 import shlex
 import subprocess
@@ -23,6 +24,13 @@ def main():
     args = parser.parse_args()
     if not INSTANCE:
         parser.exit(1, '缺少 QWENNOTE_SWAS_INSTANCE_ID；请设置目标实例 ID 后再执行部署。\n')
+    domain = os.environ.get('QWENNOTE_DOMAIN', '')
+    if not domain:
+        parser.exit(1, '缺少 QWENNOTE_DOMAIN；请显式设置站点域名后再执行部署。\n')
+    if len(domain) > 253 or not re.fullmatch(
+            r'[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?'
+            r'(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+', domain):
+        parser.exit(1, 'QWENNOTE_DOMAIN 格式无效；请提供不含协议、端口或路径的域名。\n')
     os.environ['SWAS_INSTANCE_ID'] = INSTANCE
     spec = importlib.util.spec_from_file_location('swas_run', args.helper)
     swas = importlib.util.module_from_spec(spec)
@@ -52,9 +60,6 @@ if ss -lntp | grep -E ':8090[[:space:]]'; then
     test "$(ss -lntp '( sport = :8090 )' | tail -n +2 | wc -l)" -eq 1
     ss -lntp '( sport = :8090 )' | grep '127.0.0.1:8090'
 else echo PORT_8090_FREE; fi
-printf 'MAIN_BEFORE='
-curl --max-time 30 -sS -o /dev/null -w '%{http_code}\\n' https://mingkai.xin/
-systemctl is-active dashboard-shell.service
 install -d -m 755 /opt/qwennote/releases
 install -d -m 700 /opt/qwennote/deploy-audit
 find /etc/nginx/conf.d -maxdepth 1 -type f -name '*.conf' ''' + nginx_filter + ''' -exec sha256sum {} + > /opt/qwennote/deploy-audit/''' + stamp + '''.nginx-before
@@ -87,13 +92,14 @@ cat /opt/qwennote/deploy-audit/''' + stamp + '''.nginx-before
            'tar xzf /tmp/qwennote.tar.gz -C ' + release)
     (logs / 'archive.sha256').write_text(digest + '\n')
     phases = ('prepare', 'activate') if args.app_only else ('prepare', 'certificate', 'activate')
-    mode = 'QWENNOTE_APP_ONLY=1 ' if args.app_only else ''
+    mode = 'QWENNOTE_DOMAIN=' + shlex.quote(domain) + ' '
+    if args.app_only:
+        mode += 'QWENNOTE_APP_ONLY=1 '
     for phase in phases:
         print('PHASE=' + phase, flush=True)
         remote(phase, f'{mode}bash {release}/scripts/install_release.sh {phase} {release}', timeout=900)
     remote('regression', 'sha256sum -c /opt/qwennote/deploy-audit/' + stamp + '.nginx-before\n' +
-           "printf 'MAIN_AFTER='\ncurl --max-time 30 -sS -o /dev/null -w '%{http_code}\\n' https://mingkai.xin/\n" +
-           'systemctl is-active dashboard-shell.service\nnginx -t')
+           'systemctl is-active qwennote.service')
     print('DEPLOYMENT_LOGS=' + str(logs), flush=True)
 
 
