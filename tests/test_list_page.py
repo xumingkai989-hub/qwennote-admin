@@ -36,12 +36,12 @@ class Page(HTMLParser):
         if tag == 'article':
             self.cards.append(attrs['data-recording-id'])
             self.current_card = attrs['data-recording-id']
-            if 'recording-row' in attrs.get('class', '').split():
+            if 'timeline-card' in attrs.get('class', '').split():
                 self.row_fields[self.current_card] = set()
         classes = attrs.get('class', '').split()
         if self.current_card in self.row_fields:
             self.row_fields[self.current_card].update(set(classes) & {
-                'recording-time', 'recording-title', 'recording-duration', 'recording-status',
+                'recording-time', 'recording-title', 'duration-pill', 'card-summary',
             })
         if 'recording-title' in classes:
             self.titles[self.current_card] = attrs.get('title')
@@ -123,26 +123,27 @@ def test_list_newest_created_at_first_with_descending_id_tiebreaker(list_client,
     ]
 
 
-def test_list_time_always_includes_month_day_and_hour_minute(list_client, add_recording):
+def test_list_time_shows_hour_minute_below_date_heading(list_client, add_recording):
     add_recording('today-early', '2026-10-29T00:01:00+08:00')
     add_recording('today-late', '2026-10-29T10:14:00+08:00')
     add_recording('yesterday', '2026-10-28T23:59:00+08:00')
     html = list_client.get('/?from=2026-10-28&to=2026-10-29').text
     times = re.findall(r'<time class="recording-time"[^>]*>([^<]+)</time>', html)
     assert len(times) == 3
-    assert all(re.fullmatch(r'\d{2}-\d{2} \d{2}:\d{2}', value) for value in times)
-    assert times == ['10-29 10:14', '10-29 00:01', '10-28 23:59']
+    assert all(re.fullmatch(r'\d{2}:\d{2} 创建', value) for value in times)
+    assert times == ['10:14 创建', '00:01 创建', '23:59 创建']
+    assert '10月29日 周四' in html and '10月28日 周三' in html
 
 
 def test_apple_grouped_list_and_dark_mode_markers(list_client):
     html = list_client.get('/').text
-    assert 'class="recording-list inset-grouped"' in html
+    assert 'class="recording-list timeline"' in html
     assert 'segmented-control' not in html
     assert not {'今天', '昨天'} & {''.join(parts).strip() for parts in Page(html).controls}
     assert 'aria-label="清除筛选"' in html
     css = list_client.get('/static/app.css').text
     assert '@media (prefers-color-scheme: dark)' in css
-    assert '.inset-grouped' in css
+    assert '.date-group' in css
     assert '"SF Pro Text"' in css
     assert 'outline: 2px solid var(--accent)' in css
 
@@ -169,7 +170,7 @@ def test_date_filters_include_whole_days(list_client, add_recording, query, expe
                        for field in Page(response.text).inputs)
 
 
-def test_row_metadata_four_states_and_no_recording_bodies(list_client, add_recording):
+def test_card_badges_follow_transcript_state_and_only_excerpt_is_rendered(list_client, add_recording):
     for recording_id, transcript, summary in [
         ('complete', True, True), ('transcript-only', True, False),
         ('summary-only', False, True), ('empty', False, False),
@@ -178,12 +179,14 @@ def test_row_metadata_four_states_and_no_recording_bodies(list_client, add_recor
                       duration=None if recording_id == 'empty' else 18)
     html = list_client.get('/').text
     assert Page(html).badges == {
-        'complete': '已转录', 'transcript-only': '仅转写', 'summary-only': '仅总结', 'empty': '未转录',
+        'summary-only': '未转录', 'empty': '未转录',
     }
-    assert '>10-29 09:30</time>' in html
-    assert '18 分</span>' in html and '—' in html
+    assert '>09:30 创建</time>' in html
+    assert '录音 · 18分</span>' in html
+    assert html.count('class="duration-pill"') == 3
     assert '时间为笔记创建时间' in html
-    assert 'SUMMARY_BODY_PRIVATE' not in html and 'TRANSCRIPT_BODY_PRIVATE' not in html
+    assert 'SUMMARY_BODY_PRIVATE' in html and 'TRANSCRIPT_BODY_PRIVATE' not in html
+    assert 'SUMMARY_BODY_PRIVATE' * 7 not in html
     assert len(html) < 20000
     assert {link['href'] for link in Page(html).links if link.get('href', '').startswith('/recordings/')} == {
         '/recordings/complete', '/recordings/transcript-only', '/recordings/summary-only', '/recordings/empty',
@@ -264,17 +267,17 @@ def test_title_is_escaped_and_zero_duration_is_visible(list_client, add_recordin
     html = list_client.get('/').text
     assert '<script>alert(1)</script>' not in html
     assert '&lt;script&gt;alert(1)&lt;/script&gt;' in html
-    assert '0 分</span>' in html
+    assert '录音 · 0分</span>' in html
 
 
-def test_desktop_rows_each_have_four_fields_and_detail_link(list_client, add_recording):
+def test_cards_each_have_four_fields_and_detail_link(list_client, add_recording):
     for i in range(23):
         add_recording(f'row-{i:02}')
     page = Page(list_client.get('/').text)
     assert len(page.row_fields) == len(page.cards) == 20
     for recording_id, fields in page.row_fields.items():
-        assert fields == {'recording-time', 'recording-title', 'recording-duration', 'recording-status'}
-        assert any(link.get('class') == 'recording-row-link' and
+        assert fields == {'recording-time', 'recording-title', 'duration-pill', 'card-summary'}
+        assert any(link.get('class') == 'timeline-card-link' and
                    link.get('href') == f'/recordings/{recording_id}' for link in page.links)
 
 
@@ -288,10 +291,14 @@ def test_long_title_has_complete_escaped_title_attribute(list_client, add_record
 def test_mobile_two_line_structure_and_desktop_header(list_client, add_recording):
     add_recording('mobile')
     html = list_client.get('/').text
-    for class_name in ['recording-list-header', 'recording-row-link', 'recording-time',
-                       'recording-title', 'recording-details', 'recording-meta-separator',
-                       'recording-duration', 'recording-status']:
+    for class_name in ['date-heading', 'timeline-card-link', 'recording-time',
+                       'recording-title', 'card-summary', 'duration-pill', 'card-footer']:
         assert f'class="{class_name}"' in html
+    assert 'recording-list-header' not in html
+    css = list_client.get('/static/app.css').text
+    assert '-webkit-line-clamp: 2' in css
+    assert '.date-group { position: relative; padding-left: 20px; }' in css
+    assert '.date-group:not(:last-child)::before' in css
 
 
 def test_header_search_is_enabled_and_css_is_served(list_client):
@@ -301,7 +308,7 @@ def test_header_search_is_enabled_and_css_is_served(list_client):
     assert 'disabled' not in search
     assert search.get('name') == 'q'
     assert 'action="/search"' in html
-    assert '更新' in html
+    assert 'aria-label="同步"' in html
     assert '/static/app.css' in html
     css = list_client.get('/static/app.css')
     assert css.status_code == 200 and 'text/css' in css.headers['content-type']
@@ -332,7 +339,7 @@ def test_all_dates_total_matches_database_and_first_page_has_20(list_client, add
     assert response.context['recordings'].total == total == 27
     assert len(Page(response.text).cards) == 20
     assert Page(response.text).cards[0] == newest
-    assert f'共 {total} 场' in response.text
+    assert f'全部录音 · {total} 场' in response.text
     assert all(field.get('value') == '' for field in Page(response.text).inputs if field.get('type') == 'date')
 
 
@@ -381,3 +388,75 @@ def test_one_row_form_canonicalizes_single_day_and_cleared_dates(list_client, pa
 
 def test_form_end_without_start_is_invalid(list_client):
     assert list_client.get('/?from=&to=2026-10-29').status_code == 400
+
+
+def test_three_date_groups_descending_with_cards_sorted_inside(list_client, add_recording):
+    for key, day, hour in [('old', 28, 18), ('new-early', 30, 1), ('middle', 29, 23), ('new-late', 30, 22)]:
+        add_recording(key, f'2026-10-{day}T{hour:02}:00:00+08:00')
+    html = list_client.get('/').text
+    headings = re.findall(r'<h2 class="date-heading"[^>]*><time[^>]*>([^<]+)</time>', html)
+    assert headings == ['10月30日 周五', '10月29日 周四', '10月28日 周三']
+    assert Page(html).cards == ['new-late', 'new-early', 'middle', 'old']
+
+
+@pytest.mark.parametrize('value,expected', [
+    ('# 标题\n\n**重点**与[链接](https://example.com)\n\n- 项目\n- `代码`', '标题 重点与链接 项目 代码'),
+    ('> 引用\n\n~~删除线~~\n\n- [x] 完成\n- [ ] 待办', '引用 删除线 完成 待办'),
+    ('\n  \n---\n', ''),
+    ('一' * 140, '一' * 120),
+])
+def test_summary_preview_strips_markdown_and_limits_length(value, expected):
+    from app.home_presentation import summary_excerpt
+    assert summary_excerpt(value) == expected
+
+
+@pytest.mark.parametrize('summary,has_summary', [('', True), ('   \n', True), ('---', True), ('stale summary', False)])
+def test_no_summary_has_no_empty_paragraph(list_client, store, summary, has_summary):
+    store.upsert_recording(
+        RecordingMeta('empty-preview', '无摘要', datetime(2026, 10, 30, 10, 59, tzinfo=SHANGHAI), None),
+        RecordingDetail('empty-preview', summary, '', False, has_summary), '2026-10-30T12:00:00+08:00',
+    )
+    html = list_client.get('/').text
+    assert 'class="card-summary"' not in html
+    assert 'class="duration-pill"' not in html
+    assert '10:59 创建' in html and '未转录' in html
+
+
+@pytest.mark.parametrize('minutes,expected', [(None, ''), (0, '0分'), (18, '18分'), (60, '1小时'), (90, '1小时30分')])
+def test_duration_uses_available_minute_precision(minutes, expected):
+    from app.home_presentation import duration_label
+    assert duration_label(minutes) == expected
+
+
+def test_group_key_uses_shanghai_date_not_source_offset():
+    from app.home_presentation import date_groups
+    from app.store import RecordingCard
+    rows = [RecordingCard(key, key, datetime.fromisoformat(timestamp), None, False, False)
+            for key, timestamp in [('utc', '2026-10-29T17:00:00+00:00'), ('local', '2026-10-29T23:00:00+08:00')]]
+    groups = date_groups(rows, None)
+    assert [group['label'] for group in groups] == ['10月30日 周五', '10月29日 周四']
+    assert groups[0]['items'][0]['recording'].created_at.strftime('%H:%M') == '01:00'
+
+
+def test_filtered_total_and_card_links_preserve_page_and_dates(list_client, add_recording):
+    for index in range(25):
+        add_recording(f'card-{index:02}')
+    add_recording('outside', '2026-10-28T23:00:00+08:00')
+    html = list_client.get('/?date=2026-10-29&page=2').text
+    assert '全部录音 · 25 场' in html
+    links = [link['href'] for link in Page(html).links if link.get('class') == 'timeline-card-link']
+    assert len(links) == 5
+    assert all(parse_qs(urlsplit(link).query) == {'date': ['2026-10-29'], 'page': ['2']} for link in links)
+
+
+def test_summary_escape_and_no_player_or_tags(list_client, store):
+    store.upsert_recording(
+        RecordingMeta('safe', '四要素', datetime(2026, 10, 30, 10, 59, tzinfo=SHANGHAI), 90),
+        RecordingDetail('safe', '**摘要** & <img src=x onerror=alert(1)> 正文', '', False, True),
+        '2026-10-30T12:00:00+08:00',
+    )
+    html = list_client.get('/').text
+    assert '四要素' in html
+    assert '<p class="card-summary">摘要 &amp; 正文</p>' in html
+    assert '录音 · 1小时30分' in html and '10:59 创建' in html
+    assert all(value not in html for value in ('onerror', '<audio', '播放', 'tag-chip', '上次同步时间'))

@@ -22,7 +22,7 @@ from test_login import login
 def render(output):
     output.mkdir(parents=True, exist_ok=True)
     (output / 'static').mkdir(exist_ok=True)
-    for name in ['app.css', 'detail.js']:
+    for name in ['app.css', 'detail.js', 'home.js']:
         (output / 'static' / name).write_bytes((ROOT / 'app/static' / name).read_bytes())
     with tempfile.TemporaryDirectory() as temp:
         settings = Settings(
@@ -41,7 +41,7 @@ def render(output):
             for i in range(8):
                 key = f'layout-{i}'
                 store.upsert_recording(
-                    RecordingMeta(key, '项目例会：页面布局与长文本阅读验收' if i == 0 else f'项目讨论 {i}', datetime(2026, 10, 30, 12-i, tzinfo=SHANGHAI), 30),
+                    RecordingMeta(key, '项目例会：页面布局与长文本阅读验收' if i == 0 else f'项目讨论 {i}', datetime(2026, 10, 30-i//3, 12-i, tzinfo=SHANGHAI), 30),
                     RecordingDetail(key, summary, transcript, True, True), '2026-10-30T12:00:00+08:00',
                 )
             for name, url in [('home', '/'), ('summary', '/recordings/layout-0?view=summary'), ('transcript', '/recordings/layout-0?view=transcript')]:

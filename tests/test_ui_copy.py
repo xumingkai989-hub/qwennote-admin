@@ -84,7 +84,8 @@ def test_short_whitelist_subject_has_no_stray_ellipsis(client, fake_auth, store)
 def test_unsynced_state_is_not_repeated(client):
     login(client)
     html = client.get('/').text
-    assert html.count('尚未同步') == 1
+    assert '尚未同步' not in html
+    assert '上次同步时间' not in html
     assert '拉取 0 · 新增 0 · 更新 0' not in html
 
 

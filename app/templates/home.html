@@ -1,24 +1,21 @@
 {% extends "base.html" %}
+{% block main_attributes %} class="home-layout"{% endblock %}
 {% block content %}
   {% set list_path = '/search' if search_query else '/' %}
   {% set clear_url = '/search?q=' ~ (search_query | urlencode) if search_query else '/' %}
   <header class="topbar">
     <a class="brand" href="/">QwenNote</a>
     <div class="account"><span>{{ user.name }}</span><form action="/auth/logout" method="post"><button class="text-button" type="submit">退出</button></form></div>
-    <button id="sync-button" type="button">{{ '重试' if sync_run and sync_run.status == 'failed' else '更新' }}</button>
   </header>
-  <div class="list-heading">{% if search_query %}<h1>搜索「{{ search_query }}」，共 {{ recordings.total }} 条</h1>{% else %}<h1>录音列表</h1><span>共 {{ recordings.total }} 场</span>{% endif %}</div>
-  <form class="search-form" action="/search" method="get" role="search">
-      <input type="search" name="q" aria-label="搜索录音" placeholder="搜索标题、总结、转写" value="{{ search_query | default('') }}">
-      {% if search_query %}{% for name, value in filters.params.items() %}<input type="hidden" name="{{ name }}" value="{{ value }}">{% endfor %}{% endif %}
-      <button type="submit">搜索</button>
-  </form>
-  <section class="sync-panel" aria-label="同步状态" aria-live="polite" aria-atomic="true">
-    <p id="sync-time">上次同步时间：{{ (sync_run.finished_at or sync_run.started_at) if sync_run else '尚未同步' }}</p>
-    <p id="sync-status">{% if sync_run %}状态：{{ sync_run.status }}{% endif %}</p>
-    <p id="sync-counts">{{ ('拉取 %s · 新增 %s · 更新 %s' % (sync_run.fetched, sync_run.inserted, sync_run.updated)) if sync_run else '' }}</p>
-    <p id="sync-error">{{ sync_run.error if sync_run and sync_run.error else '' }}</p>
-  </section>
+  <div class="list-heading home-heading">
+    {% if search_query %}<h1>搜索「{{ search_query }}」，共 {{ recordings.total }} 条</h1>{% else %}<h1>全部录音 · {{ recordings.total }} 场</h1>{% endif %}
+    <button id="sync-button" type="button" aria-label="同步" title="同步">
+      <svg class="sync-refresh" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M6.1 6.1A8 8 0 0 1 20 12M4 12a8 8 0 0 0 13.9 5.9"/></svg>
+      <svg class="sync-check" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg>
+      <span id="sync-feedback" class="visually-hidden" role="status" aria-live="polite"></span>
+    </button>
+  </div>
+  <p id="sync-error" role="alert">{{ sync_run.error if sync_run and sync_run.status == 'failed' and sync_run.error else '' }}</p>
   <section class="filters" aria-label="日期筛选">
     <form action="{{ list_path }}" method="get" class="date-filter" {% if filters.mode != 'all' %}aria-current="true"{% endif %}>
       {% if search_query %}<input type="hidden" name="q" value="{{ search_query }}">{% endif %}
@@ -29,13 +26,15 @@
       <div class="date-actions"><button class="secondary" type="submit">筛选</button><a href="{{ clear_url }}" class="filter-link" aria-label="清除筛选">清除</a></div>
     </form>
   </section>
-  <section class="{{ 'recording-grid' if search_query else 'recording-list inset-grouped' }}" aria-label="录音列表">
-    {% if not search_query and recordings.items %}
-    <div class="recording-list-header" aria-hidden="true"><span>时间</span><span>标题</span><span class="recording-duration">时长</span><span>状态</span></div>
-    {% endif %}
+  <form class="search-form" action="/search" method="get" role="search">
+      <input type="search" name="q" aria-label="搜索录音" placeholder="搜索标题、总结、转写" value="{{ search_query | default('') }}">
+      {% if search_query %}{% for name, value in filters.params.items() %}<input type="hidden" name="{{ name }}" value="{{ value }}">{% endfor %}{% endif %}
+      <button type="submit">搜索</button>
+  </form>
+  {% if search_query %}
+  <section class="recording-grid" aria-label="录音列表">
     {% for recording in recordings.items %}
     {% set status, status_label = recording.status %}
-    {% if search_query %}
     <article class="recording-card" data-recording-id="{{ recording.recording_id }}">
       <span class="badge badge-{{ status }}">{{ status_label }}</span>
       <h2><a href="/recordings/{{ recording.recording_id | urlencode }}{{ detail_query }}">{{ recording.title or '未命名录音' }}</a></h2>
@@ -49,55 +48,38 @@
       {% endif %}
     </article>
     {% else %}
-    <article class="recording-row" data-recording-id="{{ recording.recording_id }}">
-      <a class="recording-row-link" href="/recordings/{{ recording.recording_id | urlencode }}{{ detail_query }}">
-        <time class="recording-time" datetime="{{ recording.created_at.isoformat() }}">{{ recording.created_at.strftime('%m-%d %H:%M') }}</time>
-        <span class="recording-title" title="{{ recording.title or '未命名录音' }}">{{ recording.title or '未命名录音' }}</span>
-        <span class="recording-details">
-          <span class="recording-duration" aria-label="录音时长">{{ (recording.duration_min ~ ' 分') if recording.duration_min is not none else '—' }}</span>
-          <span class="recording-meta-separator" aria-hidden="true">·</span>
-          <span class="recording-status"><span class="badge badge-{{ status }}">{{ status_label }}</span></span>
-        </span>
-      </a>
-    </article>
-    {% endif %}
-    {% else %}
-    {% if search_query %}
     <div class="empty-state"><h2>没有找到包含「{{ search_query }}」的录音</h2><p>可以换个关键词，或调整日期区间后重试。</p></div>
-    {% else %}
-    <div class="empty-state"><h2>{{ '还没有同步任何录音' if filters.mode == 'all' else '这个时间范围内没有录音' }}</h2><p>{% if filters.mode == 'all' %}点击右上角「更新」同步录音。{% else %}可以调整日期，或清除筛选查看全部。{% endif %}</p></div>
-    {% endif %}
     {% endfor %}
   </section>
+  {% else %}
+  <section class="recording-list timeline" aria-label="录音列表">
+    {% for group in date_groups %}
+    <section class="date-group" aria-labelledby="date-{{ group.date.isoformat() }}">
+      <h2 class="date-heading" id="date-{{ group.date.isoformat() }}"><time datetime="{{ group.date.isoformat() }}">{{ group.label }}</time></h2>
+      <div class="date-cards">
+        {% for card in group['items'] %}
+        {% set recording = card.recording %}
+        <article class="timeline-card" data-recording-id="{{ recording.recording_id }}">
+          <a class="timeline-card-link" href="/recordings/{{ recording.recording_id | urlencode }}{{ detail_query }}">
+            <div class="card-title-row"><h3 class="recording-title" title="{{ recording.title or '未命名录音' }}">{{ recording.title or '未命名录音' }}</h3>{% if not recording.has_transcript %}<span class="badge badge-empty">未转录</span>{% endif %}</div>
+            {% if card.summary %}<p class="card-summary">{{ card.summary }}</p>{% endif %}
+            {% if card.duration %}<span class="duration-pill" aria-label="录音时长">录音 · {{ card.duration }}</span>{% endif %}
+            <div class="card-footer"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><time class="recording-time" datetime="{{ recording.created_at.isoformat() }}">{{ recording.created_at.strftime('%H:%M') }} 创建</time></div>
+          </a>
+        </article>
+        {% endfor %}
+      </div>
+    </section>
+    {% else %}
+    <div class="empty-state"><h2>{{ '还没有同步任何录音' if filters.mode == 'all' else '这个时间范围内没有录音' }}</h2><p>{% if filters.mode == 'all' %}点击右上角同步按钮同步录音。{% else %}可以调整日期，或清除筛选查看全部。{% endif %}</p></div>
+    {% endfor %}
+  </section>
+  {% endif %}
   <nav class="pagination" aria-label="录音分页">
     {% if previous_url %}<a href="{{ previous_url }}" rel="prev">上一页</a>{% else %}<span aria-disabled="true">上一页</span>{% endif %}
     <span>第 {{ recordings.page }} / {{ recordings.pages }} 页</span>
     {% if next_url %}<a href="{{ next_url }}" rel="next">下一页</a>{% else %}<span aria-disabled="true">下一页</span>{% endif %}
   </nav>
   <p class="time-note">时间为笔记创建时间</p>
-  <script>
-    const button = document.getElementById('sync-button');
-    button.addEventListener('click', async () => {
-      button.disabled = true;
-      document.getElementById('sync-status').textContent = '状态：running';
-      document.getElementById('sync-error').textContent = '';
-      try {
-        const response = await fetch('/sync', {method: 'POST', credentials: 'same-origin'});
-        const result = await response.json();
-        if (!response.ok) throw new Error(result.detail || '同步请求失败，请重试');
-        document.getElementById('sync-time').textContent = `上次同步时间：${result.finished_at}`;
-        document.getElementById('sync-status').textContent = `状态：${result.status}`;
-        document.getElementById('sync-counts').textContent = `拉取 ${result.fetched} · 新增 ${result.inserted} · 更新 ${result.updated}`;
-        document.getElementById('sync-error').textContent = result.error || '';
-        button.textContent = result.status === 'failed' ? '重试' : '更新';
-        window.location.reload();
-      } catch (error) {
-        document.getElementById('sync-status').textContent = '状态：请求未完成';
-        document.getElementById('sync-error').textContent = error.message;
-        button.textContent = '重试';
-      } finally {
-        button.disabled = false;
-      }
-    });
-  </script>
+  <script src="{{ url_for('static', path='home.js') }}?v=20261030-05" defer></script>
 {% endblock %}

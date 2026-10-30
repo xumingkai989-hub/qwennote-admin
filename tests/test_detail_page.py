@@ -479,8 +479,8 @@ def test_detail_views_share_one_layout_container(detail_client, view):
 def test_detail_layout_width_and_gutter_contract(detail_client):
     css = detail_client.get('/static/app.css').text
     frame = re.search(r'\.detail-layout \{([^}]+)\}', css)[1]
-    assert '--content-max: 1120px;' in frame
-    assert '--gutter: 16px;' in frame
+    assert '--content-max: 1120px;' in css
+    assert '--gutter: 16px;' in css
     assert 'max-width: var(--content-max);' in frame
     assert 'padding: 0 var(--gutter) 48px;' in frame
     assert 'margin-inline: auto;' in frame

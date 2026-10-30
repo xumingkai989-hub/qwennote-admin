@@ -15,6 +15,7 @@ from fastapi.templating import Jinja2Templates
 from app.admin import install_admin
 from app.config import Settings
 from app.feishu import FeishuAuth, FeishuAuthError, HttpFeishuAuth
+from app.home_presentation import date_groups
 from app.minutes import FixtureMinutesSource, HttpMinutesSource, MinutesSource, SHANGHAI
 from app.public_api import install_public_api
 from app.recording_content import (download_disposition, export_markdown, render_summary,
@@ -220,6 +221,7 @@ def create_app(
             response = templates.TemplateResponse(request=request, name="home.html", context={
                 "user": user, "sync_run": store.latest_sync(),
                 'filters': filters, 'recordings': recordings,
+                'date_groups': date_groups(recordings.items, store),
                 'detail_query': ('?' + urlencode({**filters['params'], 'page': recordings.page}))
                                 if filters['params'] or recordings.page > 1 else '',
                 'previous_url': page_url(recordings.page - 1) if recordings.page > 1 else None,

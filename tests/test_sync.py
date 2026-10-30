@@ -89,7 +89,7 @@ def test_detail_failure_keeps_other_records_and_records_safe_error(sync_client, 
     assert run['status'] == 'failed' and 'demo-1' in run['error']
     assert 'do-not-persist' not in str(run)
     html = sync_client.get('/').text
-    assert 'failed' in html and 'demo-1' in html and '重试' in html
+    assert 'demo-1' in html and 'role="alert"' in html and 'aria-label="同步"' in html
 
 
 def test_whole_batch_failure_preserves_old_records_and_allows_retry(sync_client, settings, source):
@@ -138,7 +138,7 @@ def test_concurrent_trigger_across_app_instances_returns_409(settings, fake_auth
                 assert run['status'] == 'running' and run['finished_at'] is None
                 assert second.post('/sync').status_code == 409
                 assert len(rows(settings, 'sync_runs')) == 1
-                assert 'running' in second.get('/').text
+                assert second.get('/').context['sync_run'].status == 'running'
             finally:
                 release.set()
             assert future.result(5).json()['status'] == 'success'
@@ -155,10 +155,13 @@ def test_sync_requires_active_whitelist_session(client, settings):
 
 
 def test_home_has_button_status_counts_and_immediate_result_script(sync_client):
-    assert '尚未同步' in sync_client.get('/').text
+    assert 'aria-label="同步"' in sync_client.get('/').text
     sync_client.post('/sync')
     html = sync_client.get('/').text
-    assert all(text in html for text in ('上次同步时间', 'success', '拉取 2', '新增 2', '更新 0', '更新', 'fetch(', '/sync', '笔记创建时间'))
+    assert all(text not in html for text in ('上次同步时间', '拉取 2', '新增 2', '更新 0', 'sync-panel'))
+    assert '笔记创建时间' in html and 'home.js' in html
+    script = sync_client.get('/static/home.js').text
+    assert all(text in script for text in ('fetch(', '/sync', 'is-complete', '1000', 'window.location.reload()'))
 
 
 def test_detail_id_mismatch_is_skipped(sync_client, settings, source):
