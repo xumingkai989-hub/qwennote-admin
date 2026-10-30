@@ -20,14 +20,14 @@ def build(db_path):
     async def lifespan(application):
         async with base(application):
             store = app.state.store
-            body = '本次会议中小鹅直播的转化率'
+            body = '本次会议中星河直播的转化率'
             store.upsert_recording(RecordingMeta('word-preview', '热词粒度验收（合成数据）', datetime.now(SHANGHAI), 5),
                                    RecordingDetail('word-preview', body, body, True, True), 'now')
-            store.add_hotword('小鹿直播')
+            store.add_hotword('星火直播')
             # Simulate a pre-existing sentence, then run the real startup migration.
             with store._connect() as conn:
                 conn.execute("INSERT INTO hotwords(term,created_at,updated_at) VALUES (?,'now','now')",
-                             ('本次会议中小鹿直播的转化率，后续还要复盘。',))
+                             ('本次会议中星火直播的转化率，后续还要复盘。',))
             store.migrate()
             yield
     app.router.lifespan_context = lifespan

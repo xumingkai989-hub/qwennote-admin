@@ -52,7 +52,7 @@ def test_alias_rebuild_failure_rolls_back_original_table_and_values(store, monke
         assert not conn.execute("SELECT name FROM sqlite_master WHERE name='hotwords_clean'").fetchone()
 
 
-@pytest.mark.parametrize('term,text', [('小鹿直播','产品使用小鹅直播'),('AI Tutor','这款助教用于课堂')])
+@pytest.mark.parametrize('term,text', [('星火直播','产品使用星河直播'),('AI Tutor','这款助教用于课堂')])
 def test_actual_assembled_prompt_only_term_and_context(term,text):
     import asyncio
     sent = []

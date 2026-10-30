@@ -15,7 +15,7 @@ from test_login import login
 @pytest.mark.parametrize('column', ['subject', 'union_id', 'open_id'])
 @pytest.mark.parametrize('identifier', ['on_login', 'ou_login'])
 def test_either_provider_id_matches_any_whitelist_column(client, store, fake_auth, column, identifier):
-    fake_auth.user = FeishuUser('ou_login', '许铭凯', '', union_id='on_login')
+    fake_auth.user = FeishuUser('ou_login', '张三', '', union_id='on_login')
     with sqlite3.connect(store.db_path) as conn:
         conn.execute('INSERT INTO users (subject, union_id, open_id, name, avatar_url, is_active, added_at) '
                      'VALUES (?, ?, ?, ?, ?, 1, ?)',
@@ -25,7 +25,7 @@ def test_either_provider_id_matches_any_whitelist_column(client, store, fake_aut
     assert login(client).status_code == 302
     assert client.get('/').status_code == 200
     user = store.get_user(identifier)
-    assert user.name == '许铭凯'
+    assert user.name == '张三'
     assert user.union_id == 'on_login'
     assert user.open_id == 'ou_login'
     assert user.added_at == 'original'

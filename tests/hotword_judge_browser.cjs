@@ -24,9 +24,9 @@ test('hotword trace, undo and pending state on desktop/mobile/dark',async()=>{
    await page.goto(`${base}/recordings/preview-${suffix}?view=summary`);
    assert.equal(await page.locator('#hotword-trace summary').innerText(),'热词已应用 2 处');
    await page.locator('#hotword-trace summary').click();
-   assert.match(await page.locator('#hotword-trace').innerText(),/小红直播 → 小鹿直播/);
+   assert.match(await page.locator('#hotword-trace').innerText(),/小红直播 → 星火直播/);
    assert.match(await page.locator('#hotword-trace').innerText(),/离线审核通过/);
-   assert.match(await page.locator('#summary-content').innerText(),/小鹿直播/);
+   assert.match(await page.locator('#summary-content').innerText(),/星火直播/);
    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
    await page.screenshot({path:path.join(out,`hotword-applied-${name}.png`),fullPage:true});
    await Promise.all([page.waitForURL(/view=summary/),page.getByRole('button',{name:'撤销总结中的 小红直播',exact:true}).click()]);

@@ -39,7 +39,7 @@ def provenance(client, store):
     body = '小{origin:1}红直播  {origin:2}  内容\n\n{origin:3}\n\n最后一句{origin:4}   '
     meta = RecordingMeta('origin-test', '展示测试', datetime(2026, 10, 30, 10, tzinfo=SHANGHAI), 5)
     store.upsert_recording(meta, RecordingDetail('origin-test', body, body, True, True), 'original')
-    seed_rule(store, '小鹿直播', '小红直播')
+    seed_rule(store, '星火直播', '小红直播')
     seed_rule(store, '标记不能先变热词', 'origin')
     from test_hotwords import approve_rules
     approve_rules(store, 'origin-test')
@@ -67,7 +67,7 @@ def test_five_exits_strip_before_hotwords_without_polluting_source(provenance, s
     response = client.get(path)
     assert response.status_code == 200
     assert 'origin:' not in response.text and '标记不能先变热词' not in response.text
-    assert ('人工正文' if override else '小鹿直播') in response.text
+    assert ('人工正文' if override else '星火直播') in response.text
     assert store.get_recording('origin-test') == before
     assert before.summary_md == before.transcript_md == original
     assert 'origin:' in before.summary_md

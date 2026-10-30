@@ -7,7 +7,7 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const base = process.env.EDIT_PREVIEW_URL || 'http://127.0.0.1:8767';
 const out = path.resolve(process.env.EDIT_ARTIFACTS || '../qwennote-admin-artifacts/ui-12-20261030');
 const original = '小红直播\n\nAI 助手';
-const changed = '小鹿直播\n\nAI Tutor';
+const changed = '星火直播\n\nAI Tutor';
 
 test('edit, cancel, save, opt-in suggestions, failures, and revert in four browser configurations', async () => {
   fs.mkdirSync(out, {recursive:true});
@@ -60,7 +60,7 @@ test('edit, cancel, save, opt-in suggestions, failures, and revert in four brows
       await page.locator('#edit-button').click();
       await page.locator('#hotword-suggestions').waitFor({state:'visible'});
       assert.equal(await page.locator('#hotword-options input:checked').count(), 2);
-      assert.match(await page.locator('#hotword-options').innerText(), /小鹿直播/);
+      assert.match(await page.locator('#hotword-options').innerText(), /星火直播/);
       assert.ok(!(await page.locator('#hotword-options').innerText()).includes('小红直播'));
       await page.locator('#hotword-options input').last().uncheck();
       assert.equal(await page.locator('#save-hotwords').innerText(), '存入选中的 1 条');
@@ -74,7 +74,7 @@ test('edit, cancel, save, opt-in suggestions, failures, and revert in four brows
       await Promise.all([page.waitForNavigation(), page.locator('#dismiss-hotwords').click()]);
       assert.equal(bulkRequests, 0);
       assert.match(await page.locator('#edit-trace').innerText(), /已手动编辑 · \d\d-\d\d \d\d:\d\d/);
-      assert.match(await page.locator('#detail-display').innerText(), /小鹿直播/);
+      assert.match(await page.locator('#detail-display').innerText(), /星火直播/);
       await page.screenshot({path:path.join(out,`${suffix}-trace.png`),fullPage:true});
       await page.locator('#edit-button').click();
       assert.equal((await editor.innerText()).replace(/\n{3,}/g, '\n\n'), changed);
@@ -91,7 +91,7 @@ test('edit, cancel, save, opt-in suggestions, failures, and revert in four brows
       await page.route('**/hotwords/bulk', route => route.fulfill({status:500,contentType:'application/json',body:'{}'}));
       await page.locator('#save-hotwords').click();
       await page.waitForFunction(() => document.getElementById('hotword-status').textContent.includes('正文已保存'));
-      assert.match(await page.locator('#detail-display').innerText(), /小鹿直播/);
+      assert.match(await page.locator('#detail-display').innerText(), /星火直播/);
       await page.unroute('**/hotwords/bulk');
       const response = page.waitForResponse(r => r.url().endsWith('/hotwords/bulk'));
       await page.locator('#save-hotwords').click();
@@ -100,7 +100,7 @@ test('edit, cancel, save, opt-in suggestions, failures, and revert in four brows
       await page.waitForFunction(() => document.getElementById('dismiss-hotwords').textContent === '完成');
       assert.match(await page.locator('#hotword-status').innerText(), /已存在 \d 条/);
       await Promise.all([page.waitForNavigation(), page.locator('#dismiss-hotwords').click()]);
-      assert.match(await page.locator('#detail-display').innerText(), /小鹿直播/);
+      assert.match(await page.locator('#detail-display').innerText(), /星火直播/);
       // Punctuation-only editing saves without a dialog.
       await page.locator('#edit-button').click();
       await editor.fill(changed + '！');
@@ -165,7 +165,7 @@ test('rich layout stays fixed, Markdown and timestamps survive edits, mobile scr
           const selection=getSelection();selection.removeAllRanges();selection.addRange(range);break;
         }
       });
-      await page.keyboard.insertText('小鹿直播');
+      await page.keyboard.insertText('星火直播');
       await page.screenshot({path:path.join(out,`${suffix}-editing.png`),fullPage:true});
       if(width===390) {
         await page.setViewportSize({width,height:430});
@@ -177,11 +177,11 @@ test('rich layout stays fixed, Markdown and timestamps survive edits, mobile scr
       const response=page.waitForResponse(r=>r.url().endsWith('/edit'));
       await content.press('Meta+Enter');
       const result=await (await response).json();assert.equal(result.saved,true);
-      assert.deepEqual(result.suggestions,[{term:'小鹿直播'}]);
+      assert.deepEqual(result.suggestions,[{term:'星火直播'}]);
       await page.locator('#hotword-suggestions').waitFor({state:'visible'});
       await Promise.all([page.waitForNavigation(),page.locator('#dismiss-hotwords').click()]);
       const saved=await page.locator('#edit-source').textContent().then(JSON.parse);
-      assert.equal(saved.trim(),initialSource.replace('小红直播','小鹿直播').trim());
+      assert.equal(saved.trim(),initialSource.replace('小红直播','星火直播').trim());
       assert.equal(await page.locator('#sidebar-links a[href="/search"]').count(),0);
       assert.deepEqual(await page.locator('#sidebar-links a').evaluateAll(links=>links.map(link=>link.getAttribute('href'))),
         ['/','/hotwords','/assistant','/models','/settings']);

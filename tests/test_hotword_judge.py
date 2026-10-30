@@ -99,7 +99,7 @@ def test_failures_persist_skip_and_page_survives(populated, store, failure):
     assert 'do not persist provider text' not in str(store.hotword_checks('hotword'))
 
 
-ITEM = {'hotword_id': 1, 'field': 'summary', 'term': '小鹿直播', 'text': '小鹅直播'}
+ITEM = {'hotword_id': 1, 'field': 'summary', 'term': '星火直播', 'text': '星河直播'}
 CONTEXT = {'start': 0, 'text': ITEM['text']}
 
 
@@ -112,7 +112,7 @@ def test_strict_json_rejects_invalid_shape(text):
 
 @pytest.mark.parametrize('mutate', ['duplicate', 'unknown', 'long', 'extra', 'bad-field', 'bad-decision', 'control'])
 def test_strict_json_rejects_invalid_items(mutate):
-    row = {'span': '小鹅直播', 'reason': '确指产品'}
+    row = {'span': '星河直播', 'reason': '确指产品'}
     if mutate == 'unknown': row['span'] = 2
     if mutate == 'long': row['reason'] = '字' * 101
     if mutate == 'extra': row['extra'] = True

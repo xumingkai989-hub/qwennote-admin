@@ -19,7 +19,7 @@ def build(directory):
     async def lifespan(application):
         async with base(application):
             store = app.state.store
-            seed_rule(store, '小鹿直播', '小红直播')
+            seed_rule(store, '星火直播', '小红直播')
             for suffix in ['summary', 'transcript', 'mobile', 'dark']:
                 approve_rules(store, 'preview-' + suffix)
             yield

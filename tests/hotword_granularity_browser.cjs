@@ -25,13 +25,13 @@ test('short word suggestion, review flag/edit entry, inline errors and standard-
         await Promise.all([page.waitForNavigation(), page.locator('#revert-button').click()]);
       }
       await page.locator('#edit-button').click();
-      await page.locator('#summary-content').fill('本次会议中小鹿直播的转化率');
+      await page.locator('#summary-content').fill('本次会议中星火直播的转化率');
       const saved = page.waitForResponse(r=>r.url().endsWith('/edit'));
       await page.locator('#edit-button').click();
       const result = await (await saved).json();
-      assert.deepEqual(result.suggestions,[{term:'小鹿直播'}]);
+      assert.deepEqual(result.suggestions,[{term:'星火直播'}]);
       await page.locator('#hotword-suggestions').waitFor({state:'visible'});
-      assert.match(await page.locator('#hotword-options').innerText(),/小鹿直播/);
+      assert.match(await page.locator('#hotword-options').innerText(),/星火直播/);
       await page.screenshot({path:path.join(out,`short-suggestion-${width}.png`),fullPage:true});
       await page.goto(base+'/hotwords');
       const review = page.locator('tr').filter({has:page.locator('.hotword-review')});

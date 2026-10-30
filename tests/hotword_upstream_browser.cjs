@@ -31,7 +31,7 @@ test('standard form, immediate single results, repush and serial batch using fak
   const page=await browser.newPage({viewport:{width:1440,height:1100}});
   await page.route('**/*',r=>new URL(r.request().url()).origin===base?r.continue():r.abort());
   await page.goto(base+'/hotwords');
-  const row=page.locator('tbody tr').filter({has:page.getByRole('rowheader',{name:'小鹿直播',exact:true})});
+  const row=page.locator('tbody tr').filter({has:page.getByRole('rowheader',{name:'星火直播',exact:true})});
   await row.locator('[data-push]').click();
   await page.waitForFunction(()=>document.querySelector('#qwen-feedback').textContent==='已推送');
   assert.equal(await page.locator('dialog[open]').count(),0);
@@ -40,7 +40,7 @@ test('standard form, immediate single results, repush and serial batch using fak
   assert.equal(await row.locator('[data-qwen-state]').innerText(),'已推送');
   await page.screenshot({path:path.join(out,'single-success-fake.png'),fullPage:true});
   let calls=await (await page.request.get(base+'/synthetic-calls')).json();
-  assert.deepEqual(calls.calls.filter(r=>r[0]==='add_personal_hot_word'),[['add_personal_hot_word',{hotWordList:['小鹿直播']}]]);
+  assert.deepEqual(calls.calls.filter(r=>r[0]==='add_personal_hot_word'),[['add_personal_hot_word',{hotWordList:['星火直播']}]]);
   const failure=page.locator('tbody tr').filter({has:page.getByRole('rowheader',{name:'失败词',exact:true})});
   await failure.locator('[data-push]').click();
   await page.waitForFunction(()=>document.querySelector('#qwen-feedback').textContent.includes('千问拒绝'));

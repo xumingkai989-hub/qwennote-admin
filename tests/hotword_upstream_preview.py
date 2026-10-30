@@ -25,7 +25,7 @@ def build(db_path):
     async def lifespan(application):
         async with base(application):
             store = app.state.store
-            store.add_hotword('小鹿直播')
+            store.add_hotword('星火直播')
             store.add_hotword('AI Tutor', note='英文标准词')
             store.add_hotword('失败词')
             seed(store, '停用词', enabled=0)

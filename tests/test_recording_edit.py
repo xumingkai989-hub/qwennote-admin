@@ -19,7 +19,7 @@ from test_admin import replace_session
 from test_login import login
 
 ORIGINAL = '小红直播\n\nAI 助手'
-NEW = '小鹿直播\n\nAI Tutor'
+NEW = '星火直播\n\nAI Tutor'
 PATH = '/recordings/edit-test'
 
 
@@ -57,11 +57,11 @@ def test_save_display_trace_and_revert(editing, store, field):
     assert response.status_code == 200
     data = response.json()
     assert data['saved'] is True and data['suggestions'] == [
-        {'term': '小鹿直播'}, {'term': 'AI Tutor'}]
+        {'term': '星火直播'}, {'term': 'AI Tutor'}]
     saved = store.get_overrides('edit-test')[field]
     assert saved['content_md'] == NEW and saved['updated_at'] == data['updated_at']
     html = editing.get(PATH + '?view=' + field).text
-    assert '小鹿直播' in visible(html) and '小红直播' not in visible(html)
+    assert '星火直播' in visible(html) and '小红直播' not in visible(html)
     assert '已手动编辑 · ' + data['edited_at'] in html and 'id="revert-button"' in html
     assert base_rows(store) == before and store.list_hotwords() == []
     assert post(editing, action='revert', field=field).json() == {'reverted': True}
@@ -82,7 +82,7 @@ def test_actual_sync_preserves_override_then_revert_uses_latest_base(editing, st
     result = editing.post('/sync').json()
     assert result['status'] == 'success' and result['updated'] == 1
     assert store.get_overrides('edit-test') == saved
-    assert '小鹿直播' in visible(editing.get(PATH + '?view=' + field).text)
+    assert '星火直播' in visible(editing.get(PATH + '?view=' + field).text)
     post(editing, action='revert', field=field)
     assert '同步更新后的' in visible(editing.get(PATH + '?view=' + field).text)
     assert store.get_overrides('edit-test') == {}
@@ -90,7 +90,7 @@ def test_actual_sync_preserves_override_then_revert_uses_latest_base(editing, st
 
 def test_fields_are_independent_and_second_save_diffs_previous_override(editing, store):
     post(editing, field='summary')
-    result = post(editing, field='summary', content='小鹿直播\n\nAI Mentor').json()
+    result = post(editing, field='summary', content='星火直播\n\nAI Mentor').json()
     assert result['suggestions'] == [{'term': 'AI Mentor'}]
     post(editing, field='transcript', content='人工修改转写')
     assert len(store.get_overrides('edit-test')) == 2
@@ -99,16 +99,16 @@ def test_fields_are_independent_and_second_save_diffs_previous_override(editing,
 
 
 def test_editor_starts_with_hotword_display_and_override_is_authoritative(editing, store):
-    seed_rule(store, '小鹿直播', '小红直播')
+    seed_rule(store, '星火直播', '小红直播')
     from test_hotwords import approve_rules
     approve_rules(store, 'edit-test')
     html = editing.get(PATH).text
     aliases = json.loads(re.search(r'<script id="edit-source"[^>]*>(.*?)</script>', html, re.S)[1])
-    assert aliases == '小鹿直播\n\nAI 助手'
-    result = post(editing, content='小鹿直播\n\nAI Tutor').json()
+    assert aliases == '星火直播\n\nAI 助手'
+    result = post(editing, content='星火直播\n\nAI Tutor').json()
     assert result['suggestions'] == [{'term': 'AI Tutor'}]
-    seed_rule(store, '再次替换', '小鹿直播')
-    assert '小鹿直播' in visible(editing.get(PATH).text)
+    seed_rule(store, '再次替换', '星火直播')
+    assert '星火直播' in visible(editing.get(PATH).text)
     assert '再次替换' not in visible(editing.get(PATH).text)
 
 
@@ -149,7 +149,7 @@ def test_exports_and_body_api_use_overrides(editing, store, path):
 @pytest.mark.parametrize('old,new,expected', [
     ('abcdef错ghijkl', 'abcdef对ghijkl', [{'term': '对'}]),
     ('abcXYZdef', 'abcNEWXYZdef', []),
-    ('小红直播', '小鹿直播', [{'term': '小鹿直播'}]),
+    ('小红直播', '星火直播', [{'term': '星火直播'}]),
     ('AI 助手', 'AI Tutor', [{'term': 'AI Tutor'}]),
     ('相同', '相同', []), ('你好，世界！', '你好 世界。', []),
     ('AI 助手', 'AI  助手', []), ('a,b,a', 'ab,a', []),

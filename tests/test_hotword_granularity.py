@@ -19,12 +19,12 @@ from test_recording_edit import editing, token
 
 
 @pytest.mark.parametrize('old,new,expected', [
-    ('本次会议中小鹅直播的转化率', '本次会议中小鹿直播的转化率', [{'term': '小鹿直播'}]),
-    ('讨论：小鹅直播，今天上线', '讨论：小鹿直播，今天上线', [{'term': '小鹿直播'}]),
+    ('本次会议中星河直播的转化率', '本次会议中星火直播的转化率', [{'term': '星火直播'}]),
+    ('讨论：星河直播，今天上线', '讨论：星火直播，今天上线', [{'term': '星火直播'}]),
     ('原文', '原文新增文字', []),
     ('AI Tutor', 'ai tutor', []),
     ('AI Tutor', 'AI  Tutor', []),
-    ('小 鹅直播', '小鹅直播', []),
+    ('星 河直播', '星河直播', []),
     ('甲' * 13, '乙' * 13, []),
     ('A' * 25, 'B' * 25, []),
     ('「甲词」', '「乙词」', [{'term': '乙词'}]),
@@ -99,20 +99,20 @@ def test_startup_flags_legacy_without_rewriting(settings, fake_auth, store, term
 def test_judge_invalid_span_retry_once(store, bad_span, retry_valid):
     store.migrate()
     store.add_hotword('标准词')
-    text = bad_span + ' 小鹅直播'
+    text = bad_span + ' 星河直播'
     store.upsert_recording(RecordingMeta('word', '词粒度', datetime.now(SHANGHAI), 1),
                           RecordingDetail('word', text, '', False, True), 'now')
     requests = []
     def handler(request):
         requests.append(json.loads(request.content))
-        span = '小鹅直播' if retry_valid and len(requests) == 2 else bad_span
+        span = '星河直播' if retry_valid and len(requests) == 2 else bad_span
         return response([{'span': span, 'reason': '产品'}])
     before = store.get_recording('word')
     result, = run_judgments(store, settings=SETTINGS, transport=httpx.MockTransport(handler))
     assert len(requests) == 2 and '上次结果不合法' in requests[1]['system']
     rows = store.hotword_decisions('word')
     if retry_valid:
-        assert len(rows) == 1 and rows[0]['span'] == '小鹅直播' and not result['judge_failed']
+        assert len(rows) == 1 and rows[0]['span'] == '星河直播' and not result['judge_failed']
     else:
         assert rows == [] and result['judge_failed'] == 1
         assert any(c['reason'] == 'judge_failed' for c in store.hotword_checks('word'))
