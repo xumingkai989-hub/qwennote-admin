@@ -500,3 +500,12 @@ def test_detail_long_text_readability(detail_client):
     for selector in ['.transcript-segment + .transcript-segment',
                      '.transcript-paragraph + .transcript-paragraph']:
         assert selector + ' { margin-top: 24px; }' in css
+
+
+def test_detail_section_has_nonzero_horizontal_padding(detail_client):
+    css = detail_client.get('/static/app.css').text
+    rules = re.findall(r'\.detail-section \{([^}]+)\}', css)
+    paddings = [re.search(r'padding:\s*([^;]+);', rule)[1].split() for rule in rules]
+    assert paddings == [['28px', '32px', '40px'], ['20px', '16px', '28px']]
+    assert all(float(padding[1].removesuffix('px')) > 0 for padding in paddings)
+    assert re.search(r'@media \(max-width: 719\.98px\)\s*\{\s*\.detail-section \{ padding: 20px 16px 28px;', css)

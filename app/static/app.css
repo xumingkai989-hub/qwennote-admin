@@ -128,7 +128,10 @@ h1 { margin: 0; font-size: 34px; line-height: 1.2; font-weight: 700; letter-spac
 .detail-meta { grid-column: 1 / -1; margin-top: 4px; color: var(--secondary); font-size: 13px; white-space: nowrap; }
 #copy-status:empty { display: none; }
 .error-page { padding-top: 26px; overflow-wrap: anywhere; }
-.detail-section { margin: 16px 0 0; padding: 24px 0 36px; background: var(--surface); border-radius: 12px; overflow-wrap: anywhere; }
+.detail-section { margin: 16px 0 0; padding: 28px 32px 40px; background: var(--surface); border-radius: 12px; overflow-wrap: anywhere; }
+@media (max-width: 719.98px) {
+  .detail-section { padding: 20px 16px 28px; }
+}
 .detail-section h2 { margin-top: 0; }
 .markdown-body pre { overflow-x: auto; padding: 16px; background: var(--background); border-radius: 8px; }
 .markdown-body code, .timestamp { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
@@ -247,15 +250,15 @@ mark { background: var(--mark); color: var(--text); border-radius: 2px; }
 .summary-document .markdown-body li > ol { margin: 6px 0; }
 .summary-document .markdown-body li > p { margin-bottom: 6px; }
 .summary-document .markdown-body blockquote { margin: 12px 0; padding-left: 12px; border-left: 3px solid var(--document-quote); color: var(--document-secondary); }
-.summary-document .markdown-body pre { margin: 12px 0; padding: 16px; overflow-x: auto; border-radius: 8px; background: var(--document-code); white-space: pre; overflow-wrap: normal; }
+.summary-document .markdown-body pre { margin: 12px 0; padding: 16px; border-radius: 8px; background: var(--document-code); white-space: pre-wrap; overflow-wrap: anywhere; }
 .summary-document .markdown-body code,
 .summary-document .chapter-time { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
 .summary-document .markdown-body hr { margin: 24px 0; border: 0; border-top: 1px solid var(--document-rule); }
 .summary-document .markdown-body strong { font-weight: 600; }
 .summary-document .markdown-body a { color: #007AFF; text-decoration: underline; }
 .summary-table { max-width: 100%; overflow-x: auto; margin: 12px 0; }
-.summary-table table { border-collapse: collapse; min-width: 100%; }
-.summary-table th, .summary-table td { border: 1px solid var(--document-rule); padding: 8px; min-width: 100px; }
+.summary-table table { border-collapse: collapse; width: 100%; table-layout: fixed; }
+.summary-table th, .summary-table td { border: 1px solid var(--document-rule); padding: 8px; overflow-wrap: anywhere; }
 .summary-table th { background: var(--document-meta); font-weight: 600; }
 .summary-document .markdown-body .summary-task { list-style: none; position: relative; }
 .summary-document .summary-checkbox { position: absolute; left: -24px; top: 7px; width: 16px; height: 16px; min-height: 0; padding: 0; margin: 0; border-radius: 3px; accent-color: #007AFF; }

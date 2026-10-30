@@ -342,3 +342,5 @@ LD_LIBRARY_PATH=/opt/qwennote/current/.sqlite/lib \
 1440px 的 home/detail/admin 新旧对比截图、390px 截图、测量 JSON、完整 HTML 报告保存于仓库外 `../qwennote-admin-artifacts/04g-20261030/`。截图使用同一组合成数据；上线经 `scripts/deploy.py --app-only`，发布目录与线上哈希核验记录在该交付目录。
 
 工单 04h 将详情版心恢复为与主页一致的 **1120px 外框 / 固定 16px 页边距**，1440px 视口的 section 宽 1088px；总结和转写正文行高 1.75，转写段间距 24px。该规格替代上文 04d / 04f 的窄版参数。六视口实测表与浏览器回归运行方式见 [04h 版心验收](docs/detail-layout-04h.md)。
+
+工单 04i 保持上述版心不变，在详情卡片内侧增加桌面左右 32px、手机左右 16px 留白；表格和代码块长内容换行。四视口实测表与回归证据见 [04i 内边距验收](docs/detail-padding-04i.md)。
