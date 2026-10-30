@@ -117,7 +117,7 @@ PY
 
 总结使用锁定的 `markdown-it-py==4.0.0`，显式设置 `html=False`，将原始 HTML 转义并阻止危险链接协议；仅该渲染器的输出在 Python 边界标为 Markup。标题、发言人和转写正文均由 Jinja 自动转义，不使用 `|safe`。支持标题、列表、粗体、引用和代码块。
 
-`GET /recordings/{recording_id}.md` 下载 UTF-8 Markdown，包含 YAML frontmatter、标题、总结和转写；字符串用兼容 YAML 的 JSON 引号与转义，未知时长留空。文件名删除非法字符及控制字符，空名回退为“录音”；响应通过 RFC 5987 `filename*=UTF-8''...` 保留中文，附带百分号编码的 quoted `filename` 兼容值。导出和详情均禁止缓存。
+`GET /recordings/{recording_id}.md?part=summary|transcript|all` 下载 UTF-8 Markdown。默认及非法 `part` 回退为 `all`，保留原有合并格式；`summary` 仅包含总结，`transcript` 仅包含转写原文。三种导出均包含相同 YAML frontmatter 和标题，文件名分别为 `<slug>-总结.md`、`<slug>-转写.md`、`<slug>.md`。详情菜单按“导出总结 / 导出转写原文 / 导出全部”排列，末项保留“复制 Markdown”（完整文档）。内容经过现有溯源清理、热词和人工编辑覆盖展示管线，仅对导出的段落应用热词；不改原始存储。字符串用兼容 YAML 的 JSON 引号与转义，未知时长留空。文件名删除非法字符及控制字符，空名回退为“录音”；响应通过 RFC 5987 `filename*=UTF-8''...` 保留中文，附带百分号编码的 quoted `filename` 兼容值。导出和详情均禁止缓存。工单 13 验收见 [导出拆分](docs/export-13.md)。
 
 “复制 Markdown”点击后才请求现有 `.md` 下载接口，检查响应状态与 Markdown 类型后，通过 `navigator.clipboard.writeText` 复制与下载相同的完整文档；首屏不内嵌隐藏 Markdown，未选中正文不进入 HTML，也不执行相应 Markdown 渲染或转写分段。浏览器不支持或拒绝剪贴板时展开只读原文并全选，提示手动复制，无前端框架。新增离线 TestClient 测试覆盖安全渲染及危险链接、转写段落、缺内容分支、登录/白名单失效、404、筛选返回、复制源、导出字段与特殊字符和文件名清洗。
 

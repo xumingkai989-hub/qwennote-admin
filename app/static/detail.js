@@ -49,7 +49,9 @@ for (const eventName of ['click', 'focusin']) {
     if (!exportContainer.contains(event.target)) closeExport();
   });
 }
-document.getElementById('download-markdown').addEventListener('click', () => closeExport(true));
+for (const item of exportItems) {
+  if (item !== copyButton) item.addEventListener('click', () => closeExport(true));
+}
 let copyPending = false;
 let copyTimer;
 function selectCopySource(source, text) {

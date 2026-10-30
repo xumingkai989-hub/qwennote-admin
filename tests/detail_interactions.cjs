@@ -30,14 +30,14 @@ function setup({ failClipboard = false, empty = false, failFetch = false } = {})
   const ids = Object.fromEntries(['copy-markdown', 'markdown-source', 'copy-status', 'copy-fallback',
     'transcript-toast', 'transcript-copy-fallback', 'transcript-source', 'copy-transcript',
     'transcript-search-status', 'transcript-search', 'export-button', 'export-menu',
-    'detail-export', 'download-markdown'].map(id => [id, element()]));
+    'detail-export', 'download-summary', 'download-transcript', 'download-markdown'].map(id => [id, element()]));
   ids['copy-markdown'].dataset = { markdownUrl: '/recordings/demo.md' };
   ids['copy-markdown'].textContent = '复制 Markdown';
   ids['export-menu'].hidden = true;
   ids['transcript-toast'].hidden = true;
-  ids['export-menu'].querySelectorAll = () => [ids['copy-markdown'], ids['download-markdown']];
+  ids['export-menu'].querySelectorAll = () => [ids['download-summary'], ids['download-transcript'], ids['download-markdown'], ids['copy-markdown']];
   ids['detail-export'].contains = target => ['detail-export', 'export-button', 'export-menu',
-    'copy-markdown', 'download-markdown'].some(id => ids[id] === target);
+    'copy-markdown', 'download-summary', 'download-transcript', 'download-markdown'].some(id => ids[id] === target);
   const selection = { removeAllRanges() {}, addRange(range) { range.node.selected = true; } };
   const document = { createRange: () => ({selectNodeContents(node) { this.node = node; }}), activeElement: null, listeners: {}, getElementById: id => ids[id] || null,
     addEventListener(name, handler) { this.listeners[name] = handler; } };
@@ -143,20 +143,20 @@ test('export opens, toggles and moves focus with wrapping arrows and Home/End', 
   ids['export-button'].click();
   assert.equal(ids['export-menu'].hidden, false);
   assert.equal(ids['export-button'].attributes['aria-expanded'], 'true');
-  assert.equal(document.activeElement, ids['copy-markdown']);
+  assert.equal(document.activeElement, ids['download-summary']);
   assert.ok(key(ids['export-menu'], 'ArrowUp'));
-  assert.equal(document.activeElement, ids['download-markdown']);
+  assert.equal(document.activeElement, ids['copy-markdown']);
   key(ids['export-menu'], 'ArrowDown');
-  assert.equal(document.activeElement, ids['copy-markdown']);
+  assert.equal(document.activeElement, ids['download-summary']);
   key(ids['export-menu'], 'End');
-  assert.equal(document.activeElement, ids['download-markdown']);
-  key(ids['export-menu'], 'Home');
   assert.equal(document.activeElement, ids['copy-markdown']);
+  key(ids['export-menu'], 'Home');
+  assert.equal(document.activeElement, ids['download-summary']);
   ids['export-button'].click();
   assert.ok(ids['export-menu'].hidden);
   assert.equal(document.activeElement, ids['export-button']);
   key(ids['export-button'], 'ArrowUp');
-  assert.equal(document.activeElement, ids['download-markdown']);
+  assert.equal(document.activeElement, ids['copy-markdown']);
 });
 
 test('Escape restores trigger focus; outside click and focus dismiss without stealing focus', () => {
@@ -179,13 +179,17 @@ test('Escape restores trigger focus; outside click and focus dismiss without ste
   assert.equal(document.activeElement, ids['transcript-search']);
 });
 
-test('download activates with Enter, closes menu and restores focus', () => {
+for (const [index, id] of ['download-summary', 'download-transcript', 'download-markdown'].entries()) {
+test(`${id} activates with Enter, closes menu and restores focus`, () => {
   const { ids, document } = setup();
-  key(ids['export-button'], 'ArrowUp');
+  ids['export-button'].click();
+  for (let step = 0; step < index; step++) key(ids['export-menu'], 'ArrowDown');
+  assert.equal(document.activeElement, ids[id]);
   assert.ok(key(ids['export-menu'], 'Enter'));
   assert.ok(ids['export-menu'].hidden);
   assert.equal(document.activeElement, ids['export-button']);
 });
+}
 
 test('Markdown feedback only changes menu label for 800ms, closes immediately, no toast', async () => {
   const { ids, timers, copied } = setup();
@@ -205,7 +209,7 @@ test('Markdown feedback only changes menu label for 800ms, closes immediately, n
 
 test('Markdown copy via Enter runs once while pending and ignores repeated keydown', async () => {
   const app = setup();
-  app.ids['export-button'].click();
+  key(app.ids['export-button'], 'ArrowUp');
   key(app.ids['export-menu'], 'Enter', true);
   assert.equal(app.requests(), 0);
   key(app.ids['export-menu'], 'Enter');

@@ -24,8 +24,10 @@
     <div id="detail-export" class="detail-export">
       <button id="export-button" class="secondary" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="export-menu">导出 <span aria-hidden="true">▾</span></button>
       <div id="export-menu" class="export-menu" role="menu" aria-labelledby="export-button" hidden>
+        <a id="download-summary" role="menuitem" tabindex="-1" href="{{ url_for('recording_markdown', recording_id=recording.recording_id).include_query_params(part='summary') }}">导出总结</a>
+        <a id="download-transcript" role="menuitem" tabindex="-1" href="{{ url_for('recording_markdown', recording_id=recording.recording_id).include_query_params(part='transcript') }}">导出转写原文</a>
+        <a id="download-markdown" role="menuitem" tabindex="-1" href="{{ url_for('recording_markdown', recording_id=recording.recording_id).include_query_params(part='all') }}">导出全部</a>
         <button id="copy-markdown" type="button" role="menuitem" tabindex="-1" data-markdown-url="{{ url_for('recording_markdown', recording_id=recording.recording_id) }}">复制 Markdown</button>
-        <a id="download-markdown" role="menuitem" tabindex="-1" href="{{ url_for('recording_markdown', recording_id=recording.recording_id) }}">下载 .md</a>
       </div>
     </div>
     <div class="detail-meta">
@@ -116,6 +118,6 @@
   {% endif %}
   </div>
   <div id="transcript-toast" class="transcript-toast" role="status" aria-live="polite" hidden></div>
-  <script src="{{ url_for('static', path='detail.js') }}?v=20261030-12" defer></script>
+  <script src="{{ url_for('static', path='detail.js') }}?v=20261030-13" defer></script>
   {% if can_edit %}<script src="{{ url_for('static', path='recording-edit.js') }}?v=20261030-12" defer></script>{% endif %}
 {% endblock %}

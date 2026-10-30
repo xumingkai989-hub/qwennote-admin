@@ -261,10 +261,14 @@ def create_app(
         recording, error = recording_for_request(request, store, recording_id)
         if error is not None:
             return error
+        part = request.query_params.get('part', 'all')
+        if part not in ('summary', 'transcript', 'all'):
+            part = 'all'
         recording = apply_recording_hotwords(recording, store.apply_hotwords,
+                                            fields=('summary', 'transcript') if part == 'all' else (part,),
                                             overrides=store.get_overrides(recording_id))
-        return Response(export_markdown(recording), media_type='text/markdown', headers={
-            'Content-Disposition': download_disposition(recording.title),
+        return Response(export_markdown(recording, part), media_type='text/markdown', headers={
+            'Content-Disposition': download_disposition(recording.title, part),
             'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff',
         })
 

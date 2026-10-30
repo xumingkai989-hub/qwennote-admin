@@ -36,7 +36,7 @@ def test_detail_markdown_and_metadata(detail_client):
     html = response.text
     for text in ['项目例会', '2026-10-29 09:30', '12 分钟', '已转录',
                  '<h1 class="summary-h1">会议总结</h1>', '<ul>', '<strong>行动事项</strong>', '<blockquote>', '<pre><code',
-                 '复制 Markdown', '下载 .md']:
+                 '复制 Markdown', '导出总结', '导出转写原文', '导出全部']:
         assert text in html
     assert response.headers['cache-control'] == 'no-store'
     assert '/recordings/detail.md' in html
@@ -136,10 +136,67 @@ def test_markdown_export(detail_client):
     assert unquote(response.headers['content-disposition'].split('filename="')[1].split('"')[0]) == '项目例会.md'
 
 
+@pytest.mark.parametrize('part,suffix', [('summary', '-总结'), ('transcript', '-转写'), ('all', '')])
+def test_export_parts(detail_client, part, suffix):
+    response = detail_client.get('/recordings/detail.md?part=' + part)
+    assert response.status_code == 200
+    assert response.headers['content-type'] == 'text/markdown; charset=utf-8'
+    assert response.headers['cache-control'] == 'no-store'
+    fields, body = frontmatter(response.text)
+    assert fields == dict(recording_id='detail', title='项目例会', created_at='2026-10-29 09:30',
+                          duration_min=12, has_transcript=True, has_summary=True)
+    assert body.startswith('\n# 项目例会\n\n')
+    assert ('## 总结\n' in body) == (part != 'transcript')
+    assert (SUMMARY in body) == (part != 'transcript')
+    assert ('## 转写原文\n' in body) == (part != 'summary')
+    assert (TRANSCRIPT in body) == (part != 'summary')
+    filename = '项目例会' + suffix + '.md'
+    disposition = response.headers['content-disposition']
+    assert unquote(disposition.split('filename="')[1].split('"')[0]) == filename
+    assert unquote(disposition.split("filename*=UTF-8''")[1]) == filename
+    if part == 'all':
+        assert response.content == detail_client.get('/recordings/detail.md').content
+
+
+@pytest.mark.parametrize('part', ['', 'invalid', 'SUMMARY', 'summary/transcript'])
+def test_invalid_export_part_falls_back_to_all(detail_client, part):
+    response = detail_client.get('/recordings/detail.md', params={'part': part})
+    default = detail_client.get('/recordings/detail.md')
+    assert response.status_code == 200
+    assert response.content == default.content
+    assert response.headers['content-disposition'] == default.headers['content-disposition']
+
+
+@pytest.mark.parametrize('part', ['summary', 'transcript', 'all'])
+def test_export_part_only_applies_hotwords_to_exported_content(detail_client, store, part):
+    detail_client.add(summary='总结小{origin:1}红直播', transcript='转写小{origin:2}红直播')
+    original = store.get_recording('detail')
+    store.add_hotword('小红直播', '小鹿直播')
+    store.add_hotword('origin', '不应先替换')
+    response = detail_client.get('/recordings/detail.md?part=' + part)
+    assert 'origin:' not in response.text and '不应先替换' not in response.text
+    assert '小红直播' not in response.text
+    assert ('总结小鹿直播' in response.text) == (part != 'transcript')
+    assert ('转写小鹿直播' in response.text) == (part != 'summary')
+    assert {word.source: word.hits for word in store.list_hotwords()} == {
+        '小红直播': 2 if part == 'all' else 1, 'origin': 0}
+    assert store.get_recording('detail') == original
+
+
+@pytest.mark.parametrize('part,heading,placeholder', [
+    ('summary', '总结', '（无总结）'), ('transcript', '转写原文', '（未转录）')])
+def test_empty_export_part(detail_client, part, heading, placeholder):
+    detail_client.add(summary='', transcript='', duration=None)
+    fields, body = frontmatter(detail_client.get('/recordings/detail.md?part=' + part).text)
+    assert fields['duration_min'] is None
+    assert body == f'\n# 项目例会\n\n## {heading}\n{placeholder}\n'
+
+
 @pytest.mark.parametrize('title', ['标题/\\:*?"<>|', '冒号: #注释\n下一行 "引号"', 'true', '', '\r\n恶意标题', 'Unicode\x85换行\u2028分隔\u2029'])
-def test_export_quotes_yaml_and_cleans_filename(detail_client, title):
+@pytest.mark.parametrize('part,suffix', [('summary', '-总结'), ('transcript', '-转写'), ('all', '')])
+def test_export_quotes_yaml_and_cleans_filename(detail_client, title, part, suffix):
     detail_client.add(title=title, duration=None)
-    response = detail_client.get('/recordings/detail.md')
+    response = detail_client.get('/recordings/detail.md?part=' + part)
     assert response.status_code == 200
     fields, _ = frontmatter(response.text)
     assert fields['title'] == title and fields['duration_min'] is None
@@ -148,7 +205,7 @@ def test_export_quotes_yaml_and_cleans_filename(detail_client, title):
     assert not re.search(r'[/\\:*?"<>|\x00-\x1f\x7f]', filename)
     assert filename.endswith('.md') and len(filename) > 3
     if title.startswith('标题'):
-        assert filename == '标题.md'
+        assert filename == '标题' + suffix + '.md'
 
 
 def test_export_empty_sections(detail_client):
@@ -210,7 +267,7 @@ def test_only_selected_view_is_rendered(detail_client, summary, transcript, quer
         assert '第一段正文。' not in html and 'transcript-heading' not in html
     else:
         assert '行动事项' not in html and 'summary-heading' not in html
-    assert '复制 Markdown' in html and '下载 .md' in html
+    assert '复制 Markdown' in html and '导出全部' in html
 
 
 @pytest.mark.parametrize('view,unused', [('summary', 'transcript_segments'), ('transcript', 'render_summary')])
@@ -305,11 +362,14 @@ def test_compact_header_has_single_export_menu(detail_client, view):
     assert 'class="detail-meta"' in header and 'class="badge badge-complete"' in header
     assert re.search(r'id="export-button"[^>]*aria-haspopup="menu"[^>]*aria-expanded="false"', header)
     menu = re.search(r'<div id="export-menu"[^>]*role="menu"[^>]*hidden>(.*?)</div>', header, re.S)[1]
-    assert menu.count('role="menuitem"') == 2
-    for label in ['复制 Markdown', '下载 .md']:
+    assert menu.count('role="menuitem"') == 4
+    for label in ['复制 Markdown', '导出总结', '导出转写原文', '导出全部']:
         assert menu.count(label) == 1 and html.count(label) == 1
+    links = re.findall(r'<a id="download-[^"]+"[^>]*href="([^"]+)"[^>]*>(.*?)</a>', menu)
+    assert links == [(f'http://testserver/recordings/detail.md?part={part}', label)
+                     for part, label in [('summary', '导出总结'), ('transcript', '导出转写原文'), ('all', '导出全部')]]
     download = re.search(r'<a id="download-markdown"[^>]*>', menu)[0]
-    assert 'href="http://testserver/recordings/detail.md"' in download
+    assert 'href="http://testserver/recordings/detail.md?part=all"' in download
     # Preserve the existing link attributes and server Content-Disposition filename.
     assert ' download' not in download
     assert '时间为笔记创建时间' not in html and '非录音开始时间' not in html

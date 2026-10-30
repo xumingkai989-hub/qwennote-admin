@@ -114,7 +114,7 @@ def transcript_segments(value: str) -> list[dict]:
     return segments
 
 
-def export_markdown(recording: StoredRecording) -> str:
+def export_markdown(recording: StoredRecording, part: str = 'all') -> str:
     # JSON quoted scalars are also YAML double quoted scalars, including newlines,
     # quotes, colon/hash and string values such as "true" or numeric-looking IDs.
     fields = {
@@ -138,13 +138,18 @@ def export_markdown(recording: StoredRecording) -> str:
     header = '\n'.join(f'{key}: {yaml_scalar(value)}' for key, value in fields.items())
     summary = recording.summary_md if recording.has_summary else '（无总结）'
     transcript = recording.transcript_md if recording.has_transcript else '（未转录）'
-    return (f'---\n{header}\n---\n\n# {recording.title}\n\n'
-            f'## 总结\n{summary}\n\n## 转写原文\n{transcript}\n')
+    sections = []
+    if part != 'transcript':
+        sections.append(f'## 总结\n{summary}')
+    if part != 'summary':
+        sections.append(f'## 转写原文\n{transcript}')
+    return f'---\n{header}\n---\n\n# {recording.title}\n\n' + '\n\n'.join(sections) + '\n'
 
 
-def download_disposition(title: str) -> str:
+def download_disposition(title: str, part: str = 'all') -> str:
     slug = re.sub(r'[/\\:*?"<>|\x00-\x1f\x7f]', '', title).strip().strip('.') or '录音'
     # UTF-8 filename* preserves Chinese in browsers; the quoted fallback is
     # percent encoded so the HTTP header remains valid ASCII (no CR/LF).
-    filename = quote(slug + '.md', safe='')
+    suffix = {'summary': '-总结', 'transcript': '-转写'}.get(part, '')
+    filename = quote(slug + suffix + '.md', safe='')
     return f'attachment; filename="{filename}"; filename*=UTF-8\'\'{filename}'

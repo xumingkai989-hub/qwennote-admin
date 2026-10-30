@@ -49,7 +49,9 @@ def provenance(client, store):
 
 @pytest.mark.parametrize('path', [
     '/recordings/origin-test?view=summary', '/recordings/origin-test?view=transcript',
-    '/recordings/origin-test.md', '/api/v1/recordings/origin-test',
+    '/recordings/origin-test.md',
+    '/recordings/origin-test.md?part=summary', '/recordings/origin-test.md?part=transcript',
+    '/recordings/origin-test.md?part=all', '/api/v1/recordings/origin-test',
     '/api/v1/daily/2026-10-30?format=md',
 ])
 @pytest.mark.parametrize('override', [False, True])
