@@ -44,9 +44,13 @@
     </form>
   </section>
   <p class="selected-period">当前：{% if filters.mode == 'all' %}全部日期{% else %}{{ filters.start }}{% if filters.mode == 'range' %} 至 {{ filters.end }}{% endif %}{% endif %}</p>
-  <section class="recording-grid" aria-label="录音列表">
+  <section class="{{ 'recording-grid' if search_query else 'recording-list' }}" aria-label="录音列表">
+    {% if not search_query and recordings.items %}
+    <div class="recording-list-header" aria-hidden="true"><span>时间</span><span>标题</span><span class="recording-duration">时长</span><span>状态</span></div>
+    {% endif %}
     {% for recording in recordings.items %}
     {% set status, status_label = recording.status %}
+    {% if search_query %}
     <article class="recording-card" data-recording-id="{{ recording.recording_id }}">
       <span class="badge badge-{{ status }}">{{ status_label }}</span>
       <h2><a href="/recordings/{{ recording.recording_id | urlencode }}{{ detail_query }}">{{ recording.title or '未命名录音' }}</a></h2>
@@ -59,6 +63,19 @@
       </div>
       {% endif %}
     </article>
+    {% else %}
+    <article class="recording-row" data-recording-id="{{ recording.recording_id }}">
+      <a class="recording-row-link" href="/recordings/{{ recording.recording_id | urlencode }}{{ detail_query }}">
+        <time class="recording-time" datetime="{{ recording.created_at.isoformat() }}">{{ recording.created_at.strftime('%H:%M') }}</time>
+        <span class="recording-title" title="{{ recording.title or '未命名录音' }}">{{ recording.title or '未命名录音' }}</span>
+        <span class="recording-details">
+          <span class="recording-duration" aria-label="录音时长">{{ (recording.duration_min ~ ' 分') if recording.duration_min is not none else '—' }}</span>
+          <span class="recording-meta-separator" aria-hidden="true">·</span>
+          <span class="recording-status"><span class="badge badge-{{ status }}">{{ status_label }}</span></span>
+        </span>
+      </a>
+    </article>
+    {% endif %}
     {% else %}
     {% if search_query %}
     <div class="empty-state"><h2>没有找到包含「{{ search_query }}」的录音</h2><p>可以换个关键词，或调整日期区间后重试。</p></div>

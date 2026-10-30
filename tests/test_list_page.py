@@ -17,6 +17,8 @@ class Page(HTMLParser):
         self.selected = []
         self.inputs = []
         self.badges = {}
+        self.row_fields = {}
+        self.titles = {}
         self.current_card = None
         self.in_badge = False
         self.feed(html)
@@ -28,6 +30,15 @@ class Page(HTMLParser):
         if tag == 'article':
             self.cards.append(attrs['data-recording-id'])
             self.current_card = attrs['data-recording-id']
+            if 'recording-row' in attrs.get('class', '').split():
+                self.row_fields[self.current_card] = set()
+        classes = attrs.get('class', '').split()
+        if self.current_card in self.row_fields:
+            self.row_fields[self.current_card].update(set(classes) & {
+                'recording-time', 'recording-title', 'recording-duration', 'recording-status',
+            })
+        if 'recording-title' in classes:
+            self.titles[self.current_card] = attrs.get('title')
         if tag == 'span' and 'badge' in attrs.get('class', '').split():
             self.in_badge = True
         if attrs.get('aria-current'):
@@ -104,7 +115,7 @@ def test_date_filters_include_whole_days(list_client, add_recording, query, expe
                        for field in Page(response.text).inputs)
 
 
-def test_card_metadata_four_states_and_no_recording_bodies(list_client, add_recording):
+def test_row_metadata_four_states_and_no_recording_bodies(list_client, add_recording):
     for recording_id, transcript, summary in [
         ('complete', True, True), ('transcript-only', True, False),
         ('summary-only', False, True), ('empty', False, False),
@@ -115,8 +126,8 @@ def test_card_metadata_four_states_and_no_recording_bodies(list_client, add_reco
     assert Page(html).badges == {
         'complete': '已转录', 'transcript-only': '仅转写', 'summary-only': '仅总结', 'empty': '未转录',
     }
-    assert '2026-10-29 09:30' in html
-    assert '18 分钟' in html and '—' in html
+    assert '>09:30</time>' in html
+    assert '18 分</span>' in html and '—' in html
     assert '时间均为笔记创建时间，非录音开始时间' in html
     assert 'SUMMARY_BODY_PRIVATE' not in html and 'TRANSCRIPT_BODY_PRIVATE' not in html
     assert len(html) < 20000
@@ -193,7 +204,34 @@ def test_title_is_escaped_and_zero_duration_is_visible(list_client, add_recordin
     html = list_client.get('/').text
     assert '<script>alert(1)</script>' not in html
     assert '&lt;script&gt;alert(1)&lt;/script&gt;' in html
-    assert '0 分钟' in html
+    assert '0 分</span>' in html
+
+
+def test_desktop_rows_each_have_four_fields_and_detail_link(list_client, add_recording):
+    for i in range(23):
+        add_recording(f'row-{i:02}')
+    page = Page(list_client.get('/').text)
+    assert len(page.row_fields) == len(page.cards) == 20
+    for recording_id, fields in page.row_fields.items():
+        assert fields == {'recording-time', 'recording-title', 'recording-duration', 'recording-status'}
+        assert any(link.get('class') == 'recording-row-link' and
+                   link.get('href') == f'/recordings/{recording_id}' for link in page.links)
+
+
+def test_long_title_has_complete_escaped_title_attribute(list_client, add_recording):
+    title = '会议："导师中心"与教务分身 <进展> & 后续安排' * 12
+    add_recording('long-title', title=title)
+    page = Page(list_client.get('/').text)
+    assert page.titles == {'long-title': title}
+
+
+def test_mobile_two_line_structure_and_desktop_header(list_client, add_recording):
+    add_recording('mobile')
+    html = list_client.get('/').text
+    for class_name in ['recording-list-header', 'recording-row-link', 'recording-time',
+                       'recording-title', 'recording-details', 'recording-meta-separator',
+                       'recording-duration', 'recording-status']:
+        assert f'class="{class_name}"' in html
 
 
 def test_header_search_is_enabled_and_css_is_served(list_client):

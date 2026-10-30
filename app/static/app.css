@@ -37,6 +37,25 @@ h1 { margin: 0; font-size: 28px; letter-spacing: -.03em; }
 .secondary { background: #f1f4ed; color: #24533f; border-color: #bac5bc; padding: 8px 14px; }
 .secondary:hover { background: #e2ebdb; }
 .selected-period { margin: 16px 0; }
+.recording-list { background: white; }
+.recording-list-header, .recording-row-link { display: grid; grid-template-columns: 64px minmax(0, 1fr) 72px 88px; column-gap: 16px; align-items: center; height: 44px; padding: 0 12px; border-bottom: 1px solid #dce2d7; }
+.recording-list-header { position: sticky; top: 0; z-index: 1; background: #e9eee5; color: #5e6a62; font-size: 14px; }
+.recording-row { min-width: 0; }
+.recording-row-link { color: inherit; }
+.recording-row-link:hover, .recording-row-link:focus-visible { background: #f1f4ed; text-decoration: none; }
+.recording-time { font-variant-numeric: tabular-nums; white-space: nowrap; color: #5e6a62; font-size: 14px; }
+.recording-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.recording-details { display: contents; }
+.recording-duration { text-align: right; white-space: nowrap; color: #5e6a62; font-size: 14px; }
+.recording-meta-separator { display: none; }
+.recording-status { white-space: nowrap; }
+@media (max-width: 719.98px) {
+  .recording-list-header { display: none; }
+  .recording-row-link { height: auto; min-height: 68px; grid-template-columns: 64px minmax(0, 1fr); gap: 2px 8px; align-items: baseline; padding: 10px 8px; }
+  .recording-title { white-space: normal; overflow-wrap: anywhere; }
+  .recording-details { grid-column: 2; display: flex; align-items: center; gap: 8px; }
+  .recording-meta-separator { display: inline; color: #5e6a62; }
+}
 .recording-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
 .recording-card { min-width: 0; padding: 24px; background: white; border: 1px solid #dce2d7; border-radius: 14px; }
 .recording-card h2 { margin: 16px 0 24px; font-size: 22px; line-height: 1.45; overflow-wrap: anywhere; }
