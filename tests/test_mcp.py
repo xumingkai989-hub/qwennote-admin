@@ -149,7 +149,9 @@ def test_filtered_and_no_summary_page(setup_source, settings, fake_auth):
         login(client)
         assert client.post('/sync').json()['status'] == 'success'
         detail = client.get('/recordings/real-1').text
-        assert '未转录' in detail and '暂无总结' in detail
+        assert '未转录' in detail and '这条录音还没有 AI 总结' in detail
+        transcript = client.get('/recordings/real-1?view=transcript').text
+        assert '这条录音还没有转写内容' in transcript
         assert not source.get_detail('real-1').has_transcript
         assert '正文' not in detail
 

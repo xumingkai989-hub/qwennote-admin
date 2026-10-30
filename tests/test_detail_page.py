@@ -36,14 +36,14 @@ def test_detail_markdown_and_metadata(detail_client):
     html = response.text
     for text in ['项目例会', '2026-10-29 09:30', '12 分钟', '已转录', '时间为笔记创建时间',
                  '<h1>会议总结</h1>', '<ul>', '<strong>行动事项</strong>', '<blockquote>', '<pre><code',
-                 '第一段正文。', '第二段正文。', '复制 Markdown', '下载 .md']:
+                 '复制 Markdown', '下载 .md']:
         assert text in html
     assert response.headers['cache-control'] == 'no-store'
     assert '/recordings/detail.md' in html
 
 
 def test_transcript_preserves_segments_and_paragraphs(detail_client):
-    html = detail_client.get('/recordings/detail').text
+    html = detail_client.get('/recordings/detail?view=transcript').text
     assert re.search(r'<[^>]*class="timestamp"[^>]*>\[00:00:00.360–00:00:26.760\]</', html)
     assert re.search(r'<strong[^>]*>发言人 1</strong>', html)
     paragraphs = re.findall(r'<p class="transcript-paragraph">(.*?)</p>', html, re.S)
@@ -55,12 +55,14 @@ def test_transcript_preserves_segments_and_paragraphs(detail_client):
     '<script>alert(1)</script>', '<img src=x onerror=alert(1)>',
     '</textarea><script>alert(2)</script>',
 ])
-def test_user_html_is_escaped_everywhere(detail_client, payload):
+@pytest.mark.parametrize('view', ['summary', 'transcript'])
+def test_user_html_is_escaped_everywhere(detail_client, payload, view):
     detail_client.add(title=payload, summary=payload, transcript=TRANSCRIPT + '\n\n' + payload)
-    html = detail_client.get('/recordings/detail').text
+    html = detail_client.get('/recordings/detail?view=' + view).text
     assert payload not in html
     assert '&lt;script&gt;' in html or '&lt;img' in html
-    assert unescape(re.search(r'<textarea[^>]*>(.*?)</textarea>', html, re.S)[1]).endswith(payload + '\n')
+    assert unescape(re.search(r'<textarea[^>]*>(.*?)</textarea>', html, re.S)[1]) == ''
+    assert detail_client.get('/recordings/detail.md').text.endswith(payload + '\n')
 
 
 def test_dangerous_markdown_links_are_not_executable(detail_client):
@@ -69,15 +71,18 @@ def test_dangerous_markdown_links_are_not_executable(detail_client):
     assert 'href="javascript:' not in html and 'src="data:' not in html
 
 
-@pytest.mark.parametrize('summary,transcript,message,absent', [
-    (SUMMARY, '', '该录音未转录', 'class="transcript-segment"'),
-    ('', TRANSCRIPT, '该录音暂无总结', 'id="summary-content"'),
-    ('', '', '该录音既无转写也无总结', 'class="transcript-segment"'),
+@pytest.mark.parametrize('summary,transcript,view,message,absent', [
+    (SUMMARY, '', 'transcript', '这条录音还没有转写内容', 'class="transcript-segment"'),
+    ('', TRANSCRIPT, 'summary', '这条录音还没有 AI 总结', 'id="summary-content"'),
+    ('', '', 'summary', '这条录音还没有 AI 总结', 'id="summary-content"'),
+    ('', '', 'transcript', '这条录音还没有转写内容', 'class="transcript-segment"'),
 ])
-def test_empty_content_branches(detail_client, summary, transcript, message, absent):
+def test_empty_content_branches(detail_client, summary, transcript, view, message, absent):
     detail_client.add(summary=summary, transcript=transcript)
-    html = detail_client.get('/recordings/detail').text
+    html = detail_client.get('/recordings/detail?view=' + view).text
     assert message in html and absent not in html
+    assert re.search(r'class="view-option is-empty" aria-current="page"', html)
+    assert 'aria-disabled=' not in html
 
 
 @pytest.mark.parametrize('suffix', ['', '.md'])
@@ -150,7 +155,8 @@ def test_export_empty_sections(detail_client):
 def test_copy_has_clipboard_and_selection_fallback(detail_client):
     html = detail_client.get('/recordings/detail').text
     textarea = re.search(r'<textarea[^>]*>(.*?)</textarea>', html, re.S)
-    assert textarea and unescape(textarea[1]) == detail_client.get('/recordings/detail.md').text
+    assert textarea and textarea[1] == ''
+    assert 'data-markdown-url="http://testserver/recordings/detail.md"' in html
     js = detail_client.get('/static/detail.js').text
     assert 'navigator.clipboard.writeText' in js and '.select()' in js
 
@@ -170,7 +176,61 @@ def test_invalid_return_filter_falls_back(detail_client):
 
 def test_transcript_without_timestamp_keeps_paragraphs(detail_client):
     detail_client.add(transcript='普通转写第一段。\n\n普通转写第二段。')
-    html = detail_client.get('/recordings/detail').text
+    html = detail_client.get('/recordings/detail?view=transcript').text
     assert re.findall(r'<p class="transcript-paragraph">(.*?)</p>', html, re.S) == [
         '普通转写第一段。', '普通转写第二段。',
     ]
+
+
+@pytest.mark.parametrize('summary,transcript,query,expected', [
+    (SUMMARY, TRANSCRIPT, '', 'summary'),
+    (SUMMARY, TRANSCRIPT, '?view=summary', 'summary'),
+    (SUMMARY, TRANSCRIPT, '?view=transcript', 'transcript'),
+    ('', TRANSCRIPT, '', 'transcript'),
+    ('', '', '', 'summary'),
+    (SUMMARY, '', '', 'summary'),
+    (SUMMARY, TRANSCRIPT, '?view=xxx', 'summary'),
+    ('', TRANSCRIPT, '?view=xxx', 'transcript'),
+    (SUMMARY, TRANSCRIPT, '?view=', 'summary'),
+])
+def test_only_selected_view_is_rendered(detail_client, summary, transcript, query, expected):
+    detail_client.add(summary=summary, transcript=transcript)
+    response = detail_client.get('/recordings/detail' + query)
+    assert response.status_code == 200
+    html = response.text
+    assert f'id="{expected}-heading"' in html
+    if expected == 'summary':
+        assert '第一段正文。' not in html and 'transcript-heading' not in html
+    else:
+        assert '行动事项' not in html and 'summary-heading' not in html
+    assert '复制 Markdown' in html and '下载 .md' in html
+
+
+@pytest.mark.parametrize('view,unused', [('summary', 'transcript_segments'), ('transcript', 'render_summary')])
+def test_inactive_content_and_export_are_not_processed(detail_client, monkeypatch, view, unused):
+    def forbidden(*args, **kwargs):
+        raise AssertionError('Inactive content must not be processed')
+    monkeypatch.setattr('app.main.' + unused, forbidden)
+    monkeypatch.setattr('app.main.export_markdown', forbidden)
+    assert detail_client.get('/recordings/detail?view=' + view).status_code == 200
+
+
+@pytest.mark.parametrize('filters', ['date=2026-10-29&page=2', 'q=项目&from=2026-10-01&to=2026-10-30&page=3'])
+def test_switch_links_preserve_origin_and_replace_view(detail_client, filters):
+    html = detail_client.get('/recordings/detail?' + filters + '&view=summary').text
+    links = re.findall(r'<a href="([^"]+)" class="view-option[^"]*"', html)
+    assert len(links) == 2
+    for href, view in zip(links, ['summary', 'transcript']):
+        url = unescape(href)
+        assert parse_qs(urlsplit(url).query) == {**parse_qs(filters), 'view': [view]}
+        switched = detail_client.get(url).text
+        back = unescape(re.search(r'id="back-to-list"[^>]*href="([^"]+)"', switched)[1])
+        assert parse_qs(urlsplit(back).query) == parse_qs(filters)
+        assert urlsplit(back).path == ('/search' if 'q=' in filters else '/')
+
+
+def test_short_timestamp_format(detail_client):
+    detail_client.add(transcript='[00:00.360–00:26.760] 发言人 1\n\n正文')
+    html = detail_client.get('/recordings/detail?view=transcript').text
+    assert '[00:00.360–00:26.760]' in html
+    assert '<strong>发言人 1</strong>' in html

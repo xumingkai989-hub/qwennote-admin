@@ -125,6 +125,14 @@ h1 { margin: 0; font-size: 34px; line-height: 1.2; font-weight: 700; letter-spac
 .detail-header h1, .detail-header .card-meta { grid-column: 1 / -1; }
 .detail-header h1 { overflow-wrap: anywhere; }
 .detail-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.detail-view-switch { position: sticky; top: 0; z-index: 2; margin-top: 12px; padding: 0 0 12px; background: var(--background); }
+.segmented-control { display: flex; width: 320px; max-width: 100%; padding: 4px; border-radius: 12px; background: var(--control); }
+.view-option { display: flex; flex: 1; align-items: center; justify-content: center; min-height: 44px; border-radius: 9px; color: var(--text); font-size: 15px; font-weight: 600; }
+.view-option:hover { text-decoration: none; }
+.view-option[aria-current="page"] { background: #FFFFFF; color: #1C1C1E; box-shadow: 0 2px 5px #0000001A, 0 1px 2px #0000000D; }
+.view-option.is-empty { color: var(--secondary); }
+.view-option.is-empty[aria-current="page"] { color: #AEAEB2; }
+.detail-meta { margin-top: 4px; }
 .detail-section { margin: 24px 0; padding: 24px; background: var(--surface); border-radius: 12px; overflow-wrap: anywhere; }
 .detail-section h2 { margin-top: 0; }
 .markdown-body pre { overflow-x: auto; padding: 16px; background: var(--background); border-radius: 8px; }
@@ -174,5 +182,6 @@ mark { background: var(--mark); color: var(--text); border-radius: 2px; }
   .pagination { gap: 20px; }
   .detail-header { grid-template-columns: minmax(0, 1fr); }
   .detail-actions { grid-row: 2; }
+  .segmented-control { width: 100%; }
   .detail-section { padding: 18px; }
 }

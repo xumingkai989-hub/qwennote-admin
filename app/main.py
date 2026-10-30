@@ -266,11 +266,16 @@ def create_app(
                 {**params, **filters['params'], 'page': filters['page']})
         except ValueError:
             back_url = '/'
+        default_view = 'summary' if recording.has_summary or not recording.has_transcript else 'transcript'
+        view = request.query_params.get('view', default_view)
+        if view not in ('summary', 'transcript'):
+            view = default_view
         return templates.TemplateResponse(request=request, name='detail.html', context={
             'title': recording.title or '未命名录音', 'recording': recording, 'back_url': back_url,
-            'summary_html': render_summary(recording.summary_md) if recording.has_summary else None,
-            'segments': transcript_segments(recording.transcript_md) if recording.has_transcript else [],
-            'markdown': export_markdown(recording),
+            'view': view,
+            'view_urls': {name: request.url.include_query_params(view=name) for name in ('summary', 'transcript')},
+            'summary_html': render_summary(recording.summary_md) if view == 'summary' and recording.has_summary else None,
+            'segments': transcript_segments(recording.transcript_md) if view == 'transcript' and recording.has_transcript else [],
         }, headers={'Cache-Control': 'no-store'})
 
     @app.post('/auth/logout')

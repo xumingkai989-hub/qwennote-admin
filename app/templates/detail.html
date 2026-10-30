@@ -4,33 +4,37 @@
   <header class="detail-header">
     <a id="back-to-list" href="{{ back_url }}">← 返回列表</a>
     <div class="detail-actions">
-      <button id="copy-markdown" type="button">复制 Markdown</button>
+      <button id="copy-markdown" type="button" data-markdown-url="{{ url_for('recording_markdown', recording_id=recording.recording_id) }}">复制 Markdown</button>
       <a class="filter-link" href="{{ url_for('recording_markdown', recording_id=recording.recording_id) }}">下载 .md</a>
     </div>
     <h1>{{ title }}</h1>
-    <div class="card-meta">
-      <time datetime="{{ recording.created_at.isoformat() }}">{{ recording.created_at.strftime('%Y-%m-%d %H:%M') }}</time>
-      <span>{{ (recording.duration_min ~ ' 分钟') if recording.duration_min is not none else '—' }}</span>
-      <span class="badge badge-{{ status }}">{{ status_label }}</span>
-    </div>
   </header>
+  <nav class="detail-view-switch" aria-label="录音内容视图">
+    <div class="segmented-control">
+      {% for name, label, available in [('summary', '总结', recording.has_summary), ('transcript', '转写原文', recording.has_transcript)] %}
+        <a href="{{ view_urls[name] }}" class="view-option{% if not available %} is-empty{% endif %}"{% if view == name %} aria-current="page"{% endif %}{% if not available %} aria-label="{{ label }}（暂无内容）" title="暂无内容"{% endif %}>{{ label }}</a>
+      {% endfor %}
+    </div>
+  </nav>
+  <div class="card-meta detail-meta">
+    <time datetime="{{ recording.created_at.isoformat() }}">{{ recording.created_at.strftime('%Y-%m-%d %H:%M') }}</time>
+    <span>{{ (recording.duration_min ~ ' 分钟') if recording.duration_min is not none else '—' }}</span>
+    <span class="badge badge-{{ status }}">{{ status_label }}</span>
+  </div>
   <p class="time-note">时间为笔记创建时间，非录音开始时间（Asia/Shanghai）</p>
   <p id="copy-status" role="status" aria-live="polite"></p>
   <div id="copy-fallback" hidden>
     <label for="markdown-source">Markdown 原文（可全选复制）</label>
-    <textarea id="markdown-source" readonly>{{ markdown }}</textarea>
+    <textarea id="markdown-source" readonly></textarea>
   </div>
-  {% if not recording.has_summary and not recording.has_transcript %}
-    <p class="empty-state">该录音既无转写也无总结</p>
-    <p>该录音暂无总结</p>
-    <p>该录音未转录</p>
-  {% else %}
+  {% if view == 'summary' %}
     <section class="detail-section" aria-labelledby="summary-heading">
       <h2 id="summary-heading">总结</h2>
       {% if recording.has_summary %}
         <div id="summary-content" class="markdown-body">{{ summary_html }}</div>
-      {% else %}<p>该录音暂无总结</p>{% endif %}
+      {% else %}<p class="empty-state">这条录音还没有 AI 总结</p>{% endif %}
     </section>
+  {% else %}
     <section class="detail-section" aria-labelledby="transcript-heading">
       <h2 id="transcript-heading">转写原文</h2>
       {% if recording.has_transcript %}
@@ -42,8 +46,8 @@
             {% for paragraph in segment.paragraphs %}<p class="transcript-paragraph">{{ paragraph }}</p>{% endfor %}
           </div>
         {% endfor %}
-      {% else %}<p>该录音未转录</p>{% endif %}
+      {% else %}<p class="empty-state">这条录音还没有转写内容</p>{% endif %}
     </section>
   {% endif %}
-  <script src="{{ url_for('static', path='detail.js') }}" defer></script>
+  <script src="{{ url_for('static', path='detail.js') }}?v=20261030-04b" defer></script>
 {% endblock %}
