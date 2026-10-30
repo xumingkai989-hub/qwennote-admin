@@ -4,7 +4,8 @@
   <p>{{ message }}</p>
   {% if denied_open_id is not none %}
   <p>飞书姓名：{{ denied_name or '（未提供姓名）' }}</p>
-  <p>你的 open_id：<code>{{ denied_open_id }}</code></p>
+  <p>你的 union_id：<code>{{ denied_union_id or '未返回' }}</code></p>
+  <p>你的 open_id：<code>{{ denied_open_id or '未返回' }}</code></p>
   <p>（把上面这串交给管理员加入白名单即可）</p>
   {% endif %}
   <a href="/">重新登录</a>

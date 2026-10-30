@@ -14,11 +14,13 @@ from app.sync import SyncInProgress, SyncRun, SyncStore
 
 @dataclass(frozen=True)
 class User:
-    open_id: str
+    subject: str
     name: str
     avatar_url: str
     is_active: bool
     added_at: str
+    union_id: str | None = None
+    open_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -88,15 +90,15 @@ class Store(SyncStore, Protocol):
 
     def migrate(self) -> None: ...
 
-    def seed_admin(self, open_id: str) -> None: ...
+    def seed_admin(self, subject: str) -> None: ...
 
-    def get_user(self, open_id: str) -> User | None: ...
+    def get_user(self, subject: str, other_id: str | None = None) -> User | None: ...
 
     def list_users(self) -> list[User]: ...
 
     def add_user(self, user: FeishuUser) -> None: ...
 
-    def remove_user(self, open_id: str) -> None: ...
+    def remove_user(self, subject: str) -> None: ...
 
     def update_profile(self, user: FeishuUser) -> None: ...
 
@@ -126,7 +128,9 @@ class SQLiteStore:
             conn.execute("PRAGMA journal_mode = WAL")
             conn.executescript("""
                 CREATE TABLE IF NOT EXISTS users (
-                    open_id TEXT PRIMARY KEY NOT NULL,
+                    subject TEXT PRIMARY KEY NOT NULL,
+                    union_id TEXT,
+                    open_id TEXT,
                     name TEXT NOT NULL DEFAULT '',
                     avatar_url TEXT NOT NULL DEFAULT '',
                     is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
@@ -170,11 +174,30 @@ class SQLiteStore:
                     at TEXT NOT NULL
                 );
             """)
+            # Rebuild the legacy primary key atomically. Its ID type is unknown:
+            # retain the original value in both subject and open_id, without guessing.
+            conn.execute('BEGIN IMMEDIATE')
+            user_columns = {row['name'] for row in conn.execute('PRAGMA table_info(users)')}
+            if 'subject' not in user_columns:
+                conn.execute("""
+                    CREATE TABLE users_identity (
+                        subject TEXT PRIMARY KEY NOT NULL, union_id TEXT, open_id TEXT,
+                        name TEXT NOT NULL DEFAULT '', avatar_url TEXT NOT NULL DEFAULT '',
+                        is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
+                        added_at TEXT NOT NULL
+                    )
+                """)
+                conn.execute('INSERT INTO users_identity '
+                             '(subject, open_id, name, avatar_url, is_active, added_at) '
+                             'SELECT open_id, open_id, name, avatar_url, is_active, added_at FROM users')
+                conn.execute('DROP TABLE users')
+                conn.execute('ALTER TABLE users_identity RENAME TO users')
             # Work order 01 used NOT NULL on optional values. Rebuild only that
             # schema, preserving every existing recording and its owner.
             columns = conn.execute("PRAGMA table_info(recordings)").fetchall()
             if any(row['name'] == 'duration_min' and row['notnull'] for row in columns):
-                conn.execute("BEGIN IMMEDIATE")
+                if not conn.in_transaction:
+                    conn.execute("BEGIN IMMEDIATE")
                 conn.execute("""
                     CREATE TABLE recordings_nullable (
                         recording_id TEXT PRIMARY KEY NOT NULL,
@@ -461,43 +484,85 @@ class SQLiteStore:
             transcript_md=row['transcript_md'] or '',
         )
 
-    def seed_admin(self, open_id: str) -> None:
-        with self._connect() as conn:
-            conn.execute(
-                "INSERT INTO users (open_id, name, avatar_url, is_active, added_at) "
-                "VALUES (?, ?, ?, 1, ?) ON CONFLICT(open_id) DO NOTHING",
-                (open_id, "管理员", "", datetime.now(timezone.utc).isoformat()),
-            )
+    @staticmethod
+    def _matching_users(conn: sqlite3.Connection, *identifiers: str | None) -> list[sqlite3.Row]:
+        ids = tuple(dict.fromkeys(value for value in identifiers if value))
+        if not ids:
+            return []
+        placeholders = ','.join('?' for _ in ids)
+        return conn.execute(
+            f'SELECT * FROM users WHERE subject IN ({placeholders}) '
+            f'OR union_id IN ({placeholders}) OR open_id IN ({placeholders}) '
+            'ORDER BY is_active DESC, subject', ids * 3,
+        ).fetchall()
 
-    def get_user(self, open_id: str) -> User | None:
+    @staticmethod
+    def _user(row: sqlite3.Row) -> User:
+        return User(row['subject'], row['name'], row['avatar_url'], bool(row['is_active']),
+                    row['added_at'], row['union_id'], row['open_id'])
+
+    def seed_admin(self, subject: str) -> None:
         with self._connect() as conn:
-            row = conn.execute("SELECT * FROM users WHERE open_id = ?", (open_id,)).fetchone()
-        if row is None:
-            return None
-        return User(row["open_id"], row["name"], row["avatar_url"], bool(row["is_active"]), row["added_at"])
+            conn.execute('BEGIN IMMEDIATE')
+            if not self._matching_users(conn, subject):
+                conn.execute(
+                    "INSERT INTO users (subject, name, avatar_url, is_active, added_at) "
+                    "VALUES (?, ?, ?, 1, ?)",
+                    (subject, "管理员", "", datetime.now(timezone.utc).isoformat()),
+                )
+
+    def get_user(self, subject: str, other_id: str | None = None) -> User | None:
+        with self._connect() as conn:
+            rows = self._matching_users(conn, subject, other_id)
+        return self._user(rows[0]) if rows else None
 
     def list_users(self) -> list[User]:
         with self._connect() as conn:
-            rows = conn.execute('SELECT * FROM users ORDER BY added_at, open_id').fetchall()
-        return [User(row['open_id'], row['name'], row['avatar_url'],
-                     bool(row['is_active']), row['added_at']) for row in rows]
+            return [self._user(row) for row in conn.execute(
+                'SELECT * FROM users ORDER BY added_at, subject')]
 
     def add_user(self, user: FeishuUser) -> None:
         with self._connect() as conn:
-            conn.execute(
-                'INSERT INTO users (open_id, name, avatar_url, is_active, added_at) '
-                'VALUES (?, ?, ?, 1, ?) ON CONFLICT(open_id) DO UPDATE SET '
-                'name = excluded.name, avatar_url = excluded.avatar_url, is_active = 1',
-                (user.open_id, user.name, user.avatar_url, datetime.now(timezone.utc).isoformat()),
-            )
+            conn.execute('BEGIN IMMEDIATE')
+            rows = self._matching_users(conn, user.union_id, user.open_id)
+            if rows:
+                for row in rows:
+                    conn.execute(
+                        'UPDATE users SET name = ?, avatar_url = ?, is_active = 1, '
+                        'union_id = coalesce(?, union_id), open_id = coalesce(?, open_id) '
+                        'WHERE subject = ?',
+                        (user.name, user.avatar_url, user.union_id or None,
+                         user.open_id or None, row['subject']),
+                    )
+            else:
+                conn.execute(
+                    'INSERT INTO users (subject, union_id, open_id, name, avatar_url, is_active, added_at) '
+                    'VALUES (?, ?, ?, ?, ?, 1, ?)',
+                    (user.subject, user.union_id or None, user.open_id or None, user.name,
+                     user.avatar_url, datetime.now(timezone.utc).isoformat()),
+                )
 
-    def remove_user(self, open_id: str) -> None:
+    def remove_user(self, subject: str) -> None:
         with self._connect() as conn:
-            conn.execute('UPDATE users SET is_active = 0 WHERE open_id = ?', (open_id,))
+            # Legacy/config entries may represent the same person twice. Revoke
+            # their known aliases too, so another matching row cannot bypass removal.
+            conn.execute('BEGIN IMMEDIATE')
+            rows = self._matching_users(conn, subject)
+            ids = [value for row in rows for value in
+                   (row['subject'], row['union_id'], row['open_id']) if value]
+            for row in self._matching_users(conn, *ids):
+                conn.execute('UPDATE users SET is_active = 0 WHERE subject = ?', (row['subject'],))
 
     def update_profile(self, user: FeishuUser) -> None:
         with self._connect() as conn:
-            conn.execute(
-                "UPDATE users SET name = ?, avatar_url = ? WHERE open_id = ? AND is_active = 1",
-                (user.name, user.avatar_url, user.open_id),
-            )
+            conn.execute('BEGIN IMMEDIATE')
+            for row in self._matching_users(conn, user.union_id, user.open_id):
+                # Keep existing subjects stable for previously issued sessions.
+                if row['is_active']:
+                    conn.execute(
+                        'UPDATE users SET name = ?, avatar_url = ?, '
+                        'union_id = coalesce(?, union_id), open_id = coalesce(?, open_id) '
+                        'WHERE subject = ?',
+                        (user.name, user.avatar_url, user.union_id or None,
+                         user.open_id or None, row['subject']),
+                    )

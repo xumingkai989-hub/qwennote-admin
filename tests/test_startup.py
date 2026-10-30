@@ -22,9 +22,9 @@ def test_startup_migrates_only_required_tables_and_seeds_admin(client, settings)
             "transcript_md", "has_transcript", "has_summary", "owner_open_id", "synced_at", "search_text",
         }
         assert {r[1] for r in conn.execute("PRAGMA table_info(users)")} == {
-            "open_id", "name", "avatar_url", "is_active", "added_at",
+            "subject", "union_id", "open_id", "name", "avatar_url", "is_active", "added_at",
         }
-        row = conn.execute("SELECT open_id, is_active, added_at FROM users").fetchone()
+        row = conn.execute("SELECT subject, is_active, added_at FROM users").fetchone()
         assert row[0] == settings.admin_open_id
         assert row[1] == 1
         assert row[2]
@@ -53,8 +53,8 @@ def test_store_can_be_replaced_without_sqlite(settings, fake_auth):
         def seed_admin(self, open_id):
             self.user = User(open_id, "管理员", "", True, "")
 
-        def get_user(self, open_id):
-            return self.user if self.user.open_id == open_id else None
+        def get_user(self, open_id, other_id=None):
+            return self.user if self.user.subject == open_id else None
 
         def update_profile(self, user):
             pass

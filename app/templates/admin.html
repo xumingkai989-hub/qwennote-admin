@@ -40,12 +40,12 @@
     <h2 id="whitelist-heading">当前白名单</h2>
     <div class="admin-table-wrap">
       <table class="admin-table">
-        <thead><tr><th scope="col">姓名</th><th scope="col">open_id</th><th scope="col">加入时间</th><th scope="col">状态</th><th scope="col">操作</th></tr></thead>
+        <thead><tr><th scope="col">姓名</th><th scope="col">subject</th><th scope="col">加入时间</th><th scope="col">状态</th><th scope="col">操作</th></tr></thead>
         <tbody>{% for person in users %}
-          <tr><td>{{ person.name }}</td><td title="{{ person.open_id }}">{{ person.open_id[:8] }}…</td>
+          <tr><td>{{ person.name }}</td><td title="{{ person.subject }}">{{ person.subject[:8] }}…</td>
             <td><time datetime="{{ person.added_at }}">{{ person.added_at }}</time></td>
             <td>{{ '已启用' if person.is_active else '已停用' }}</td>
-            <td><form action="{{ url_for('remove_user', open_id=person.open_id) }}" method="post">
+            <td><form action="{{ url_for('remove_user', open_id=person.subject) }}" method="post">
               <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
               <button type="submit" class="secondary">移除</button>
             </form></td>

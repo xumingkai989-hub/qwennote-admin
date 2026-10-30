@@ -92,8 +92,8 @@ def create_app(
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         app.state.store.migrate()
-        for open_id in settings.admin_open_ids:
-            app.state.store.seed_admin(open_id)
+        for subject in settings.admin_open_ids:
+            app.state.store.seed_admin(subject)
         yield
 
     app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
@@ -125,11 +125,13 @@ def create_app(
         return response
 
     def error_page(request: Request, status: int, title: str, message: str, *,
-                   denied_open_id: str | None = None, denied_name: str = "") -> Response:
+                   denied_open_id: str | None = None, denied_union_id: str | None = None,
+                   denied_name: str = "") -> Response:
         return finish_callback(templates.TemplateResponse(
             request=request, name="error.html",
             context={"title": title, "message": message,
-                     "denied_open_id": denied_open_id, "denied_name": denied_name}, status_code=status,
+                     "denied_open_id": denied_open_id, "denied_union_id": denied_union_id,
+                     "denied_name": denied_name}, status_code=status,
         ))
 
     def web_access_error(request: Request, open_id: str | None, message: str) -> Response:
@@ -302,15 +304,16 @@ def create_app(
             identity = auth.exchange_code(code)
         except FeishuAuthError:
             return error_page(request, 502, "登录失败", "飞书认证暂时失败，请重新登录。")
-        user = store.get_user(identity.open_id)
+        user = store.get_user(identity.subject, identity.open_id)
         if user is None or not user.is_active:
-            logger.warning("auth: whitelist miss open_id=%s name=%s", identity.open_id,
-                           "present" if identity.name else "<redacted-if-empty>")
+            logger.warning("auth: whitelist miss union_id=%r open_id=%r name=%r",
+                           identity.union_id, identity.open_id, identity.name)
             return error_page(request, 403, "无访问权限", "你没有访问权限，你的账号不在访问白名单中。",
-                              denied_open_id=identity.open_id, denied_name=identity.name)
+                              denied_open_id=identity.open_id, denied_union_id=identity.union_id,
+                              denied_name=identity.name)
         store.update_profile(identity)
         response = RedirectResponse("/", status_code=302)
-        set_cookie(response, "session", sessions.encode(identity.open_id), SESSION_MAX_AGE)
+        set_cookie(response, "session", sessions.encode(user.subject), SESSION_MAX_AGE)
         return finish_callback(response)
 
     return app

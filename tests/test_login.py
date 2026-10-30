@@ -62,7 +62,7 @@ def test_regular_whitelisted_user_can_login(client, fake_auth, settings):
     fake_auth.user = FeishuUser(uuid4().hex, "普通白名单用户", "")
     with sqlite3.connect(settings.db_path) as conn:
         conn.execute(
-            "INSERT INTO users (open_id, name, avatar_url, is_active, added_at) VALUES (?, ?, ?, 1, ?)",
+            "INSERT INTO users (subject, name, avatar_url, is_active, added_at) VALUES (?, ?, ?, 1, ?)",
             (fake_auth.user.open_id, "", "", "2026-10-29T00:00:00+00:00"),
         )
     assert login(client).status_code == 302

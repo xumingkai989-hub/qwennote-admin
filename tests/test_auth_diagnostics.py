@@ -39,9 +39,9 @@ def test_whitelist_miss_identity_is_html_escaped(client, fake_auth):
         assert escape(value) in response.text
 
 
-@pytest.mark.parametrize('name,marker', [('张三\nforged log', 'present'), ('', '<redacted-if-empty>')])
-def test_whitelist_miss_logs_only_id_and_name_presence(client, fake_auth, caplog, name, marker):
-    fake_auth.user = FeishuUser('on_denied', name, '')
+@pytest.mark.parametrize('name', ['张三\nforged log', ''])
+def test_whitelist_miss_logs_both_ids_and_safe_name(client, fake_auth, caplog, name):
+    fake_auth.user = FeishuUser('ou_denied', name, '', union_id='on_denied')
     client.cookies.set('session', 'private-session-sentinel')
     with caplog.at_level(logging.WARNING):
         state = begin_login(client)
@@ -51,9 +51,12 @@ def test_whitelist_miss_logs_only_id_and_name_presence(client, fake_auth, caplog
     assert response.status_code == 403
     warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
     assert len(warnings) == 1
-    assert warnings[0].getMessage() == f'auth: whitelist miss open_id=on_denied name={marker}'
+    assert warnings[0].getMessage() == (
+        f'auth: whitelist miss union_id={fake_auth.user.union_id!r} '
+        f'open_id={fake_auth.user.open_id!r} name={name!r}')
+    assert '\n' not in warnings[0].getMessage()
     for value in ('valid-test-code', 'private-token-sentinel', 'private-header-sentinel',
-                  'private-session-sentinel', state, '张三', 'forged log'):
+                  'private-session-sentinel', state):
         assert value not in caplog.text
 
 
@@ -74,7 +77,7 @@ def test_multiple_admins_are_seeded_can_login_and_manage(settings, fake_auth, mo
     settings = Settings.from_env()
     app = create_app(settings=settings, feishu_auth=fake_auth)
     with TestClient(app, follow_redirects=False) as client:
-        assert {u.open_id for u in app.state.store.list_users()} == {'on_a', 'on_b'}
+        assert {u.subject for u in app.state.store.list_users()} == {'on_a', 'on_b'}
         assert all(u.is_active for u in app.state.store.list_users())
         for open_id in ('on_a', 'on_b'):
             client.cookies.clear()

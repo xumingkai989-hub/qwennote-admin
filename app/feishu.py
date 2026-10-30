@@ -13,6 +13,11 @@ class FeishuUser:
     avatar_url: str
     department: str = ""
     email: str = ""
+    union_id: str = ""
+
+    @property
+    def subject(self) -> str:
+        return self.union_id or self.open_id
 
 
 class FeishuAuthError(Exception):
@@ -66,14 +71,22 @@ class HttpFeishuAuth:
                 data = payload.get("data")
                 if not isinstance(data, dict):
                     raise FeishuAuthError("Authorization failed")
+                union_id = data.get("union_id")
                 open_id = data.get("open_id")
+                if union_id is None:
+                    union_id = ""
+                if open_id is None:
+                    open_id = ""
                 name = data.get("name") or ""
                 avatar_url = data.get("avatar_url") or ""
-                if not isinstance(open_id, str) or not open_id.strip():
+                if not isinstance(union_id, str) or not isinstance(open_id, str):
+                    raise FeishuAuthError("Authorization failed")
+                union_id, open_id = union_id.strip(), open_id.strip()
+                if not (union_id or open_id):
                     raise FeishuAuthError("Authorization failed")
                 if not isinstance(name, str) or not isinstance(avatar_url, str):
                     raise FeishuAuthError("Authorization failed")
-                return FeishuUser(open_id, name, avatar_url)
+                return FeishuUser(open_id, name, avatar_url, union_id=union_id)
         except (httpx.HTTPError, ValueError):
             # Do not surface provider bodies, authorization codes or credentials.
             raise FeishuAuthError("Authorization failed") from None

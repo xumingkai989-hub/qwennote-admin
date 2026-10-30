@@ -21,7 +21,7 @@ cp .env.example .env
 | `FEISHU_REDIRECT_URI` | 完整回调 URL，路径 `/auth/callback`，必填 |
 | `SESSION_SECRET` | 至少 32 字节的随机签名密钥，必填 |
 | `DB_PATH` | SQLite 文件位置，自动创建父目录与表，必填 |
-| `ADMIN_OPEN_ID` | 管理员 open_id，支持逗号分隔多值（如 `on_a,on_b`）；各项去空白、忽略空项与重复项，启动时均加入白名单，必填 |
+| `ADMIN_OPEN_ID` | 管理员 ID（union_id 或 open_id），支持逗号分隔多值（如 `on_a,ou_b`）；各项去空白、忽略空项与重复项，启动时均加入白名单，必填 |
 | `QWENNOTE_SOURCE` | `http`（默认）或显式指定 `fixture` |
 | `QWENNOTE_MCP_TOKEN` | HTTP 模式必填的 Bearer 凭据；仅从环境读取，不落库 |
 | `QWENNOTE_FIXTURE_DIR` | fixture 模式必填，本地 JSON 目录；示例 `./tests/fixtures/minutes` |
@@ -41,7 +41,9 @@ cp .env.example .env
 
 `GET /auth/callback` 校验非空 code 和与浏览器匹配的 state，换身份后检查白名单。成功 302 到 `/` 并写 HttpOnly、SameSite=Lax session cookie；白名单外或停用返回 403。Session 8 小时，state 10 分钟；每次首页及同步重新检查白名单。飞书失败返回通用 502 页面，不输出服务商响应或凭据。
 
-白名单外或停用的 OAuth 回调 403 页面明确提示没有访问权限，展示飞书姓名和 open_id，方便交给管理员处理；姓名与 ID 均自动 HTML 转义。成功登录页不展示 open_id。拒绝时仅记录一条 WARNING：`auth: whitelist miss open_id=on_xxx name=present`，无姓名时 `name=<redacted-if-empty>`；日志只含 ID 与姓名是否存在，不输出姓名原文、授权码、token、请求头或 cookie。403 响应禁止缓存并禁用 Referer 转发。
+登录同时保留飞书返回的 `union_id`、`open_id`，规范身份为 `subject = union_id or open_id`。`users.subject` 为主键，`union_id`、`open_id` 为可空别名；两个返回 ID 分别与这三列交叉匹配，任一启用记录命中即授权。旧表自动迁移：原 `open_id` 同时复制到 `subject` 和 `open_id`，保留姓名、头像、启用状态与加入时间，不推测历史 ID 类型。历史/配置行的 subject 保持稳定，成功登录补齐别名；session 使用命中的白名单 subject。新建用户优先用 union_id 作 subject。启动时逐个检查 `ADMIN_OPEN_ID` 的任意格式 ID，已有记录跳过（包括停用记录），新记录只填 subject。
+
+白名单外或停用的 OAuth 回调 403 页面展示飞书姓名、union_id 和 open_id，缺失 ID 显示“未返回”；姓名与 ID 均自动 HTML 转义。拒绝时记录一条 WARNING，包含 union_id、open_id、name（使用 repr 转义换行，避免伪造日志行），不输出授权码、token、请求头或 cookie。403 响应禁止缓存并禁用 Referer 转发。
 
 `create_app(settings=..., feishu_auth=..., store=..., minutes_source=...)` 支持替换依赖。路由也可通过 `get_feishu_auth`、`get_store`、`get_minutes_source` 与 `dependency_overrides` 注入；迁移始终使用工厂传入的 Store。
 
@@ -215,9 +217,9 @@ curl --silent --show-error --include --header @- \
 `GET /admin` 仅允许配置 `ADMIN_OPEN_ID` 中任一 ID 对应的活动白名单用户访问，不依赖数据库角色或姓名；普通用户返回现有 error 模板的 403 页面，未登录使用现有飞书授权跳转。管理页与搜索响应均禁止缓存，并设置 `Referrer-Policy: no-referrer`。
 
 - `GET /admin?q=姓名或邮箱`：显示至多 20 个联系人，包含姓名、部门、邮箱与“添加”按钮。姓名、部门、邮箱、查询和隐藏表单字段均经过 Jinja 自动转义；不展示手机号、性别、令牌等其他敏感字段。搜索结果只用于本次响应，不写入数据库。
-- `POST /admin/users`：URL 编码表单包含 `open_id`、`name`、`avatar_url`、`csrf_token`。只保存被选中者的 ID、姓名、头像及白名单状态与加入时间。以 `open_id` 为唯一主键幂等 upsert；重复添加保留原加入时间，已移除者再次添加恢复启用。
+- `POST /admin/users`：URL 编码表单包含 `open_id`、`name`、`avatar_url`、`csrf_token`。只保存被选中者的 ID、姓名、头像及白名单状态与加入时间。以 `subject` 为唯一主键、按两种 ID 的三列交叉匹配幂等添加；重复添加保留原加入时间，已移除者再次添加恢复启用。
 - `POST /admin/users/{open_id}/remove`：校验管理员及 CSRF 后将 `is_active` 设为 0，保留加入时间与停用状态。现有 session 在下次访问首页、搜索、详情、下载或同步时返回 403；重新登录也不能绕过白名单。管理员种子不会在重启时重新启用被停用的记录。
-- 白名单展示全部已添加用户的姓名、截断为前 8 位加 `…` 的 open_id、加入时间和启用/停用状态，`title` 属性提供完整 open_id。添加与移除成功均 303 返回管理页。
+- 白名单展示全部已添加用户的姓名、截断为前 8 位加 `…` 的 subject、加入时间和启用/停用状态，`title` 属性提供完整 subject。添加与移除成功均 303 返回管理页。
 
 **CSRF 方案：签名双提交 cookie。** 复用 `SignedCookie`，独立 `admin-csrf` salt，token 绑定当前已签名 session 的 SHA-256 摘要并附带随机值（不携带 session 本体），最长有效期 8 小时。管理页设置 HttpOnly、SameSite=Lax、Path=/admin cookie，HTTPS 配置下添加 Secure；表单包含相同 token。两个管理 POST 必须通过签名、时效、session 绑定和恒定时间比对，缺失、伪造、过期、重复字段或其他 session 的 token 返回 403，GET 不执行写操作。此方案无需依赖反向代理转发 Origin 的方式，普通 HTML 表单不带 Origin 时也能严格验证。
 
