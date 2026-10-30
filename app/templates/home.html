@@ -13,7 +13,10 @@
         <svg class="sync-check" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg>
         快速同步
       </button>
-      <button id="full-sync-button" type="button" title="用于补历史或修复漏数据，耗时较长">全盘同步</button>
+      <button id="full-sync-button" type="button" title="用于补历史或修复漏数据，耗时较长">
+        <svg class="sync-refresh" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M6.1 6.1A8 8 0 0 1 20 12M4 12a8 8 0 0 0 13.9 5.9"/></svg>
+        <span class="sync-label">全盘同步</span>
+      </button>
     </div>
   </div>
   {% include "sync_result.html" %}
@@ -80,5 +83,5 @@
     {% if next_url %}<a href="{{ next_url }}" rel="next">下一页</a>{% else %}<span aria-disabled="true">下一页</span>{% endif %}
   </nav>
   <p class="time-note">时间为笔记创建时间</p>
-  <script src="{{ url_for('static', path='home.js') }}?v=20261030-29" defer></script>
+  <script src="{{ url_for('static', path='home.js') }}?v=20261030-30" defer></script>
 {% endblock %}

@@ -8,6 +8,7 @@ import pytest
 
 import app.main as main
 from app.minutes import RecordingDetail, RecordingMeta, SHANGHAI
+from app.sync import SyncRun
 from test_login import login
 
 
@@ -92,6 +93,30 @@ def add_recording(store):
             '2026-10-29T12:00:00+08:00',
         )
     return add
+
+
+@pytest.mark.parametrize(('mode', 'label'), [('quick', '快速同步'), ('full', '全盘同步')])
+@pytest.mark.parametrize('counts', [(9, 2, 3, 4), (0, 0, 0, 0)])
+def test_home_get_renders_latest_sync_mode_and_all_counts(list_client, store, mode, label, counts):
+    started = '2026-10-30T21:40:00+08:00'
+    run_id = store.start_sync(started, mode=mode)
+    store.finish_sync(SyncRun(
+        id=run_id, started_at=started, finished_at='2026-10-30T21:40:20+08:00',
+        status='success', mode=mode, fetched=counts[0], inserted=counts[1],
+        updated=counts[2], skipped=counts[3],
+    ))
+    response = list_client.get('/')
+    assert response.status_code == 200
+    assert (f'上次：10-30 21:40 · {label} · 检查 {counts[0]} 条 · '
+            f'新增 {counts[1]} · 更新 {counts[2]} · 跳过 {counts[3]}') in response.text
+
+
+def test_home_get_without_sync_history_omits_last_sync(list_client, store):
+    assert store.latest_sync() is None
+    response = list_client.get('/')
+    assert response.status_code == 200
+    assert '上次：' not in response.text
+    assert re.search(r'<p id="sync-feedback"[^>]*></p>', response.text)
 
 
 def test_default_is_all_dates_sorted_by_created_time(list_client, add_recording):

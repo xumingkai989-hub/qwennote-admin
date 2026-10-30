@@ -268,16 +268,20 @@ mark { background: var(--mark); color: var(--text); border-radius: 2px; }
 .home-layout .topbar { grid-template-columns: minmax(0, 1fr) auto; }
 .home-heading { flex-wrap: wrap; align-items: center; padding-block: 20px 12px; }
 .home-heading h1 { font-size: 24px; font-weight: 600; letter-spacing: normal; }
-#sync-button { display: flex; align-items: center; justify-content: center; gap: 6px; white-space: nowrap; min-height: 44px; padding: 8px 12px; background: transparent; color: var(--accent); }
-#sync-button:hover { background: var(--control); }
+#sync-button, #full-sync-button { display: flex; align-items: center; justify-content: center; gap: 6px; white-space: nowrap; min-height: 44px; padding: 8px 12px; }
+#sync-button { background: var(--accent); color: #FFFFFF; }
 .sync-actions { display: flex; align-items: center; flex-shrink: 0; gap: 8px; }
-#full-sync-button { white-space: nowrap; }
-.sync-result { color: var(--secondary); font-size: 14px; }
+#full-sync-button { background: transparent; border: 1px solid var(--accent); color: var(--accent); }
+#full-sync-button:hover { background: var(--control); }
+#full-sync-button .sync-refresh { display: none; }
+#full-sync-button.is-syncing .sync-refresh { display: block; }
+.sync-result { color: var(--secondary); font-size: 13px; }
+.home-layout > .sync-result { margin: 0 0 12px; text-align: left; }
 .sync-result:empty { display: none; }
 #sync-button .sync-check { display: none; }
 #sync-button.is-complete .sync-refresh { display: none; }
 #sync-button.is-complete .sync-check { display: block; }
-#sync-button.is-syncing .sync-refresh { animation: sync-spin 1s linear infinite; }
+.sync-actions .is-syncing .sync-refresh { animation: sync-spin 1s linear infinite; }
 @keyframes sync-spin { to { transform: rotate(360deg); } }
 .home-layout > .search-form { margin: 0 0 24px; }
 .timeline {
@@ -322,7 +326,7 @@ mark { background: var(--mark); color: var(--text); border-radius: 2px; }
 @media (prefers-reduced-motion: reduce) {
   .timeline-card { transition: none; }
   .timeline-card:hover { transform: none; }
-  #sync-button.is-syncing .sync-refresh { animation: none; }
+  .sync-actions .is-syncing .sync-refresh { animation: none; }
 }
 
 /* Meeting topics follow the transcript status and wrap on small screens. */

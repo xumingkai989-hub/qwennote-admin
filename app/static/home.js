@@ -9,6 +9,8 @@
     buttons.forEach(item => {item.disabled = true;});
     activeButton.setAttribute('aria-busy', 'true');
     activeButton.classList.add('is-syncing');
+    const label = full ? activeButton.querySelector('.sync-label') : null;
+    if (label) label.textContent = '正在扫描…';
     errorMessage.textContent = '';
     feedback.textContent = full ? '正在全量扫描，可能需要几分钟' : '正在快速同步';
     try {
@@ -28,6 +30,7 @@
     } finally {
       activeButton.classList.remove('is-syncing', 'is-complete');
       activeButton.removeAttribute('aria-busy');
+      if (label) label.textContent = '全盘同步';
       buttons.forEach(item => {item.disabled = false;});
     }
   };

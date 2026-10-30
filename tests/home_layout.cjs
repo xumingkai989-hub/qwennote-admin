@@ -21,6 +21,13 @@ test('home timeline, cards and controls fit desktop/mobile and both color scheme
           return {
             viewport: innerWidth, scrollWidth: document.documentElement.scrollWidth,
             button: box('#sync-button'), fullButton: box('#full-sync-button'), frame: box('main'), list: box('.timeline'), card: box('.timeline-card'),
+            heading: box('.home-heading h1'), feedback: box('#sync-feedback'),
+            syncStyles: ['#sync-button', '#full-sync-button', '#sync-feedback'].map(selector => {
+              const style = getComputedStyle(document.querySelector(selector));
+              return {background: style.backgroundColor, color: style.color, radius: style.borderRadius,
+                borderWidth: style.borderTopWidth, borderColor: style.borderTopColor, fontSize: style.fontSize};
+            }),
+            feedbackText: document.querySelector('#sync-feedback').textContent,
             groups: groups.map(group => {
               const line = getComputedStyle(group, '::before');
               const heading = group.querySelector('.date-heading');
@@ -74,6 +81,22 @@ test('home timeline, cards and controls fit desktop/mobile and both color scheme
         }
 
         assert.ok(measurements.button.width >= 100); assert.equal(measurements.button.height, 44);
+        assert.equal(measurements.fullButton.height, 44);
+        assert.equal(measurements.fullButton.y, measurements.button.y);
+        assert.equal(measurements.fullButton.x - measurements.button.x - measurements.button.width, 8);
+        assert.equal(measurements.feedback.x, measurements.heading.x);
+        assert.ok(measurements.feedback.y >= measurements.button.y + measurements.button.height);
+        assert.equal(measurements.feedbackText, '上次：10-30 21:40 · 快速同步 · 检查 0 条 · 新增 0 · 更新 0 · 跳过 0');
+        const accent = colorScheme === 'dark' ? 'rgb(10, 132, 255)' : 'rgb(0, 122, 255)';
+        assert.equal(measurements.syncStyles[0].background, accent);
+        assert.equal(measurements.syncStyles[0].color, 'rgb(255, 255, 255)');
+        assert.equal(measurements.syncStyles[0].radius, '10px');
+        assert.equal(measurements.syncStyles[1].background, 'rgba(0, 0, 0, 0)');
+        assert.equal(measurements.syncStyles[1].color, accent);
+        assert.equal(measurements.syncStyles[1].borderWidth, '1px');
+        assert.equal(measurements.syncStyles[1].borderColor, accent);
+        assert.equal(measurements.syncStyles[2].fontSize, '13px');
+        assert.equal(measurements.syncStyles[2].color, colorScheme === 'dark' ? 'rgb(152, 152, 157)' : 'rgb(142, 142, 147)');
         assert.ok(measurements.fullButton.x >= measurements.button.x + measurements.button.width);
         assert.ok(measurements.fullButton.x + measurements.fullButton.width <= width);
         assert.equal(measurements.frame.width, Math.min(width, 1120));
@@ -96,7 +119,23 @@ test('home timeline, cards and controls fit desktop/mobile and both color scheme
         assert.equal(measurements.cardBorder, colorScheme === 'dark' ? 'rgb(56, 56, 58)' : 'rgb(229, 229, 234)');
         await page.locator('.timeline-card-link').first().focus();
         assert.equal(await page.locator('.timeline-card-link').first().evaluate(e => getComputedStyle(e).outlineStyle), 'solid');
-        if (width === 1440 || width === 390) await page.screenshot({path: path.join(directory, `${width}-home-${colorScheme}.png`), fullPage: true});
+        await page.locator('.timeline-card-link').first().blur();
+        if (width === 1440 || width === 390) await page.screenshot({path: path.join(directory, `${width}-home-${colorScheme}.png`)});
+        await page.evaluate(() => {
+          window.fetch = () => new Promise(resolve => {window.resolveSync = resolve;});
+        });
+        await page.locator('#full-sync-button').click();
+        assert.equal(await page.locator('#full-sync-button').isDisabled(), true);
+        assert.equal(await page.locator('#sync-button').isDisabled(), true);
+        assert.equal(await page.locator('#full-sync-button .sync-label').textContent(), '正在扫描…');
+        assert.equal(await page.locator('#full-sync-button .sync-refresh').isVisible(), true);
+        assert.equal(await page.locator('#full-sync-button .sync-refresh').evaluate(e => getComputedStyle(e).animationName), 'sync-spin');
+        assert.equal(await page.evaluate(() => document.documentElement.scrollWidth), width);
+        await page.evaluate(() => window.resolveSync({ok: false, json: async () => ({detail: '扫描失败，请重试'})}));
+        await page.waitForFunction(() => !document.querySelector('#full-sync-button').disabled);
+        assert.equal(await page.locator('#full-sync-button .sync-label').textContent(), '全盘同步');
+        assert.equal(await page.locator('#full-sync-button .sync-refresh').isVisible(), false);
+        assert.equal(await page.locator('#sync-error').textContent(), '扫描失败，请重试');
         results.push({colorScheme, ...measurements}); await page.close();
       }
     }

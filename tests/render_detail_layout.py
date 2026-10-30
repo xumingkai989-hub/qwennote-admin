@@ -15,6 +15,7 @@ from app.feishu import FeishuUser
 from app.main import create_app
 from app.minutes import RecordingDetail, RecordingMeta, SHANGHAI
 from app.store import SQLiteStore
+from app.sync import SyncRun
 from conftest import FakeFeishuAuth
 from test_login import login
 
@@ -35,6 +36,12 @@ def render(output):
         auth = FakeFeishuAuth(FeishuUser('ou_layout', '演示用户', ''))
         with TestClient(create_app(settings=settings, store=store, feishu_auth=auth), follow_redirects=False) as client:
             assert login(client).status_code == 302
+            started = '2026-10-30T21:40:00+08:00'
+            store.finish_sync(SyncRun(
+                id=store.start_sync(started), started_at=started,
+                finished_at='2026-10-30T21:40:01+08:00', status='success',
+                fetched=0, inserted=0, updated=0, skipped=0, mode='quick',
+            ))
             paragraph = '本次检查首页列表与详情页在不同屏幕下的左边界和内容宽度。长文本保持完整展示，通过行高和段间距帮助阅读。' * 4
             summary = '# 项目例会\n\n' + paragraph + '\n\n## 本周进展\n\n- 完成页面检查\n- 核对移动端布局\n\n> 保留完整内容。\n\n## 待办\n\n- [ ] 确认上线验收\n\n```text\n' + 'long_code_' * 30 + '\n```\n\n| 项目 | 状态 | 备注 |\n| --- | --- | --- |\n| 页面检查 | 完成 | 六种视口 |'
             transcript = '\n\n'.join(f'[00:0{i}:00.000–00:0{i}:30.000] 发言人 {i % 2 + 1}\n\n{paragraph}\n\n补充说明：继续核对完整内容与段落间距。' for i in range(6))
