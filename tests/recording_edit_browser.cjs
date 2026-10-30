@@ -183,7 +183,7 @@ test('rich layout stays fixed, Markdown and timestamps survive edits, mobile scr
       assert.equal(saved.trim(),initialSource.replace('小红直播','小鹿直播').trim());
       assert.equal(await page.locator('#sidebar-links a[href="/search"]').count(),0);
       assert.deepEqual(await page.locator('#sidebar-links a').evaluateAll(links=>links.map(link=>link.getAttribute('href'))),
-        ['/','/hotwords','/assistant','/settings']);
+        ['/','/hotwords','/assistant','/models','/settings']);
       if(width===1440 && view==='summary')await page.screenshot({path:path.join(out,'navigation.png'),fullPage:true});
       await Promise.all([page.waitForNavigation(),page.locator('#revert-button').click()]);
       // Cancel restores the original markup; delegated copy/search still works afterwards.

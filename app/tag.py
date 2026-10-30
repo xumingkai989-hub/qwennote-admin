@@ -12,6 +12,7 @@ import httpx
 
 from app.tag_vocabulary import SEED_TAGS as VOCABULARY
 from app.tagging import SYSTEM, load_tagging_context
+from app.models import messages_url, resolve_model
 
 logger = logging.getLogger(__name__)
 USAGE_KEYS = ('input_tokens', 'output_tokens', 'cache_read_input_tokens', 'cache_creation_input_tokens')
@@ -73,7 +74,7 @@ class TagError(Exception):
 async def extract(client, settings, recording, usage, *, system=SYSTEM, vocabulary=VOCABULARY):
     invalid_retries = rate_retries = 0
     while True:
-        response = await client.post(settings.base_url.rstrip('/') + '/v1/messages',
+        response = await client.post(messages_url(settings.base_url),
             headers={'x-api-key': settings.auth_token, 'anthropic-version': '2023-06-01'},
             json={'model': settings.model, 'max_tokens': 256, 'temperature': 0,
                   'thinking': {'type': 'disabled'}, 'system': system,
@@ -141,13 +142,13 @@ async def tag_batch(store, candidates, settings, run, transport):
 
 
 def run_tags(store, *, recording_ids=None, force=False, settings=None, transport=None):
-    settings = settings or TagSettings.from_env()
     with store.tag_lock():
         started = now()
         run = dict(id=store.start_tag_run(started), started_at=started, finished_at=None,
                    attempted=0, succeeded=0, failed=0, error=None,
                    **dict.fromkeys(USAGE_KEYS, 0))
         try:
+            settings = settings if settings is not None else resolve_model(store)
             if not settings.auth_token:
                 logger.warning('未配置 ANTHROPIC_AUTH_TOKEN，跳过本次会议打标')
             else:

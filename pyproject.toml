@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "QwenNote private web application"
 requires-python = ">=3.11,<3.12"
 dependencies = [
+    "cryptography==46.0.3",
     "fastapi==0.115.12",
     "httpx==0.28.1",
     "itsdangerous==2.2.0",

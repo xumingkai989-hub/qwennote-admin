@@ -233,6 +233,21 @@ class SQLiteStore:
                     job TEXT PRIMARY KEY,
                     last_run_at TEXT
                 );
+                CREATE TABLE IF NOT EXISTS models (
+                    id INTEGER PRIMARY KEY,
+                    name TEXT NOT NULL UNIQUE,
+                    provider TEXT NOT NULL CHECK (provider IN ('anthropic', 'openai', 'deepseek')),
+                    base_url TEXT NOT NULL,
+                    model_id TEXT NOT NULL,
+                    api_key_enc TEXT NOT NULL,
+                    key_last4 TEXT NOT NULL,
+                    enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
+                    is_default INTEGER NOT NULL DEFAULT 0 CHECK (is_default IN (0, 1)),
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    CHECK (is_default = 0 OR enabled = 1)
+                );
+                CREATE UNIQUE INDEX IF NOT EXISTS models_one_default ON models(is_default) WHERE is_default = 1;
             """)
             # Rebuild the legacy primary key atomically. Its ID type is unknown:
             # retain the original value in both subject and open_id, without guessing.

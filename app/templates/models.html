@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% macro csrf_field() %}<input type="hidden" name="csrf_token" value="{{ csrf_token }}">{% endmacro %}
+{% block main_attributes %} class="models-page"{% endblock %}
+{% block content %}
+<div class="list-heading"><h1>模型中心</h1></div>
+<section class="model-current" aria-labelledby="claude-heading">
+  <div class="model-section-heading"><h2 id="claude-heading">Claude Code</h2><span class="model-badge">只读</span></div>
+  <p>{% if claude %}模型：{{ claude.model }} · 端点：{{ claude.endpoint }}{% else %}未配置{% endif %}</p>
+</section>
+<section aria-labelledby="models-heading">
+  <div class="model-section-heading"><h2 id="models-heading">标签与分析模型</h2><a href="#add-model" class="model-add-link">新增模型 <span aria-hidden="true">＋</span></a></div>
+  {% if error %}<p class="settings-error" role="alert">{{ error }}</p>{% endif %}
+  <p id="model-feedback" role="status" aria-live="polite"></p>
+  {% if models %}
+  <div class="model-table-wrap"><table class="model-table">
+    <thead><tr><th>名称</th><th>Provider</th><th>模型 ID</th><th>Key</th><th>状态</th><th>默认</th><th>操作</th></tr></thead>
+    <tbody>{% for model in models %}<tr data-model-id="{{ model.id }}">
+      <td data-label="名称" class="model-name">{{ model.name }}</td>
+      <td data-label="Provider">{{ model.provider }}</td>
+      <td data-label="模型 ID"><code>{{ model.model_id }}</code></td>
+      <td data-label="Key"><span class="model-key">••••{{ model.key_last4 }}</span></td>
+      <td data-label="状态"><span class="model-badge{% if model.enabled %} model-enabled{% endif %}">{{ '已启用' if model.enabled else '已停用' }}</span></td>
+      <td data-label="默认">{% if model.is_default %}<span class="model-default">默认</span>{% else %}<span class="model-muted">—</span>{% endif %}</td>
+      <td class="model-actions">
+        <form method="post" action="/models/{{ model.id }}/test" data-model-test>{{ csrf_field() }}<button type="submit">测试</button></form>
+        <form method="post" action="/models/{{ model.id }}/toggle">{{ csrf_field() }}<button type="submit">{{ '停用' if model.enabled else '启用' }}</button></form>
+        {% if not model.is_default %}<form method="post" action="/models/{{ model.id }}/default">{{ csrf_field() }}<button type="submit">设为默认</button></form>{% endif %}
+        <form method="post" action="/models/{{ model.id }}/delete" data-model-delete>{{ csrf_field() }}<button type="submit" class="model-delete">删除</button></form>
+      </td>
+    </tr>{% endfor %}</tbody>
+  </table></div>
+  {% else %}<p class="model-empty">还没有添加模型</p>{% endif %}
+  {% if not models | selectattr('is_default') | list %}<p class="model-fallback">未设置默认模型，打标签使用环境配置；环境也未配置时跳过打标。</p>{% endif %}
+</section>
+<section id="add-model" class="model-create" aria-labelledby="add-heading">
+  <h2 id="add-heading">新增模型</h2>
+  <form method="post" action="/models" class="model-form" autocomplete="off">
+    {{ csrf_field() }}
+    <div><label for="model-name">名称</label><input id="model-name" name="name" maxlength="100" required placeholder="DeepSeek Flash"></div>
+    <div><label for="provider">Provider</label><select id="provider" name="provider"><option value="deepseek">deepseek</option><option value="anthropic">anthropic</option><option value="openai">openai</option></select></div>
+    <div class="model-field-wide"><label for="base_url">Base URL</label><input id="base_url" name="base_url" type="url" maxlength="2048" required placeholder="https://api.deepseek.com/anthropic" aria-describedby="model-protocol"></div>
+    <p id="model-protocol" class="model-field-wide model-help">端点须兼容 Anthropic Messages 协议。</p>
+    <div><label for="model_id">模型 ID</label><input id="model_id" name="model_id" maxlength="200" required placeholder="deepseek-flash"></div>
+    <div><label for="api_key">API Key</label><input id="api_key" name="api_key" type="password" minlength="8" maxlength="4096" required autocomplete="new-password" aria-describedby="model-key-help"></div>
+    <p id="model-key-help" class="model-field-wide model-help">Key 提交后仅显示末四位。</p>
+    <div class="model-field-wide"><button type="submit">新增模型</button></div>
+  </form>
+</section>
+<script src="{{ url_for('static', path='models.js') }}?v=20261030-15" defer></script>
+{% endblock %}

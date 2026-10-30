@@ -452,3 +452,9 @@ systemctl list-timers --all qwennote-tag-maintenance.timer
 管理员通过 `/settings` 配置自动同步、固定时间 / 小时间隔、补拉天数、自动标签与词表维护时间、数据保留。每天 03:00 / 05:00 的旧 timer 停用，统一由每 10 分钟唤醒的 `qwennote-tick.timer` 读取数据库设置；修改设置不需要修改 systemd 时间。网页手动同步使用已保存的补拉天数，关闭自动标签也会停止同步后的自动打标。
 
 先 `python3 scripts/deploy.py --app-only`，再在服务器执行 `bash /opt/qwennote/current/scripts/install_scheduler.sh`。原 `install_tag_maintenance.sh` 兼容入口现也安装统一 tick。回滚到旧版前先停用 tick，再按需恢复旧 timer，避免重复调度。新增表仅 `settings` 和 `scheduler_state`；详细调度 / 失败 / 清理 / 回滚口径与验证见 [工单 14](docs/settings-14.md)。本单全量 871 项 Python、21 项 JavaScript、4 项业务浏览器与 8 项布局浏览器通过。
+
+### 模型中心（工单 15）
+
+管理员通过 `/models` 查看 Claude Code 当前模型（只读），新增、测试、启停、删除标签与分析模型，并切换唯一默认模型。各 provider 共用 Anthropic Messages 兼容协议。打标与词表维护优先读默认模型，没有默认时回退原 env，未配置或解密失败不阻断录音同步。
+
+模型 Key 先用 Fernet 加密再入库，页面和 JSON 仅展示末四位；密文永不进入响应。部署 prepare 自动一次性生成 `/etc/qwennote/secret.key`（qwennote 所有，600），后续发布保留原密钥。接口、权限、错误处理、备份 / 回滚与验证细节见 [工单 15](docs/models-15.md)。全量 938 项 Python 测试通过（原有 871 项保留，新增 67 项），其他浏览器与部署证据保存在仓库外成果目录。

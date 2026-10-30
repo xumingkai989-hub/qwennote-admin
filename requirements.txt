@@ -10,8 +10,12 @@ certifi==2026.10.23
     # via
     #   httpcore
     #   httpx
+cffi==2.1.1
+    # via cryptography
 click==8.5.0
     # via uvicorn
+cryptography==46.0.3
+    # via qwennote-admin (pyproject.toml)
 fastapi==0.115.12
     # via qwennote-admin (pyproject.toml)
 h11==0.16.0
@@ -42,6 +46,8 @@ packaging==26.3
     # via pytest
 pluggy==1.7.0
     # via pytest
+pycparser==3.12
+    # via cffi
 pydantic==2.14.1
     # via fastapi
 pydantic-core==2.50.1

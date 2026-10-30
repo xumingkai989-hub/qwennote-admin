@@ -38,6 +38,12 @@ EOF
     # Do not alter /usr/bin/python3 or install another interpreter.
     /usr/bin/python3.11 -m venv .venv
     .venv/bin/pip install -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple/
+    .venv/bin/python -m scripts.prepare_model_secrets
+    # Permit only the application user to traverse the root-owned config directory.
+    # Other configuration files keep their existing owner and mode.
+    command -v setfacl >/dev/null || dnf install -y acl
+    setfacl -m u:qwennote:--x /etc/qwennote
+    runuser -u qwennote -- test -r /etc/qwennote/secret.key
     bash scripts/build_sqlite.sh "$release"
     .venv/bin/python -m scripts.deployment_runtime "$release"
     command -v sqlite3 >/dev/null || dnf install -y sqlite
