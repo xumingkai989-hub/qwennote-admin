@@ -457,3 +457,32 @@ def test_summary_document_is_absent_from_transcript(detail_client):
     assert 'summary-document' not in html and 'summary-metadata' not in html
     assert '智能纪要由 AI 生成' not in html
     assert html.count('class="transcript-segment"') == 2
+
+
+@pytest.mark.parametrize('view', ['summary', 'transcript'])
+def test_detail_views_share_one_layout_container(detail_client, view):
+    html = detail_client.get('/recordings/detail?view=' + view).text
+    assert html.count('<main class="detail-layout">') == 1
+    main = re.search(r'<main class="detail-layout">(.*?)</main>', html, re.S)[1]
+    assert '<header class="detail-header">' in main
+    assert '<nav class="detail-view-switch"' in main
+    assert 'class="detail-meta"' in main
+    assert main.count('<section class="detail-section ') == 1
+    assert f'aria-labelledby="{view}-heading"' in main
+    assert 'class="detail-layout"' not in detail_client.get('/').text
+
+
+def test_detail_layout_width_and_gutter_contract(detail_client):
+    css = detail_client.get('/static/app.css').text
+    frame = re.search(r'\.detail-layout \{([^}]+)\}', css)[1]
+    assert '--content-max: 760px;' in frame
+    assert '--gutter: 24px;' in frame
+    assert 'max-width: var(--content-max);' in frame
+    assert 'padding: 0 var(--gutter) 48px;' in frame
+    assert 'margin-inline: auto;' in frame
+    for query, gutter in [('min-width: 900px', 32), ('max-width: 639.98px', 16)]:
+        assert re.search(r'@media \(' + re.escape(query) + r'\)\s*\{\s*\.detail-layout \{ --gutter: ' + str(gutter) + r'px;', css)
+    assert '.detail-view-switch { margin-top: 16px;' in css
+    assert '.transcript-segments { width: 100%; }' in css
+    summary = re.search(r'\.detail-section\.summary-document \{([^}]+)\}', css)[1]
+    assert 'max-width' not in summary and 'padding' not in summary

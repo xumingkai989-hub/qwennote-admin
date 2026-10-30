@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% block main_attributes %} class="detail-layout"{% endblock %}
 {% block content %}
   {% set status, status_label = recording.status %}
   <header class="detail-header">
@@ -8,11 +9,6 @@
         <h1 title="{{ title }}">{{ title }}</h1>
         <span class="badge badge-{{ status }}">{{ status_label }}</span>
       </div>
-      <div class="detail-meta">
-        <time datetime="{{ recording.created_at.isoformat() }}">{{ recording.created_at.strftime('%Y-%m-%d %H:%M') }}</time>
-        <span aria-hidden="true"> · </span>
-        <span>{{ (recording.duration_min ~ ' 分钟') if recording.duration_min is not none else '—' }}</span>
-      </div>
     </div>
     <div id="detail-export" class="detail-export">
       <button id="export-button" class="secondary" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="export-menu">导出 <span aria-hidden="true">▾</span></button>
@@ -20,6 +16,11 @@
         <button id="copy-markdown" type="button" role="menuitem" tabindex="-1" data-markdown-url="{{ url_for('recording_markdown', recording_id=recording.recording_id) }}">复制 Markdown</button>
         <a id="download-markdown" role="menuitem" tabindex="-1" href="{{ url_for('recording_markdown', recording_id=recording.recording_id) }}">下载 .md</a>
       </div>
+    </div>
+    <div class="detail-meta">
+      <time datetime="{{ recording.created_at.isoformat() }}">{{ recording.created_at.strftime('%Y-%m-%d %H:%M') }}</time>
+      <span aria-hidden="true"> · </span>
+      <span>{{ (recording.duration_min ~ ' 分钟') if recording.duration_min is not none else '—' }}</span>
     </div>
   </header>
   <nav class="detail-view-switch" aria-label="录音内容视图">
