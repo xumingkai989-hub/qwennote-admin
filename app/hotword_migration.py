@@ -62,6 +62,13 @@ def migrate_hotwords(conn):
         conn.execute('ALTER TABLE hotwords_standard RENAME TO hotwords')
     elif not old:
         conn.execute(HOTWORDS.format(table='hotwords'))
+    if 'needs_review' not in columns(conn, 'hotwords'):
+        conn.execute('ALTER TABLE hotwords ADD COLUMN needs_review INTEGER NOT NULL DEFAULT 0 CHECK(needs_review IN (0,1))')
+    # Only flag legacy data. Never normalize or overwrite a user's term/aliases.
+    from app.hotwords import SENTENCE_PUNCTUATION
+    for row in conn.execute('SELECT id,term FROM hotwords'):
+        if len(row['term']) > 20 or any(c in SENTENCE_PUNCTUATION for c in row['term']):
+            conn.execute('UPDATE hotwords SET needs_review=1 WHERE id=?', (row['id'],))
     if old_decisions and 'span' not in old_decisions:
         conn.execute('DROP TABLE recording_hotword_decisions')
         old_decisions = set()

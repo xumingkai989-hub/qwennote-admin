@@ -41,7 +41,7 @@ def test_legacy_migration_merges_targets_accumulates_hits_and_removes_columns(st
     assert word.note == '首条；次条' and (word.created_at, word.updated_at) == ('2026-01', '2026-03')
     with store._connect() as c:
         assert {r['name'] for r in c.execute('PRAGMA table_info(hotwords)')} == {
-            'id', 'term', 'aliases', 'note', 'enabled', 'hits', 'created_at', 'updated_at'}
+            'id', 'term', 'aliases', 'note', 'enabled', 'hits', 'created_at', 'updated_at', 'needs_review'}
     assert store.hotword_decisions('legacy') == []
     store.migrate()
     assert {r.term: r for r in store.list_hotwords()} == rows

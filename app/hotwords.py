@@ -1,5 +1,6 @@
 """One-pass, longest-first presentation substitutions for Markdown bodies."""
 import re
+import unicodedata
 from collections import Counter
 
 
@@ -14,11 +15,50 @@ FENCE = re.compile(r'^ {0,3}(`{3,}|~{3,})')
 STRUCTURE_LINE = re.compile(r'^ {0,3}(?:([-*_])(?:[ \t]*\1){2,}[ \t]*|[=-]+[ \t]*|\[[^\]]+\]:.*|\|?[ :|-]+\|?[ \t]*)$')
 
 
+SENTENCE_PUNCTUATION = '，。！？；：、\n'
+
+
+def word_error(value: str) -> str:
+    if not 1 <= len(value) <= 20 or not value.strip():
+        return '请输入 1–20 个字符的词语。'
+    if any(c in SENTENCE_PUNCTUATION for c in value) or re.search(r' {2,}', value):
+        return '词语不能含句子标点、换行或连续两个空格。'
+    if any(c in '<>' for c in value):
+        return '词语不能含 < 或 >。'
+    if any(ord(c) < 32 or ord(c) == 127 for c in value):
+        return '词语须为单行，不能含控制字符。'
+    return ''
+
+
+def clean_aliases(aliases: str) -> tuple[str, list[dict[str, str]]]:
+    """Commas delimit hints; validate each hint without silently rewriting it."""
+    valid, skipped = [], []
+    for raw in re.split('[,，]', aliases):
+        if not raw:
+            continue
+        error = word_error(raw)
+        if error:
+            skipped.append({'alias': raw, 'error': error})
+        elif raw.strip() not in valid:
+            valid.append(raw.strip())
+    return ','.join(valid), skipped
+
+
 def validate_hotword(term: str, aliases: str = '', note: str = '') -> None:
-    if (not term.strip()
-            or any(len(value) > limit for value, limit in [(term, 500), (aliases, 1000), (note, 1000)])
-            or any(ord(char) < 32 or ord(char) == 127 for value in (term, aliases, note) for char in value)):
-        raise ValueError('Hotwords must have a standard term and bounded single-line hints')
+    error = word_error(term)
+    if error:
+        raise ValueError(error)
+    if (len(aliases) > 1000 or len(note) > 1000
+            or any(ord(c) < 32 or ord(c) == 127 for c in note)):
+        raise ValueError('别名提示和备注最多 1000 字；备注须为单行。')
+    if clean_aliases(aliases)[1]:
+        raise ValueError('别名须逐条符合词语规则。')
+
+
+def valid_judge_span(span: str) -> bool:
+    return (1 <= len(span) <= 12 and span == span.strip() and not word_error(span)
+            and not any(unicodedata.category(c).startswith('P') or c in '<>'
+                        or ord(c) < 32 or ord(c) == 127 for c in span))
 
 
 def validate_decision(row, text, term):

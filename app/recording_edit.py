@@ -10,7 +10,7 @@ from fastapi import Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from starlette.concurrency import run_in_threadpool
 
-from app.hotwords import validate_hotword
+from app.hotwords import validate_hotword, clean_aliases
 from app.minutes import SHANGHAI
 from app.recording_content import apply_recording_hotwords
 
@@ -22,38 +22,73 @@ def edit_timestamp(value):
 
 
 def diff_suggestions(original: str, content: str) -> list[dict[str, str]]:
-    """Character opcodes with six characters of context on each side, at most 3."""
-    def meaningful(value):
-        return ''.join(char for char in value if not char.isspace()
-                       and not unicodedata.category(char).startswith('P'))
-    if meaningful(original) == meaningful(content):
+    """Minimal replacements, optionally completed to a bounded lexical unit.
+
+    Character diffs split a one-character typo inside a word. Complete that unit
+    only between punctuation / function-word boundaries, never a fixed context
+    window. If that unit is too long, retain the minimal opcode instead.
+    """
+    def normalized(value):
+        return ''.join(c for c in value if not c.isspace()
+                       and not unicodedata.category(c).startswith('P')).casefold()
+
+    def trim(value):
+        left, right = 0, len(value)
+        while left < right and (value[left].isspace() or unicodedata.category(value[left]).startswith('P')):
+            left += 1
+        while right > left and (value[right-1].isspace() or unicodedata.category(value[right-1]).startswith('P')):
+            right -= 1
+        return value[left:right]
+
+    def too_long(value):
+        return len(value) > (24 if value.isascii() else 12)
+
+    def boundary(char):
+        return (char in '\n\r\t的了和与在中把将是为及跟对从到'
+                or unicodedata.category(char)[0] in ('P', 'S'))
+
+    def unit(text, left, right):
+        while left > 0 and not boundary(text[left-1]):
+            left -= 1
+        while right < len(text) and not boundary(text[right]):
+            right += 1
+        return trim(text[left:right])
+
+    if normalized(original) == normalized(content):
         return []
-    # Trim identical ends before matching, keeping offsets into the full strings.
-    # Disable popular-character heuristics: repeated Chinese characters are text,
-    # not junk. Trimming also keeps a small correction in a long note inexpensive.
     start = 0
     while start < min(len(original), len(content)) and original[start] == content[start]:
         start += 1
     old_end, new_end = len(original), len(content)
-    while old_end > start and new_end > start and original[old_end - 1] == content[new_end - 1]:
+    while old_end > start and new_end > start and original[old_end-1] == content[new_end-1]:
         old_end -= 1
         new_end -= 1
     matcher = SequenceMatcher(None, original[start:old_end], content[start:new_end], autojunk=False)
     suggestions = []
     for kind, i, end_i, j, end_j in matcher.get_opcodes():
-        i, end_i, j, end_j = i + start, end_i + start, j + start, end_j + start
-        if kind not in ('replace', 'insert'):
+        if kind not in ('replace', 'delete'):
             continue
-        if meaningful(original[i:end_i]) == meaningful(content[j:end_j]):
+        i, end_i, j, end_j = i+start, end_i+start, j+start, end_j+start
+        old, new = trim(original[i:end_i]), trim(content[j:end_j])
+        if normalized(old) == normalized(new) or not normalized(old):
             continue
-        # Hotwords are single-line: context stops at a line boundary.
-        def snippet(text, start, end):
-            left = text[max(0, start - 6):start].split('\n')[-1].split('\r')[-1].split('\t')[-1]
-            right = text[end:end + 6].split('\n')[0].split('\r')[0].split('\t')[0]
-            return left + text[start:end] + right
-        item = {'aliases': snippet(original, i, end_i), 'term': snippet(content, j, end_j)}
-        if not meaningful(item['aliases']):
+        if too_long(old) or too_long(new):
+            # Defensive common-end minimization for coarse replacement opcodes.
+            while old and new and old[0] == new[0]:
+                old, new = old[1:], new[1:]
+            while old and new and old[-1] == new[-1]:
+                old, new = old[:-1], new[:-1]
+            old, new = trim(old), trim(new)
+            if too_long(old) or too_long(new):
+                continue
+        else:
+            old_unit, new_unit = unit(original, i, end_i), unit(content, j, end_j)
+            if (not too_long(old_unit) and not too_long(new_unit)
+                    and old_unit and new_unit and kind == 'replace'):
+                old, new = old_unit, new_unit
+        if normalized(old) == normalized(new):
             continue
+        item = {'aliases': old, 'term': new}
         try:
             validate_hotword(**item)
         except ValueError:
@@ -144,18 +179,25 @@ def install_recording_edit(app, *, sessions, authorize, csrf, valid_csrf, sessio
         fields = await fields_for(request)
         if not isinstance(fields, dict):
             return fields
+        skipped = []
         try:
             items = json.loads(fields.get('items', [''])[0])
             if not isinstance(items, list) or not 1 <= len(items) <= 3:
                 raise ValueError
-            for item in items:
+            for index, item in enumerate(items):
                 if (not isinstance(item, dict) or set(item) != {'term', 'aliases'}
                         or not all(isinstance(value, str) for value in item.values())):
                     raise ValueError
+                if len(item['aliases']) > 1000:
+                    raise ValueError('别名提示最多 1000 字。')
+                item['aliases'], invalid = clean_aliases(item['aliases'])
+                skipped.extend({'index': index, **row} for row in invalid)
                 validate_hotword(**item)
-        except (ValueError, TypeError):
-            return result({'detail': '请提供 1–3 条有效热词。'}, 400)
+        except (ValueError, TypeError) as exc:
+            return result({'detail': str(exc) or '请提供 1–3 条有效热词。'}, 400)
         counts = await run_in_threadpool(app.state.store.bulk_add_hotwords, items)
-        return result({**counts, 'message': f'已存入 {counts["added"]} 条，已存在 {counts["existing"]} 条'})
+        message = f'已存入 {counts["added"]} 条，已存在 {counts["existing"]} 条'
+        return result({**counts, 'message': message + (f'；已跳过 {len(skipped)} 条非法别名' if skipped else ''),
+                       **({'skipped_aliases': skipped} if skipped else {})})
 
     return token_for

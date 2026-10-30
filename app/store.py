@@ -84,6 +84,7 @@ class Hotword:
     created_at: str
     updated_at: str
     applied_records: int = 0
+    needs_review: bool = False
 
 
 class Store(SyncStore, Protocol):
@@ -516,7 +517,7 @@ class SQLiteStore:
             if old and (old['term'], old['aliases']) != (term, aliases):
                 conn.execute('DELETE FROM recording_hotword_decisions WHERE hotword_id=?', (hotword_id,))
                 conn.execute('DELETE FROM recording_hotword_checks WHERE hotword_id=?', (hotword_id,))
-            return conn.execute('UPDATE hotwords SET term=?, aliases=?, note=?, updated_at=? WHERE id=?',
+            return conn.execute('UPDATE hotwords SET term=?, aliases=?, note=?, updated_at=?, needs_review=0 WHERE id=?',
                                 (term, aliases, note, datetime.now(timezone.utc).isoformat(), hotword_id)).rowcount > 0
 
     def delete_hotword(self, hotword_id: int) -> bool:

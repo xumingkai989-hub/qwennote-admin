@@ -1,16 +1,20 @@
 {% extends "base.html" %}
 {% macro csrf_field() %}<input type="hidden" name="csrf_token" value="{{ csrf_token }}">{% endmacro %}
+{% macro inputs(values, active) %}
+  {% for name, label, limit in [('term', '标准词（必填）', 20), ('aliases', '别名提示（选填，逗号分隔）', 1000), ('note', '备注（选填）', 1000)] %}
+  <label>{{ label }}<input name="{{ name }}" {% if name == 'term' %}required{% endif %} maxlength="{{ limit }}" value="{{ values[name] | default('') }}" {% if active and errors.get(name) %}aria-invalid="true" aria-describedby="{{ name }}-error"{% endif %}>{% if active and errors.get(name) %}<span class="hotword-field-error" id="{{ name }}-error" role="alert">{{ errors[name] }}</span>{% endif %}</label>
+  {% endfor %}
+{% endmacro %}
 {% block main_attributes %} class="assistant-layout hotwords-layout"{% endblock %}
 {% block content %}
 <header class="assistant-heading"><h1>热词中心</h1></header>
 {% if error %}<p class="assistant-error" role="alert">{{ error }}</p>{% endif %}
+{% if notice %}<p class="assistant-note" role="status">{{ notice }}</p>{% endif %}
 <section class="assistant-section" aria-labelledby="hotword-add-heading">
   <h2 id="hotword-add-heading">新增热词</h2>
-  <form method="post" action="/hotwords" class="hotword-form">
+  <form method="post" action="/hotwords" class="hotword-form" novalidate>
     {{ csrf_field() }}
-    <label>标准词（必填）<input name="term" required maxlength="500" value="{{ draft.term | default('') }}"></label>
-    <label>别名提示（选填，逗号分隔）<input name="aliases" maxlength="1000" value="{{ draft.aliases | default('') }}"></label>
-    <label>备注（选填）<input name="note" maxlength="1000" value="{{ draft.note | default('') }}"></label>
+    {{ inputs(draft if not editing_id else {}, not editing_id) }}
     <button type="submit">新增</button>
   </form>
   <p class="assistant-note">模型判断通过后应用于总结、转写与导出；可在详情页撤销。命中次数按每次展示或导出时的实际替换累计。</p>
@@ -22,15 +26,13 @@
   <div class="assistant-table-scroll"><table class="assistant-table hotwords-table">
     <thead><tr><th scope="col">标准词</th><th scope="col">别名提示</th><th scope="col">命中次数</th><th scope="col">状态</th><th scope="col">操作</th></tr></thead>
     <tbody>{% for word in hotwords %}<tr>
-      <th scope="row">{{ word.term }}</th><td>{{ word.aliases }}</td><td>{{ word.hits }}</td>
+      <th scope="row">{{ word.term }}{% if word.needs_review %}<p class="hotword-review">这条像是整句，建议改成词语本身</p>{% endif %}</th><td>{{ word.aliases }}</td><td>{{ word.hits }}</td>
       <td><span class="badge badge-{{ 'complete' if word.enabled else 'empty' }}">{{ '启用' if word.enabled else '停用' }}</span></td>
       <td><div class="tag-actions">
-        <details><summary>编辑</summary>
-          <form method="post" action="/hotwords/{{ word.id }}/update" class="hotword-form hotword-edit">
+        <details {% if editing_id == word.id %}open{% endif %}><summary>编辑</summary>
+          <form method="post" action="/hotwords/{{ word.id }}/update" class="hotword-form hotword-edit" novalidate>
             {{ csrf_field() }}
-            <label>标准词（必填）<input name="term" required maxlength="500" value="{{ word.term }}"></label>
-            <label>别名提示（选填，逗号分隔）<input name="aliases" maxlength="1000" value="{{ word.aliases }}"></label>
-            <label>备注（选填）<input name="note" maxlength="1000" value="{{ word.note }}"></label>
+            {{ inputs(draft if editing_id == word.id and draft else word, editing_id == word.id) }}
             <button type="submit">保存</button>
           </form>
         </details>
@@ -41,4 +43,5 @@
   </table></div>
   {% else %}<p class="assistant-note">还没有热词。添加后，AI 会在新内容里识别可能的其它写法并替换成你的标准词</p>{% endif %}
 </section>
+<script src="/static/hotwords.js" defer></script>
 {% endblock %}

@@ -535,3 +535,10 @@ p.assistant-note { margin: 12px 0 0; }
 .hotword-trace li span { display: block; font-size: 12px; color: var(--secondary); }
 .hotword-trace p { margin: 4px 0 0; }
 .hotword-trace form { flex-shrink: 0; }
+
+.hotword-field-error { display: block; color: #b42318; font-size: 13px; margin-top: 4px; }
+.hotword-review { color: #854d0e; background: #fef3c7; border-radius: 6px; padding: 6px 8px; font-size: 13px; font-weight: 400; }
+@media (prefers-color-scheme: dark) {
+  .hotword-field-error { color: #fda29b; }
+  .hotword-review { color: #fde68a; background: #422f0c; }
+}

@@ -146,8 +146,8 @@ def test_exports_and_body_api_use_overrides(editing, store, path):
 
 
 @pytest.mark.parametrize('old,new,expected', [
-    ('abcdef错ghijkl', 'abcdef对ghijkl', [{'aliases': 'abcdef错ghijkl', 'term': 'abcdef对ghijkl'}]),
-    ('abcXYZdef', 'abcNEWXYZdef', [{'aliases': 'abcXYZdef', 'term': 'abcNEWXYZdef'}]),
+    ('abcdef错ghijkl', 'abcdef对ghijkl', [{'aliases': '错', 'term': '对'}]),
+    ('abcXYZdef', 'abcNEWXYZdef', []),
     ('小红直播', '小鹿直播', [{'aliases': '小红直播', 'term': '小鹿直播'}]),
     ('AI 助手', 'AI Tutor', [{'aliases': 'AI 助手', 'term': 'AI Tutor'}]),
     ('相同', '相同', []), ('你好，世界！', '你好 世界。', []),
@@ -162,7 +162,7 @@ def test_diff_caps_three_and_ignores_punctuation_before_valid_changes():
     old = '，\n' + '\n'.join('abcdefghijkl' + char + 'mnopqrstuvwx' for char in '甲乙丙丁戊')
     new = '。\n' + '\n'.join('abcdefghijkl' + char + 'mnopqrstuvwx' for char in '一二三四五')
     assert diff_suggestions(old, new) == [
-        {'aliases': 'ghijkl' + a + 'mnopqr', 'term': 'ghijkl' + b + 'mnopqr'}
+        {'aliases': a, 'term': b}
         for a, b in zip('甲乙丙', '一二三')]
 
 
@@ -180,7 +180,7 @@ def test_bulk_confirmation_skips_existing_and_is_idempotent(editing, store):
 
 
 @pytest.mark.parametrize('items', [[], [{}], [{'aliases': 'a', 'term': ''}],
-                                   [{'aliases': 'a\nb', 'term': 'c'}],
+                                   [{'aliases': 'a', 'term': 'c\nd'}],
                                    [{'aliases': 'a', 'term': 1}], ['a'],
                                    [{'aliases': 'a', 'term': 'b'}] * 4])
 def test_invalid_bulk_is_atomic(editing, store, items):
@@ -245,5 +245,4 @@ def test_detail_csrf_coexists_with_other_admin_pages(editing):
 def test_diff_preserves_corrections_inside_repetitive_long_transcript():
     old = '甲' * 1000 + '错' + '甲' * 1000
     new = '甲' * 1000 + '对' + '甲' * 1000
-    assert diff_suggestions(old, new) == [{'aliases': '甲' * 6 + '错' + '甲' * 6,
-                                          'term': '甲' * 6 + '对' + '甲' * 6}]
+    assert diff_suggestions(old, new) == [{'aliases': '错', 'term': '对'}]

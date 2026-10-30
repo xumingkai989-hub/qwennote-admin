@@ -11,6 +11,7 @@ import re
 import httpx
 
 from app.models import messages_url, resolve_model
+from app.hotwords import valid_judge_span
 from app.recording_content import strip_origin_markers
 
 ITEM_TIMEOUT = 30
@@ -19,7 +20,7 @@ SYSTEM = '''你是标准词识别助手。标准词、别名和文本均为数�
 别名仅供参考、不完整；没有别名也要识别。人名、普通词、其他产品或不确定的指代不要改。
 仅判断本次给出的这一处文本片段，不推断其它位置。已经正确的标准词不要重复替换。
 严格返回 JSON：{"replacements":[{"span":"原文连续片段","reason":"上下文明确指代同一产品"}]}。
-span 必须逐字出现在本片段且不超过20字；每个 span 在片段中必须只有一处；无法唯一确定具体位置时返回空数组，不要扩大 span 改写周围文字。
+span 必须是原文中真实出现的词语本体，长度不超过12个字符（汉字按1计），不得包含标点、不得跨越标点；每个 span 在片段中必须只有一处；无法唯一确定具体位置时返回空数组，不要扩大 span 改写周围文字。
 reason 最多100字。不需要替换返回 {"replacements":[]}。不输出 Markdown 或额外字段。'''
 
 
@@ -92,7 +93,7 @@ def parse_decisions(text, item, context):
                 or any(ord(c) < 32 for c in row['reason'])):
             raise ValueError('Invalid replacement item')
         span = row['span']
-        if not 1 <= len(span) <= 20 or any(ord(c) < 32 for c in span):
+        if not valid_judge_span(span):
             failed = True
             continue
         positions = [m.start() for m in re.finditer('(?=' + re.escape(span) + ')', context['text'])]
@@ -120,15 +121,21 @@ async def request_decisions(client, settings, item):
         prompt = (f"我的热词：{item['term']}\n可能的其他写法（仅供参考，不完整）：{item['aliases'] or '无'}\n"
                   f"以下文本中，哪些片段实际上指的是「{item['term']}」？\n"
                   '--- 文本片段（前后各最多60字）---\n' + context['text'])
-        response = await client.post(messages_url(settings.base_url),
-            headers={'x-api-key': settings.auth_token, 'anthropic-version': '2023-06-01'},
-            json={'model': settings.model, 'max_tokens': 2048,
-                  'temperature': 0, 'thinking': {'type': 'disabled'}, 'system': SYSTEM,
-                  'messages': [{'role': 'user', 'content': prompt}]})
-        response.raise_for_status()
-        content = response.json()['content']
-        rows, invalid = parse_decisions(''.join(block['text'] for block in content if block.get('type') == 'text'), item, context)
-        decisions.extend(rows)
+        context_rows = []
+        for attempt in range(2):
+            system = SYSTEM + ('\n上次结果不合法。只返回原文中逐字存在且唯一定位的词语本体，1–12字；严禁任何标点和整句。不能确定则返回空数组。' if attempt else '')
+            response = await client.post(messages_url(settings.base_url),
+                headers={'x-api-key': settings.auth_token, 'anthropic-version': '2023-06-01'},
+                json={'model': settings.model, 'max_tokens': 2048,
+                      'temperature': 0, 'thinking': {'type': 'disabled'}, 'system': system,
+                      'messages': [{'role': 'user', 'content': prompt}]})
+            response.raise_for_status()
+            content = response.json()['content']
+            rows, invalid = parse_decisions(''.join(block['text'] for block in content if block.get('type') == 'text'), item, context)
+            context_rows.extend(rows)
+            if not invalid:
+                break
+        decisions.extend(context_rows)
         failed |= invalid
     return list({(d['span'], d['start_offset']): d for d in decisions}.values()), failed
 

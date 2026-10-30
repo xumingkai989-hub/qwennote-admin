@@ -146,7 +146,9 @@ def test_markdown_syntax_code_and_link_destinations_are_protected(store, text, e
                                   '<https://example.test>', '&copy;', '`代码`', 'A|B', r'反\斜杠'])
 def test_target_is_plain_text_and_does_not_create_markdown(store, term):
     store.migrate()
-    store.add_hotword(term, 'AI')
+    # Presentation must remain safe for legacy terms that new forms reject.
+    with store._connect() as conn:
+        conn.execute("INSERT INTO hotwords(term,aliases,created_at,updated_at) VALUES (?,?,'now','now')", (term, 'AI'))
     markdown = apply_approved(store, 'AI')
     parser = MarkdownIt('commonmark', {'html': False})
     children = parser.parse(markdown)[1].children
@@ -206,7 +208,8 @@ def test_counts_accumulate_only_requested_bodies_and_can_be_revoked(populated, s
 def test_special_target_displays_literally_in_both_views(populated, store, view):
     for word in store.list_hotwords():
         store.delete_hotword(word.id)
-    store.add_hotword('**词** [名称] <标签> &copy;', 'AI Tutor')
+    with store._connect() as conn:
+        conn.execute("INSERT INTO hotwords(term,aliases,created_at,updated_at) VALUES (?,?,'now','now')", ('**词** [名称] <标签> &copy;', 'AI Tutor'))
     approve_rules(store)
     result = populated.get('/recordings/hotword?view=' + view)
     assert '**词** [名称] &lt;标签&gt; &amp;copy;' in result.text
@@ -283,7 +286,7 @@ def test_administration_crud_navigation_and_cookie(client, store):
     {'term': '', 'aliases': '好'}, {'aliases': '坏', 'term': ' '},
     {'aliases': 'x' * 1001, 'term': '好'}, {'aliases': '坏', 'term': 'x' * 501},
     {'aliases': '坏', 'term': '好', 'note': 'x' * 1001},
-    {'aliases': '坏\n词', 'term': '好'}, {'aliases': '坏', 'term': '# 标题\n新增段落'},
+    {'aliases': '坏', 'term': '好\n词'}, {'aliases': '坏', 'term': '# 标题\n新增段落'},
 ])
 @pytest.mark.parametrize('path', ['/hotwords', '/hotwords/1/update'])
 def test_invalid_fields_never_write(client, store, path, fields):
@@ -313,7 +316,9 @@ def test_missing_hotword_is_404(client, action):
 def test_management_escapes_untrusted_fields(client, store):
     login(client)
     payload = '<script>alert(1)</script>'
-    assert post(client, aliases=payload, term=payload, note=payload).status_code == 303
+    assert post(client, aliases=payload, term=payload, note=payload).status_code == 400
+    assert store.list_hotwords() == []
+    assert post(client, term='安全词', note=payload).status_code == 303
     page = client.get('/hotwords')
     assert payload not in page.text and '&lt;script&gt;' in page.text
 
