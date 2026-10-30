@@ -15,3 +15,4 @@ data/
 *.sync.lock
 *.tag.lock
 *.scheduler.lock
+*.hotword-judge.lock

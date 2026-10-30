@@ -173,6 +173,8 @@ def test_export_part_only_applies_hotwords_to_exported_content(detail_client, st
     original = store.get_recording('detail')
     store.add_hotword('小红直播', '小鹿直播')
     store.add_hotword('origin', '不应先替换')
+    from test_hotwords import approve_rules
+    approve_rules(store, 'detail')
     response = detail_client.get('/recordings/detail.md?part=' + part)
     assert 'origin:' not in response.text and '不应先替换' not in response.text
     assert '小红直播' not in response.text

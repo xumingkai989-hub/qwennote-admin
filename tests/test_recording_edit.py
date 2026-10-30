@@ -99,6 +99,8 @@ def test_fields_are_independent_and_second_save_diffs_previous_override(editing,
 
 def test_editor_starts_with_hotword_display_and_override_is_authoritative(editing, store):
     store.add_hotword('小红直播', '小鹿直播')
+    from test_hotwords import approve_rules
+    approve_rules(store, 'edit-test')
     html = editing.get(PATH).text
     source = json.loads(re.search(r'<script id="edit-source"[^>]*>(.*?)</script>', html, re.S)[1])
     assert source == '小鹿直播\n\nAI 助手'

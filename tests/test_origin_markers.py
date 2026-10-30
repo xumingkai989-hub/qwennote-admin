@@ -40,6 +40,8 @@ def provenance(client, store):
     store.upsert_recording(meta, RecordingDetail('origin-test', body, body, True, True), 'original')
     store.add_hotword('小红直播', '小鹿直播')
     store.add_hotword('origin', '标记不能先变热词')
+    from test_hotwords import approve_rules
+    approve_rules(store, 'origin-test')
     login(client)
     key = 'qn_' + secrets.token_hex(16)
     store.create_api_key('origin-test', hashlib.sha256(key.encode()).hexdigest())

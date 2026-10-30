@@ -293,7 +293,7 @@ def create_app(
         if view not in ('summary', 'transcript'):
             view = default_view
         recording = apply_recording_hotwords(
-            recording, lambda text: store.apply_hotwords(text, markdown=view != 'transcript'), fields=(view,), overrides=overrides)
+            recording, lambda text, **kw: store.apply_hotwords(text, markdown=view != 'transcript', **kw), fields=(view,), overrides=overrides)
         can_edit = navigation_context(request)['navigation_admin']
         token = edit_token(request) if can_edit else ''
         edit_content = getattr(recording, view + '_md') if getattr(recording, 'has_' + view) else ''
@@ -304,6 +304,7 @@ def create_app(
             'title': recording.title or '未命名录音', 'recording': recording, 'back_url': back_url,
             'view': view, 'can_edit': can_edit, 'edit_csrf': token,
             'edit_content': edit_content, 'edit_blocks': edit_blocks,
+            'hotword_trace': store.hotword_presentation(recording_id),
             'edited_at': edit_timestamp(overrides[view]['updated_at']) if view in overrides else None,
             'view_urls': {name: request.url.include_query_params(view=name) for name in ('summary', 'transcript')},
             'summary_html': render_summary(recording.summary_md) if view == 'summary' and recording.has_summary else None,

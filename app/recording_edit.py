@@ -2,11 +2,12 @@
 import json
 import secrets
 import unicodedata
+from urllib.parse import quote
 from datetime import datetime
 from difflib import SequenceMatcher
 
 from fastapi import Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from starlette.concurrency import run_in_threadpool
 
 from app.hotwords import validate_hotword
@@ -100,7 +101,7 @@ def install_recording_edit(app, *, sessions, authorize, csrf, valid_csrf, sessio
                 store.revert_override(recording_id, field)
                 return result({'reverted': True})
             current = apply_recording_hotwords(
-                recording, lambda text: store.apply_hotwords(text, markdown=field != 'transcript'),
+                recording, lambda text, **kw: store.apply_hotwords(text, markdown=field != 'transcript', **kw),
                 fields=(field,), overrides=store.get_overrides(recording_id))
             # Save before deriving suggestions. No hotwords are written here.
             updated = store.save_override(recording_id, field, content)
@@ -115,6 +116,22 @@ def install_recording_edit(app, *, sessions, authorize, csrf, valid_csrf, sessio
     @app.post('/recordings/{recording_id}/revert')
     async def revert(request: Request, recording_id: str):
         return await mutate(request, recording_id, revert=True)
+
+    @app.post('/recordings/{recording_id}/hotwords/{hotword_id}/revoke')
+    async def revoke_hotword(request: Request, recording_id: str, hotword_id: int):
+        fields = await fields_for(request)
+        if not isinstance(fields, dict):
+            return fields
+        field = fields.get('field', [''])[0]
+        view = fields.get('view', [field])[0]
+        if field not in ('summary', 'transcript') or view not in ('summary', 'transcript'):
+            return result({'detail': '请检查热词字段。'}, 400)
+        store = app.state.store
+        if await run_in_threadpool(store.get_recording, recording_id) is None:
+            return result({'detail': '录音不存在。'}, 404)
+        await run_in_threadpool(store.revoke_hotword, recording_id, hotword_id, field)
+        return RedirectResponse('/recordings/' + quote(recording_id, safe='') + '?view=' + view,
+                                status_code=303, headers={'Cache-Control': 'no-store'})
 
     @app.post('/hotwords/bulk')
     async def bulk(request: Request):

@@ -58,7 +58,7 @@ def apply_recording_hotwords(recording: StoredRecording, substitute: Callable[[s
         overridden = overrides and field in overrides
         value = overrides[field]['content_md'] if overridden else getattr(recording, field + '_md')
         if value is not None:
-            value = (apply_hotwords(value, substitute) if field in fields and not overridden
+            value = (apply_hotwords(value, lambda text: substitute(text, recording_id=recording.recording_id, field=field)) if field in fields and not overridden
                      and getattr(recording, 'has_' + field) else strip_origin_markers(value))
             changes[field + '_md'] = value
             changes['has_' + field] = bool(value.strip()) and (bool(overridden) or getattr(recording, 'has_' + field))

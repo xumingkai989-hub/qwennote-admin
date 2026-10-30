@@ -53,6 +53,7 @@ def run_sync(source: MinutesSource, store: SyncStore, *, backfill_days: int = 90
         errors = []
         seen = set()
         tag_ids = []
+        judge_ids = []
         refresh_before = getattr(source, 'refresh_count', 0)
         try:
             if hasattr(source, 'sync_window'):
@@ -82,6 +83,10 @@ def run_sync(source: MinutesSource, store: SyncStore, *, backfill_days: int = 90
                         continue
                     inserted += outcome == 'inserted'
                     updated += outcome == 'updated'
+                    if previous is None or (previous.summary_md, previous.transcript_md,
+                            previous.has_summary, previous.has_transcript) != (
+                            detail.summary_md or '', detail.transcript_md or '', detail.has_summary, detail.has_transcript):
+                        judge_ids.append(meta.recording_id)
                     if previous is None or (previous.title, previous.summary_md, previous.transcript_md) != (
                             meta.title or '', detail.summary_md or '', detail.transcript_md or ''):
                         tag_ids.append(meta.recording_id)
@@ -94,6 +99,12 @@ def run_sync(source: MinutesSource, store: SyncStore, *, backfill_days: int = 90
                       '\n'.join(errors) if errors else None,
                       int(getattr(source, 'refresh_count', 0) > refresh_before))
         store.finish_sync(run)
+        try:
+            from app.hotword_judge import run_judgments
+            if judge_ids:
+                run_judgments(store, recording_ids=judge_ids)
+        except Exception:
+            logging.getLogger(__name__).warning('热词判断批次失败；未判断内容保持原文')
         # Tags are optional enrichment; never turn a successful sync into failure.
         try:
             from app.tag import run_tags

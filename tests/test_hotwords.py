@@ -36,6 +36,21 @@ def recording_rows(store):
         return [tuple(row) for row in conn.execute('SELECT * FROM recordings')]
 
 
+def approve_rules(store, recording_id='hotword', text=BODY):
+    if store.get_recording(recording_id) is None:
+        store.upsert_recording(RecordingMeta(recording_id, 'AI 例会', datetime(2026, 10, 29, 9, 30, tzinfo=SHANGHAI), 12),
+                               RecordingDetail(recording_id, text, text, True, True), 'now')
+    rules = [r for r in store.list_hotwords() if r.enabled]
+    assert store.save_hotword_decisions(store.get_recording(recording_id), rules,
+        [{'hotword_id': r.id, 'field': f, 'decision': 'apply', 'reason': '离线审核通过'}
+         for r in rules for f in ('summary', 'transcript')], store.hotword_decisions(recording_id))
+
+
+def apply_approved(store, text, **kwargs):
+    approve_rules(store, text=text)
+    return store.apply_hotwords(text, recording_id='hotword', field='summary', **kwargs)
+
+
 @pytest.fixture
 def populated(client, store):
     store.upsert_recording(
@@ -44,6 +59,7 @@ def populated(client, store):
     # The longer rule deliberately comes second.
     store.add_hotword('AI', '人工智能')
     store.add_hotword('AI Tutor', 'AI导师')
+    approve_rules(store)
     key = 'qn_' + secrets.token_hex(16)
     store.create_api_key('offline-hotwords', hashlib.sha256(key.encode()).hexdigest())
     client.headers['Authorization'] = 'Bearer ' + key
@@ -61,14 +77,14 @@ def test_longest_first_and_case(store, text, expected):
     store.migrate()
     store.add_hotword('AI', '人工智能')
     store.add_hotword('AI Tutor', 'AI导师')
-    assert store.apply_hotwords(text) == expected
+    assert apply_approved(store, text) == expected
 
 
 def test_one_pass_does_not_rescan_targets_or_cycle(store):
     store.migrate()
     for source, target in [('A', 'B'), ('B', 'C'), ('C', 'A')]:
         store.add_hotword(source, target)
-    assert store.apply_hotwords('A B C A') == 'B C A B'
+    assert apply_approved(store, 'A B C A') == 'B C A B'
     assert {row.source: row.hits for row in store.list_hotwords()} == {'A': 2, 'B': 1, 'C': 1}
 
 
@@ -77,7 +93,7 @@ def test_chinese_exact_and_regex_metacharacters_are_literal(store):
     store.add_hotword('千问', '通义千问')
     store.add_hotword('C++', 'Cpp')
     store.add_hotword('a.b', 'dot')
-    assert store.apply_hotwords('千问 C++ a.b axb') == '通义千问 Cpp dot axb'
+    assert apply_approved(store, '千问 C++ a.b axb') == '通义千问 Cpp dot axb'
 
 
 def test_disabled_rules_do_not_match_or_count(store):
@@ -85,10 +101,10 @@ def test_disabled_rules_do_not_match_or_count(store):
     store.add_hotword('AI', '人工智能')
     key = store.list_hotwords()[0].id
     assert store.toggle_hotword(key)
-    assert store.apply_hotwords('AI ai') == 'AI ai'
+    assert apply_approved(store, 'AI ai') == 'AI ai'
     assert store.list_hotwords()[0].hits == 0
     assert store.toggle_hotword(key)
-    assert store.apply_hotwords('AI ai') == '人工智能 人工智能'
+    assert apply_approved(store, 'AI ai') == '人工智能 人工智能'
     assert store.list_hotwords()[0].hits == 2
 
 
@@ -108,7 +124,7 @@ def test_disabled_rules_do_not_match_or_count(store):
 def test_markdown_syntax_code_and_link_destinations_are_protected(store, text, expected, hits):
     store.migrate()
     store.add_hotword('AI', '正确')
-    assert store.apply_hotwords(text) == expected
+    assert apply_approved(store, text) == expected
     assert store.list_hotwords()[0].hits == hits
 
 
@@ -117,11 +133,11 @@ def test_markdown_syntax_code_and_link_destinations_are_protected(store, text, e
 def test_target_is_plain_text_and_does_not_create_markdown(store, target):
     store.migrate()
     store.add_hotword('AI', target)
-    markdown = store.apply_hotwords('AI')
+    markdown = apply_approved(store, 'AI')
     parser = MarkdownIt('commonmark', {'html': False})
     children = parser.parse(markdown)[1].children
     assert [(token.type, token.content) for token in children] == [('text', target)]
-    assert store.apply_hotwords('AI', markdown=False) == target
+    assert apply_approved(store, 'AI', markdown=False) == target
 
 
 @pytest.mark.parametrize('path,fields', [
@@ -177,6 +193,7 @@ def test_special_target_displays_literally_in_both_views(populated, store, view)
     for word in store.list_hotwords():
         store.delete_hotword(word.id)
     store.add_hotword('AI Tutor', '**词** [名称] <标签> &copy;')
+    approve_rules(store)
     result = populated.get('/recordings/hotword?view=' + view)
     assert '**词** [名称] &lt;标签&gt; &amp;copy;' in result.text
     assert '<strong>词</strong>' not in result.text
@@ -236,7 +253,7 @@ def test_administration_crud_navigation_and_cookie(client, store):
     word, = store.list_hotwords()
     assert (word.source, word.target, word.note, word.enabled, word.hits) == ('AI', '正确', '备注', True, 0)
     assert word.created_at and word.updated_at
-    assert store.apply_hotwords('AI AI') == '正确 正确'
+    assert apply_approved(store, 'AI AI') == '正确 正确'
     assert post(client, f'/hotwords/{word.id}/update', source='Tutor', target='导师', note='新备注').status_code == 303
     updated, = store.list_hotwords()
     assert (updated.source, updated.target, updated.note, updated.hits) == ('Tutor', '导师', '新备注', 2)
@@ -290,7 +307,7 @@ def test_management_escapes_untrusted_fields(client, store):
 def test_migration_is_idempotent_preserves_rules_and_override_constraint(store):
     store.migrate()
     store.add_hotword('AI', '正确')
-    store.apply_hotwords('AI')
+    apply_approved(store, 'AI')
     before = store.list_hotwords()
     with store._connect() as conn:
         conn.execute("INSERT INTO recording_overrides VALUES ('future', 'summary', '# 未来', 'now')")

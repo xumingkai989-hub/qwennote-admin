@@ -458,3 +458,7 @@ systemctl list-timers --all qwennote-tag-maintenance.timer
 管理员通过 `/models` 查看 Claude Code 当前模型（只读），新增、测试、启停、删除标签与分析模型，并切换唯一默认模型。各 provider 共用 Anthropic Messages 兼容协议。打标与词表维护优先读默认模型，没有默认时回退原 env，未配置或解密失败不阻断录音同步。
 
 模型 Key 先用 Fernet 加密再入库，页面和 JSON 仅展示末四位；密文永不进入响应。部署 prepare 自动一次性生成 `/etc/qwennote/secret.key`（qwennote 所有，600），后续发布保留原密钥。接口、权限、错误处理、备份 / 回滚与验证细节见 [工单 15](docs/models-15.md)。全量 938 项 Python 测试通过（原有 871 项保留，新增 67 项），其他浏览器与部署证据保存在仓库外成果目录。
+
+### 工单 16：热词模型判断与撤销
+
+热词现在只有该记录、该字段存在 `apply` 决策才替换。同步新增或正文变化后每条记录最多一次模型请求，打包原词上下文；不确定或失败记 skip，失败理由为 `judge_failed`，原文保持。详情页展示应用次数、展开理由和管理员撤销；热词中心增加已应用记录数。详情、导出、API 与日报共用该决策管线，手动补判入口为 `python -m app.hotword_judge --all`。命令保留已有决策和撤销，显式 `--force` 可覆盖重判。数据表、严格 JSON、快照保护、计数与部署验收口径见 [工单 16](docs/hotword-judge-16.md)；此前工单 10 的无条件替换口径由本节取代。

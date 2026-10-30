@@ -36,6 +36,24 @@
       <span>{{ (recording.duration_min ~ ' 分钟') if recording.duration_min is not none else '时长未知' }}</span>
     </div>
   </header>
+  {% if hotword_trace.pending %}<p class="hotword-pending">本条的用词尚未经过热词判断</p>{% endif %}
+  {% if hotword_trace.count %}
+  <details id="hotword-trace" class="hotword-trace">
+    <summary>热词已应用 {{ hotword_trace.count }} 处</summary>
+    <ul>{% for item in hotword_trace.applied %}
+      <li><div><strong>{{ item.source }} → {{ item.target }}</strong>
+        <span>{{ '总结' if item.field == 'summary' else '转写' }} · {{ item.count }} 处</span>
+        <p>{{ item.reason }}</p></div>
+        {% if can_edit %}<form method="post" action="{{ url_for('revoke_hotword', recording_id=recording.recording_id, hotword_id=item.hotword_id) }}">
+          <input type="hidden" name="csrf_token" value="{{ edit_csrf }}">
+          <input type="hidden" name="field" value="{{ item.field }}">
+          <input type="hidden" name="view" value="{{ view }}">
+          <button class="text-button" type="submit" aria-label="撤销{{ '总结' if item.field == 'summary' else '转写' }}中的 {{ item.source }}">撤销</button>
+        </form>{% endif %}
+      </li>
+    {% endfor %}</ul>
+  </details>
+  {% endif %}
   <nav class="detail-view-switch" aria-label="录音内容视图">
     <div class="segmented-control">
       {% for name, label, available in [('summary', '总结', recording.has_summary), ('transcript', '转写原文', recording.has_transcript)] %}
