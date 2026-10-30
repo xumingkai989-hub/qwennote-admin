@@ -3,6 +3,7 @@
 {% block content %}
 <div class="list-heading"><h1>设置中心</h1></div>
 <p class="settings-status" role="status">{% if saved %}<strong>已保存</strong> · {% endif %}{% if next_runs.sync %}下次同步 {{ next_runs.sync.strftime('%m-%d %H:%M') }}{% else %}自动同步已关闭{% endif %}</p>
+{% include "sync_result.html" %}
 {% if error %}<p class="settings-error" role="alert">{{ error }}</p>{% endif %}
 <form method="post" action="/settings" class="settings-form">
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -27,7 +28,7 @@
       <div class="settings-row">
         <label for="backfill_days">首次 / 补拉天数</label>
         <input id="backfill_days" name="backfill_days" type="number" min="1" max="999999" step="1" required value="{{ preferences.backfill_days }}" aria-describedby="backfill-help">
-        <p id="backfill-help">包含今天；同时用于手动与自动同步，至少 1 天。</p>
+        <p id="backfill-help">包含今天，至少 1 天；首次和全量同步扫描此范围，增量同步按上次成功时间缩小窗口并保留 2 天重叠。</p>
       </div>
     </div>
   </fieldset>

@@ -158,7 +158,8 @@ def test_home_has_button_status_counts_and_immediate_result_script(sync_client):
     assert 'aria-label="同步"' in sync_client.get('/').text
     sync_client.post('/sync')
     html = sync_client.get('/').text
-    assert all(text not in html for text in ('上次同步时间', '拉取 2', '新增 2', '更新 0', 'sync-panel'))
+    assert all(text not in html for text in ('上次同步时间', '拉取 2', 'sync-panel'))
+    assert '检查 2 条 · 新增 2 · 更新 0 · 跳过 0' in html
     assert '笔记创建时间' in html and 'home.js' in html
     script = sync_client.get('/static/home.js').text
     assert all(text in script for text in ('fetch(', '/sync', 'is-complete', '1000', 'window.location.reload()'))

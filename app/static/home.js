@@ -1,32 +1,36 @@
 (() => {
   const button = document.getElementById('sync-button');
+  const fullButton = document.getElementById('full-sync-button');
+  const buttons = [button, fullButton].filter(Boolean);
   const errorMessage = document.getElementById('sync-error');
   const feedback = document.getElementById('sync-feedback');
-  button.addEventListener('click', async () => {
-    if (button.disabled) return;
-    button.disabled = true;
-    button.setAttribute('aria-busy', 'true');
-    button.classList.add('is-syncing');
+  const sync = async (activeButton, full) => {
+    if (activeButton.disabled) return;
+    buttons.forEach(item => {item.disabled = true;});
+    activeButton.setAttribute('aria-busy', 'true');
+    activeButton.classList.add('is-syncing');
     errorMessage.textContent = '';
     feedback.textContent = '正在同步';
     try {
-      const response = await fetch('/sync', {method: 'POST', credentials: 'same-origin'});
+      const response = await fetch(full ? '/sync?full=1' : '/sync', {method: 'POST', credentials: 'same-origin'});
       const result = await response.json();
       if (!response.ok || result.status !== 'success') {
         throw new Error(result.error || result.detail || '同步请求失败，请重试');
       }
-      button.classList.remove('is-syncing');
-      button.classList.add('is-complete');
-      feedback.textContent = '同步完成';
+      activeButton.classList.remove('is-syncing');
+      activeButton.classList.add('is-complete');
+      feedback.textContent = `检查 ${result.fetched} 条 · 新增 ${result.inserted} · 更新 ${result.updated} · 跳过 ${result.skipped}`;
       await new Promise(resolve => setTimeout(resolve, 1000));
       window.location.reload();
     } catch (error) {
       errorMessage.textContent = error.message || '同步请求失败，请重试';
       feedback.textContent = '同步失败';
     } finally {
-      button.classList.remove('is-syncing', 'is-complete');
-      button.removeAttribute('aria-busy');
-      button.disabled = false;
+      activeButton.classList.remove('is-syncing', 'is-complete');
+      activeButton.removeAttribute('aria-busy');
+      buttons.forEach(item => {item.disabled = false;});
     }
-  });
+  };
+  button.addEventListener('click', () => sync(button, false));
+  if (fullButton) fullButton.addEventListener('click', () => sync(fullButton, true));
 })();

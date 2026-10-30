@@ -20,7 +20,7 @@ test('home timeline, cards and controls fit desktop/mobile and both color scheme
           const groups = [...document.querySelectorAll('.date-group')];
           return {
             viewport: innerWidth, scrollWidth: document.documentElement.scrollWidth,
-            button: box('#sync-button'), frame: box('main'), list: box('.timeline'), card: box('.timeline-card'),
+            button: box('#sync-button'), fullButton: box('#full-sync-button'), frame: box('main'), list: box('.timeline'), card: box('.timeline-card'),
             groups: groups.map(group => {
               const line = getComputedStyle(group, '::before');
               const heading = group.querySelector('.date-heading');
@@ -74,6 +74,8 @@ test('home timeline, cards and controls fit desktop/mobile and both color scheme
         }
 
         assert.equal(measurements.button.width, 44); assert.equal(measurements.button.height, 44);
+        assert.ok(measurements.fullButton.x >= measurements.button.x + measurements.button.width);
+        assert.ok(measurements.fullButton.x + measurements.fullButton.width <= width);
         assert.equal(measurements.frame.width, Math.min(width, 1120));
         assert.equal(measurements.card.x - measurements.list.x, 20);
         assert.equal(measurements.groups.length, 3);

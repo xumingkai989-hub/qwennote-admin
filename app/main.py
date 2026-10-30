@@ -344,7 +344,8 @@ def create_app(
         try:
             backfill = (store.get_settings(backfill_days=settings.backfill_days).backfill_days
                         if hasattr(store, 'get_settings') else settings.backfill_days)
-            run = run_sync(source, store, backfill_days=backfill)
+            run = run_sync(source, store, backfill_days=backfill,
+                           full=request.query_params.get('full') == '1')
         except SyncInProgress:
             return JSONResponse({'detail': '同步正在进行，请稍后重试'}, status_code=409,
                                 headers={'Cache-Control': 'no-store'})

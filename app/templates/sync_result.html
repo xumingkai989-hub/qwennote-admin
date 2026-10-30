@@ -1,0 +1,1 @@
+<p id="sync-feedback" class="sync-result" role="status" aria-live="polite">{% if sync_run and sync_run.finished_at %}检查 {{ sync_run.fetched }} 条 · 新增 {{ sync_run.inserted }} · 更新 {{ sync_run.updated }} · 跳过 {{ sync_run.skipped }}{% endif %}</p>

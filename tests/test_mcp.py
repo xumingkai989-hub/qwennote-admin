@@ -125,7 +125,7 @@ def test_window_two_pages_idempotent_and_local_dates(setup_source, store, sse):
     assert len(calls) == 4 and calls[1]['cursor'] == 'page-two'
     assert calls[0]['startTime'] == int(datetime(2026,8,1,tzinfo=SHANGHAI).timestamp()*1000)
     assert calls[0]['endTime'] == int(NOW.timestamp()*1000)
-    assert db_rows(store, 'recordings')[0]['media_type'] == 'VIDEO'
+    assert next(r for r in db_rows(store, 'recordings') if r['recording_id'] == 'real-1')['media_type'] == 'VIDEO'
 
 
 def test_date_query_filters_provider_cross_day(setup_source):

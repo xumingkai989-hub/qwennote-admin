@@ -196,6 +196,7 @@ class SQLiteStore:
                     fetched INTEGER NOT NULL DEFAULT 0,
                     inserted INTEGER NOT NULL DEFAULT 0,
                     updated INTEGER NOT NULL DEFAULT 0,
+                    skipped INTEGER NOT NULL DEFAULT 0,
                     error TEXT
                 );
                 CREATE TABLE IF NOT EXISTS api_keys (
@@ -311,6 +312,8 @@ class SQLiteStore:
                 conn.execute('ALTER TABLE recordings ADD COLUMN media_type TEXT')
             if 'refreshed_token' not in {row['name'] for row in conn.execute('PRAGMA table_info(sync_runs)')}:
                 conn.execute('ALTER TABLE sync_runs ADD COLUMN refreshed_token INTEGER NOT NULL DEFAULT 0 CHECK (refreshed_token IN (0, 1))')
+            if 'skipped' not in {row['name'] for row in conn.execute('PRAGMA table_info(sync_runs)')}:
+                conn.execute('ALTER TABLE sync_runs ADD COLUMN skipped INTEGER NOT NULL DEFAULT 0')
             conn.execute('CREATE INDEX IF NOT EXISTS recordings_created_at_idx '
                          'ON recordings (created_at DESC, recording_id DESC)')
             # Keep the schema change, backfill and index creation in one write
@@ -729,13 +732,19 @@ class SQLiteStore:
     def finish_sync(self, run: SyncRun) -> None:
         with self._connect() as conn:
             conn.execute(
-                "UPDATE sync_runs SET finished_at = ?, status = ?, fetched = ?, inserted = ?, updated = ?, error = ?, refreshed_token = ? WHERE id = ?",
-                (run.finished_at, run.status, run.fetched, run.inserted, run.updated, run.error, run.refreshed_token, run.id),
+                "UPDATE sync_runs SET finished_at = ?, status = ?, fetched = ?, inserted = ?, updated = ?, skipped = ?, error = ?, refreshed_token = ? WHERE id = ?",
+                (run.finished_at, run.status, run.fetched, run.inserted, run.updated, run.skipped, run.error, run.refreshed_token, run.id),
             )
 
     def latest_sync(self) -> SyncRun | None:
         with self._connect() as conn:
             row = conn.execute('SELECT * FROM sync_runs ORDER BY id DESC LIMIT 1').fetchone()
+            return SyncRun(**dict(row)) if row else None
+
+    def latest_successful_sync(self) -> SyncRun | None:
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM sync_runs WHERE status = 'success' "
+                               'ORDER BY started_at DESC, id DESC LIMIT 1').fetchone()
             return SyncRun(**dict(row)) if row else None
 
     def upsert_recording(self, meta: RecordingMeta, detail: RecordingDetail, synced_at: str) -> str:

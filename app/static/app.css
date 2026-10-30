@@ -270,6 +270,10 @@ mark { background: var(--mark); color: var(--text); border-radius: 2px; }
 .home-heading h1 { font-size: 24px; font-weight: 600; letter-spacing: normal; }
 #sync-button { display: grid; place-items: center; flex: 0 0 44px; width: 44px; height: 44px; padding: 0; background: transparent; color: var(--accent); }
 #sync-button:hover { background: var(--control); }
+.sync-actions { display: flex; align-items: center; gap: 8px; }
+#full-sync-button { white-space: nowrap; }
+.sync-result { color: var(--secondary); font-size: 14px; }
+.sync-result:empty { display: none; }
 #sync-button .sync-check { display: none; }
 #sync-button.is-complete .sync-refresh { display: none; }
 #sync-button.is-complete .sync-check { display: block; }
