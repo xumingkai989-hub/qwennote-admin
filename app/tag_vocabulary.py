@@ -35,12 +35,12 @@ def migrate(conn):
     statements = [
         """CREATE TABLE IF NOT EXISTS tags (
             id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE,
-            status TEXT NOT NULL CHECK (status IN ('active', 'merged')),
+            status TEXT NOT NULL CHECK (status IN ('active', 'merged', 'deactivated')),
             merged_into INTEGER REFERENCES tags(id),
             source TEXT NOT NULL CHECK (source IN ('seed', 'model', 'manual')),
             usage_count INTEGER NOT NULL DEFAULT 0 CHECK (usage_count >= 0),
             created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
-            CHECK ((status = 'active' AND merged_into IS NULL) OR
+            CHECK ((status IN ('active', 'deactivated') AND merged_into IS NULL) OR
                    (status = 'merged' AND merged_into IS NOT NULL AND merged_into != id)))""",
         """CREATE TABLE IF NOT EXISTS tag_aliases (
             alias TEXT PRIMARY KEY NOT NULL, tag_id INTEGER NOT NULL REFERENCES tags(id))""",
@@ -57,6 +57,22 @@ def migrate(conn):
         """CREATE TABLE IF NOT EXISTS tag_semantic_checks (
             tag_id INTEGER PRIMARY KEY REFERENCES tags(id), checked_at TEXT NOT NULL)""",
     ]
+    # Work order 08's CHECK constraint predates deactivation. Rebuild only the
+    # vocabulary and its two FK dependants inside the caller's write transaction.
+    schema = conn.execute("SELECT sql FROM sqlite_master WHERE name = 'tags'").fetchone()
+    if schema and "'deactivated'" not in schema[0]:
+        aliases = list(conn.execute('SELECT alias, tag_id FROM tag_aliases'))
+        checks = list(conn.execute('SELECT tag_id, checked_at FROM tag_semantic_checks'))
+        conn.execute('DROP TABLE tag_aliases')
+        conn.execute('DROP TABLE tag_semantic_checks')
+        conn.execute('ALTER TABLE tags RENAME TO tags_before_deactivation')
+        conn.execute(statements[0])
+        conn.execute('INSERT INTO tags SELECT * FROM tags_before_deactivation')
+        conn.execute('DROP TABLE tags_before_deactivation')
+        conn.execute(statements[1])
+        conn.execute(statements[-1])
+        conn.executemany('INSERT INTO tag_aliases VALUES (?, ?)', aliases)
+        conn.executemany('INSERT INTO tag_semantic_checks VALUES (?, ?)', checks)
     for statement in statements:
         conn.execute(statement)
     stamp = now()

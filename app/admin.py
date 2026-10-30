@@ -37,6 +37,29 @@ def install_admin(app: FastAPI, *, settings: Settings, templates: Jinja2Template
                     and secrets.compare_digest(token.encode(), cookie.encode())
                     and value.startswith(session_binding(request) + ':'))
 
+    async def parse_form(request: Request, *, max_bytes=16384):
+        # Native HTML forms use URL encoding; no multipart dependency or JSON
+        # fallback. Reject duplicate fields, including ambiguous CSRF values.
+        try:
+            if request.headers.get('content-type', '').split(';')[0] != 'application/x-www-form-urlencoded':
+                raise ValueError
+            body = await request.body()
+            if len(body) > max_bytes:
+                raise ValueError
+            fields = parse_qs(body.decode('utf-8'), keep_blank_values=True, max_num_fields=8)
+            if any(len(values) != 1 for values in fields.values()):
+                raise ValueError
+        except (ValueError, UnicodeError):
+            return error_page(request, 403, '请求无效', 'CSRF 校验失败，请刷新管理页后重试。')
+        if not valid_csrf(request, fields.get('csrf_token', [''])[0]):
+            return error_page(request, 403, '请求无效', 'CSRF 校验失败，请刷新管理页后重试。')
+        return fields
+
+    from app.assistant import install_assistant
+    install_assistant(app, settings=settings, templates=templates, sessions=sessions,
+                      authorize=authorize, valid_csrf=valid_csrf, csrf=csrf,
+                      session_binding=session_binding, parse_form=parse_form, error_page=error_page)
+
     @app.get('/admin')
     def admin(request: Request):
         denied = authorize(request)
@@ -66,21 +89,9 @@ def install_admin(app: FastAPI, *, settings: Settings, templates: Jinja2Template
         denied = authorize(request)
         if denied is not None:
             return denied
-        # Native HTML forms use URL encoding; no multipart dependency or JSON
-        # fallback. Reject duplicate fields, including ambiguous CSRF values.
-        try:
-            if request.headers.get('content-type', '').split(';')[0] != 'application/x-www-form-urlencoded':
-                raise ValueError
-            body = await request.body()
-            if len(body) > 16384:
-                raise ValueError
-            fields = parse_qs(body.decode('utf-8'), keep_blank_values=True, max_num_fields=8)
-            if any(len(values) != 1 for values in fields.values()):
-                raise ValueError
-        except (ValueError, UnicodeError):
-            return error_page(request, 403, '请求无效', 'CSRF 校验失败，请刷新管理页后重试。')
-        if not valid_csrf(request, fields.get('csrf_token', [''])[0]):
-            return error_page(request, 403, '请求无效', 'CSRF 校验失败，请刷新管理页后重试。')
+        fields = await parse_form(request)
+        if not isinstance(fields, dict):
+            return fields
         if open_id is None:
             identity = {key: fields.get(key, [''])[0] for key in ('open_id', 'name', 'avatar_url')}
             if (not re.fullmatch(r'[A-Za-z0-9_-]{1,256}', identity['open_id'])

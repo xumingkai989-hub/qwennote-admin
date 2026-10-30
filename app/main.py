@@ -126,6 +126,16 @@ def create_app(
     sessions = SignedCookie(settings.session_secret, salt="web-session", max_age=SESSION_MAX_AGE)
     states = SignedCookie(settings.session_secret, salt="oauth-state", max_age=STATE_MAX_AGE)
 
+    def navigation_context(request: Request):
+        subject = sessions.decode(request.cookies.get('session'))
+        user = app.state.store.get_user(subject) if subject else None
+        active = user is not None and user.is_active
+        return {'navigation_user': user if active else None,
+                'navigation_admin': bool(active and set(settings.admin_open_ids).intersection(
+                    (user.subject, user.union_id, user.open_id)))}
+
+    templates.context_processors.append(navigation_context)
+
     def set_cookie(response: Response, name: str, value: str, max_age: int):
         response.set_cookie(
             name, value, max_age=max_age, httponly=True,

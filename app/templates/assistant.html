@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% macro csrf_field() %}<input type="hidden" name="csrf_token" value="{{ csrf_token }}">{% endmacro %}
+{% block main_attributes %} class="assistant-layout"{% endblock %}
+{% block content %}
+<header class="assistant-heading"><h1>AI 助手配置</h1></header>
+{% if error %}<p class="assistant-error" role="alert">{{ error }}</p>{% endif %}
+<section class="assistant-section" aria-labelledby="instructions-heading">
+  <h2 id="instructions-heading">反馈指令</h2>
+  <form id="instructions-form" method="post" action="/assistant/instructions">
+    {{ csrf_field() }}
+    <textarea id="instructions" name="instructions" rows="8" aria-labelledby="instructions-heading" aria-describedby="instructions-note instructions-count instructions-error">{{ instructions }}</textarea>
+    <div class="instructions-actions"><button id="instructions-save" type="submit"{% if instructions | length > 2000 %} disabled{% endif %}>保存</button><span id="instructions-saved" role="status">{% if saved_at %}已保存 · {{ saved_at }}{% endif %}</span><span id="instructions-count">{{ instructions | length }} / 2000</span></div>
+    <p id="instructions-error" class="assistant-error" role="alert">{% if instructions | length > 2000 %}反馈指令最多 2000 字，请缩短后保存。{% endif %}</p>
+    <p id="instructions-note" class="assistant-note">这段文字会直接拼进打标签的提示词，影响之后所有会议的分类</p>
+  </form>
+</section>
+<section class="assistant-section" aria-labelledby="tags-heading">
+  <h2 id="tags-heading">标签词表</h2>
+  {% if tags %}
+  <div class="assistant-table-scroll"><table class="assistant-table"><thead><tr><th scope="col">标签名</th><th scope="col">使用次数</th><th scope="col">状态</th><th scope="col">操作</th></tr></thead><tbody>
+  {% for tag in tags %}
+    <tr><th scope="row">{{ tag.name }}</th><td>{{ tag.usage_count }}</td><td><span class="badge badge-complete">启用</span></td><td><div class="tag-actions">
+      <form method="post" action="/assistant/tags/merge" class="merge-form" data-source="{{ tag.name }}">
+        {{ csrf_field() }}<input type="hidden" name="from" value="{{ tag.id }}">
+        <select name="to" aria-label="将 {{ tag.name }} 合并到" required><option value="" selected disabled>合并到…</option>{% for target in tags %}{% if target.id != tag.id %}<option value="{{ target.id }}">{{ target.name }}</option>{% endif %}{% endfor %}</select>
+        <button class="secondary" type="submit"{% if tags | length < 2 %} disabled{% endif %}>确认合并</button>
+      </form>
+      <form method="post" action="/assistant/tags/deactivate">{{ csrf_field() }}<input type="hidden" name="tag_id" value="{{ tag.id }}"><button class="deactivate-button secondary" type="submit" aria-label="停用 {{ tag.name }}">停用</button></form>
+    </div></td></tr>
+  {% endfor %}
+  </tbody></table></div>
+  {% else %}<p class="assistant-note">词表为空，下次打标会全部落到「其他」</p>{% endif %}
+</section>
+{% if proposals %}
+<section class="assistant-section" aria-labelledby="proposals-heading">
+  <h2 id="proposals-heading">待确认合并</h2>
+  <ul class="proposal-list">{% for proposal in proposals %}<li><span>{{ proposal.from_tag }} → {{ proposal.to_tag }}<span class="assistant-note">（{{ '模型建议' if proposal.reason == 'model' else '规范化建议' }}）</span></span><div class="proposal-actions">
+    <form method="post" action="/assistant/proposals/{{ proposal.id }}/accept">{{ csrf_field() }}<button type="submit">接受</button></form>
+    <form method="post" action="/assistant/proposals/{{ proposal.id }}/reject">{{ csrf_field() }}<button class="secondary" type="submit">忽略</button></form>
+  </div></li>{% endfor %}</ul>
+</section>
+{% endif %}
+<section class="assistant-section" aria-labelledby="changes-heading">
+  <h2 id="changes-heading">最近变更</h2>
+  <ul class="change-list">{% for change in changes %}<li>{{ change.time }} · {{ change.label }}</li>{% else %}<li class="assistant-note">暂无变更</li>{% endfor %}</ul>
+</section>
+<script src="{{ url_for('static', path='assistant.js') }}?v=20261030-09" defer></script>
+{% endblock %}

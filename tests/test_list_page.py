@@ -106,7 +106,7 @@ def test_default_is_all_dates_sorted_by_created_time(list_client, add_recording)
     assert response.context['filters']['start'] is None
     assert response.context['filters']['end'] is None
     assert 'type="date"' not in response.text
-    assert not page.selected
+    assert not [item for item in page.selected if 'navigation-link' not in item.get('class', '').split()]
     assert response.headers['cache-control'] == 'no-store'
 
 

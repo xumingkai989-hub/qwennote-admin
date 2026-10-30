@@ -46,7 +46,7 @@ test('home and padded detail cards share the same frame without content overflow
           assert.deepEqual(row[name].padding, width < 720 ? ['20px', '16px', '28px', '16px'] : ['28px', '32px', '40px', '32px']);
           assert.ok(row[name].textX - row[name].x >= inset);
           assert.ok(row[name].bodyX - row[name].x >= inset);
-          if (width === 1440) {assert.equal(row[name].width, 1088); assert.equal(row[name].x, 176);}
+          if (width === 1440) {assert.equal(row[name].width, 1088); assert.equal(row[name].x, 286);}
         }
         if (name === 'transcript') {
           assert.equal(row[name].innerWidth, row[name].width - (width < 720 ? 32 : 64));
