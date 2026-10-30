@@ -13,6 +13,8 @@ from test_login import login
 class Page(HTMLParser):
     def __init__(self, html):
         super().__init__(convert_charrefs=True)
+        self.controls = []
+        self.current_control = None
         self.links = []
         self.cards = []
         self.selected = []
@@ -26,6 +28,9 @@ class Page(HTMLParser):
 
     def handle_starttag(self, tag, attrs):
         attrs = dict(attrs)
+        if tag in ('a', 'button'):
+            self.current_control = []
+            self.controls.append(self.current_control)
         if tag == 'a':
             self.links.append(attrs)
         if tag == 'article':
@@ -48,10 +53,14 @@ class Page(HTMLParser):
             self.inputs.append(attrs)
 
     def handle_data(self, data):
+        if self.current_control is not None:
+            self.current_control.append(data)
         if self.in_badge and self.current_card:
             self.badges[self.current_card] = data.strip()
 
     def handle_endtag(self, tag):
+        if tag in ('a', 'button'):
+            self.current_control = None
         if tag == 'span':
             self.in_badge = False
         if tag == 'article':
@@ -84,7 +93,7 @@ def add_recording(store):
     return add
 
 
-def test_default_is_shanghai_today_sorted_by_created_time(list_client, add_recording):
+def test_default_is_all_dates_sorted_by_created_time(list_client, add_recording):
     add_recording('early', '2026-10-29T00:00:00+08:00')
     add_recording('late', '2026-10-29T23:59:59.999999+08:00')
     add_recording('yesterday', '2026-10-28T23:59:59+08:00')
@@ -92,8 +101,11 @@ def test_default_is_shanghai_today_sorted_by_created_time(list_client, add_recor
     response = list_client.get('/')
     assert response.status_code == 200
     page = Page(response.text)
-    assert page.cards == ['late', 'early']
-    assert any(link.get('href') == '/?page=1' for link in page.selected)
+    assert page.cards == ['tomorrow', 'late', 'early', 'yesterday']
+    assert response.context['filters']['start'] is None
+    assert response.context['filters']['end'] is None
+    assert '筛选：全部录音' in response.text
+    assert not page.selected
     assert response.headers['cache-control'] == 'no-store'
 
 
@@ -125,8 +137,9 @@ def test_list_time_always_includes_month_day_and_hour_minute(list_client, add_re
 def test_apple_grouped_list_and_dark_mode_markers(list_client):
     html = list_client.get('/').text
     assert 'class="recording-list inset-grouped"' in html
-    assert 'class="quick-filters segmented-control"' in html
-    assert 'href="#date"' in html
+    assert 'segmented-control' not in html
+    assert not {'今天', '昨天'} & {''.join(parts).strip() for parts in Page(html).controls}
+    assert 'aria-label="清除筛选"' in html
     css = list_client.get('/static/app.css').text
     assert '@media (prefers-color-scheme: dark)' in css
     assert '.inset-grouped' in css
@@ -148,7 +161,10 @@ def test_date_filters_include_whole_days(list_client, add_recording, query, expe
     assert Page(response.text).cards == expected
     assert Page(response.text).selected
     for key, value in query.items():
-        if key != 'yesterday':
+        if key == 'date':
+            assert any(field.get('name') == 'from' and field.get('value') == value
+                       for field in Page(response.text).inputs)
+        elif key != 'yesterday':
             assert any(field.get('name') == key and field.get('value') == value
                        for field in Page(response.text).inputs)
 
@@ -183,6 +199,11 @@ def test_pagination_20_then_5_no_overlap_and_preserves_filter(list_client, add_r
     for i in range(25):
         # Identical timestamps also require a stable tie breaker.
         add_recording(f'item-{i:02}', f'{day}T12:00:00+08:00')
+    if query:
+        # More than a page of newer records outside the selected period would
+        # replace page 2 if pagination accidentally dropped the date filter.
+        for i in range(25):
+            add_recording(f'outside-{i:02}', '2026-10-30T12:00:00+08:00')
     first = list_client.get('/', params=query)
     page1 = Page(first.text)
     next_link, = [link for link in page1.links if link.get('rel') == 'next']
@@ -203,7 +224,8 @@ def test_pagination_20_then_5_no_overlap_and_preserves_filter(list_client, add_r
 def test_empty_state_and_out_of_range_page(list_client):
     response = list_client.get('/?page=99999999999999999999')
     assert response.status_code == 200
-    assert '这一天没有录音' in response.text
+    assert '还没有同步任何录音' in response.text
+    assert '这个时间范围内没有录音' not in response.text
     assert '第 1 / 1 页' in response.text
     assert Page(response.text).cards == []
 
@@ -297,3 +319,64 @@ def test_logout_clears_session_and_returns_to_login(list_client):
 def test_logout_rejects_foreign_origin(list_client):
     assert list_client.post('/auth/logout', headers={'Origin': 'https://other.example'}).status_code == 403
     assert list_client.get('/').status_code == 200
+
+
+@pytest.mark.parametrize('url', ['/', '/?page=1'])
+def test_all_dates_total_matches_database_and_first_page_has_20(list_client, add_recording, store, url):
+    for i in range(27):
+        add_recording(f'day-{i + 1:02}', f'2026-10-{i + 1:02}T12:00:00+08:00')
+    with store._connect() as conn:
+        total = conn.execute('SELECT COUNT(*) FROM recordings').fetchone()[0]
+        newest = conn.execute('SELECT recording_id FROM recordings ORDER BY created_at DESC LIMIT 1').fetchone()[0]
+    response = list_client.get(url)
+    assert response.context['recordings'].total == total == 27
+    assert len(Page(response.text).cards) == 20
+    assert Page(response.text).cards[0] == newest
+    assert f'共 {total} 场' in response.text
+    assert all(field.get('value') == '' for field in Page(response.text).inputs if field.get('type') == 'date')
+
+
+@pytest.mark.parametrize('query,label', [
+    ({'date': '2026-10-29'}, '筛选：2026-10-29'),
+    ({'from': '2026-10-29', 'to': '2026-10-30'}, '筛选：2026-10-29 — 2026-10-30'),
+])
+def test_filter_visible_and_clear_returns_all(list_client, add_recording, query, label):
+    add_recording('outside', '2026-10-28T12:00:00+08:00')
+    add_recording('inside')
+    response = list_client.get('/', params=query)
+    assert label in response.text
+    assert Page(response.text).cards == ['inside']
+    clear, = [link for link in Page(response.text).links if link.get('aria-label') == '清除筛选']
+    assert clear['href'] == '/'
+    cleared = list_client.get(clear['href'])
+    assert Page(cleared.text).cards == ['inside', 'outside']
+    assert '筛选：全部录音' in cleared.text
+
+
+@pytest.mark.parametrize('query', [
+    {'date': '2026-10-29'}, {'from': '2026-10-29', 'to': '2026-10-30'},
+])
+def test_filtered_empty_state(list_client, add_recording, query):
+    add_recording('outside', '2026-10-28T12:00:00+08:00')
+    response = list_client.get('/', params=query)
+    assert response.status_code == 200
+    assert response.context['recordings'].total == 0
+    assert '这个时间范围内没有录音' in response.text
+    assert '还没有同步任何录音' not in response.text
+
+
+@pytest.mark.parametrize('path,query,target', [
+    ('/', {'from': '2026-10-29', 'to': ''}, '/?date=2026-10-29'),
+    ('/', {'from': '', 'to': ''}, '/'),
+    ('/search', {'q': '会议', 'from': '2026-10-29', 'to': ''}, '/search?q=%E4%BC%9A%E8%AE%AE&date=2026-10-29'),
+    ('/search', {'q': '会议', 'from': '', 'to': ''}, '/search?q=%E4%BC%9A%E8%AE%AE'),
+])
+def test_one_row_form_canonicalizes_single_day_and_cleared_dates(list_client, path, query, target):
+    response = list_client.get(path, params=query)
+    assert response.status_code == 303
+    assert response.headers['location'] == target
+    assert list_client.get(target).status_code == 200
+
+
+def test_form_end_without_start_is_invalid(list_client):
+    assert list_client.get('/?from=&to=2026-10-29').status_code == 400

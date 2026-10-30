@@ -27,7 +27,7 @@ AUTHORIZE_URL = "https://accounts.feishu.cn/open-apis/authen/v1/authorize"
 logger = logging.getLogger(__name__)
 
 
-def list_filters(request: Request, *, all_dates: bool = False) -> dict:
+def list_filters(request: Request) -> dict:
     query = request.query_params
     today = datetime.now(SHANGHAI).date()
     groups = sum(('date' in query, 'yesterday' in query, 'from' in query or 'to' in query))
@@ -46,23 +46,32 @@ def list_filters(request: Request, *, all_dates: bool = False) -> dict:
         mode = 'date'
         params = {'date': start.isoformat()}
     elif 'from' in query or 'to' in query:
-        start, end = parse_date(query.get('from', '')), parse_date(query.get('to', ''))
-        if start > end:
-            raise ValueError('起始日期不能晚于结束日期。')
-        mode = 'range'
-        params = {'from': start.isoformat(), 'to': end.isoformat()}
+        # The one-row form supports a single date and clearing both fields.
+        # Missing endpoints remain invalid; empty values come from the form.
+        if 'from' not in query or 'to' not in query:
+            raise ValueError('日期区间须提供两端。')
+        if not query['from'] and not query['to']:
+            start = end = None
+            mode = 'all'
+        elif query['from'] and not query['to']:
+            start = end = parse_date(query['from'])
+            mode = 'date'
+            params = {'date': start.isoformat()}
+        else:
+            start, end = parse_date(query['from']), parse_date(query['to'])
+            if start > end:
+                raise ValueError('起始日期不能晚于结束日期。')
+            mode = 'range'
+            params = {'from': start.isoformat(), 'to': end.isoformat()}
     elif 'yesterday' in query:
         if query['yesterday'] != '1':
             raise ValueError('昨天筛选须使用 yesterday=1。')
         start = end = today - timedelta(days=1)
         mode = 'yesterday'
         params = {'yesterday': '1'}
-    elif all_dates:
+    else:
         start = end = None
         mode = 'all'
-    else:
-        start = end = today
-        mode = 'today'
     page = int(query.get('page', '1'))
     if page < 1:
         raise ValueError('页码须为正整数。')
@@ -165,10 +174,12 @@ def create_app(
         if not query:
             return RedirectResponse('/', status_code=302, headers={'Cache-Control': 'no-store'})
         try:
-            filters = list_filters(request, all_dates=True)
+            filters = list_filters(request)
         except ValueError:
             return error_page(request, 400, '筛选条件无效',
                               '请选择一种筛选方式，使用 YYYY-MM-DD 日期、完整且顺序正确的区间和正整数页码。')
+        if 'from' in request.query_params and request.query_params.get('to') == '':
+            return RedirectResponse('/search?' + urlencode({'q': query, **filters['params']}), status_code=303)
         recordings = store.search_recordings(query, filters['start'], filters['end'], filters['page'])
         params = {'q': query, **filters['params']}
 
@@ -178,7 +189,6 @@ def create_app(
         return templates.TemplateResponse(request=request, name='home.html', context={
             'title': f'搜索「{query}」', 'user': user, 'sync_run': store.latest_sync(),
             'search_query': query, 'filters': filters, 'recordings': recordings,
-            'today': datetime.now(SHANGHAI).date().isoformat(),
             'snippets': {item.recording_id: search_snippets(item, query) for item in recordings.items},
             'detail_query': '?' + urlencode({**params, 'page': recordings.page}),
             'previous_url': page_url(recordings.page - 1) if recordings.page > 1 else None,
@@ -195,7 +205,13 @@ def create_app(
             except ValueError:
                 return error_page(request, 400, '筛选条件无效',
                                   '请选择一种筛选方式，使用 YYYY-MM-DD 日期、完整且顺序正确的区间和正整数页码。')
-            recordings = store.list_recordings(filters['start'], filters['end'], filters['page'])
+            if 'from' in request.query_params and request.query_params.get('to') == '':
+                suffix = '?' + urlencode(filters['params']) if filters['params'] else ''
+                return RedirectResponse('/' + suffix, status_code=303)
+            # Reuse the lightweight, paginated list query without changing the
+            # data layer. Full representable bounds include every stored date.
+            recordings = store.list_recordings(
+                filters['start'] or date.min, filters['end'] or date.max, filters['page'])
 
             def page_url(page: int) -> str:
                 return '/?' + urlencode({**filters['params'], 'page': page})
@@ -244,7 +260,7 @@ def create_app(
             return error
         try:
             query = request.query_params.get('q', '').strip()
-            filters = list_filters(request, all_dates=bool(query))
+            filters = list_filters(request)
             params = {'q': query} if query else {}
             back_url = ('/search?' if query else '/?') + urlencode(
                 {**params, **filters['params'], 'page': filters['page']})

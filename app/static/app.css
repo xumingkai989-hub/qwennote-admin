@@ -81,20 +81,13 @@ h1 { margin: 0; font-size: 34px; line-height: 1.2; font-weight: 700; letter-spac
 #sync-error { flex-basis: 100%; white-space: pre-wrap; color: var(--danger); }
 #sync-error:empty { display: none; }
 .filters { display: flex; flex-wrap: wrap; gap: 12px 16px; align-items: center; }
-.segmented-control { display: flex; flex: 1 1 320px; padding: 3px; border-radius: 10px; background: var(--control); }
 .filter-link { display: inline-flex; min-width: 44px; min-height: 44px; align-items: center; justify-content: center; padding: 8px 16px; border-radius: 8px; }
-.segmented-control .filter-link { flex: 1; padding: 8px; color: var(--text); font-size: 15px; white-space: nowrap; }
-.segmented-control .filter-link:hover { text-decoration: none; background: var(--hover); }
-.segmented-control .filter-link[aria-current] { background: var(--surface); box-shadow: 0 1px 3px #0000001A; font-weight: 600; }
 .date-filter { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 15px; }
 .date-filter label { color: var(--secondary); }
-.date-filter input { scroll-margin-top: 90px; }
+.date-filter input { scroll-margin-top: 90px; min-width: 0; }
+.date-actions { display: flex; align-items: center; gap: 8px; }
+.filter-help { margin: 8px 0 20px; }
 .date-filter[aria-current] input { border-color: var(--accent); }
-.range-options { width: 100%; }
-.range-options summary { display: flex; align-items: center; min-height: 44px; width: fit-content; min-width: 44px; color: var(--accent); cursor: pointer; font-size: 15px; }
-.range-options summary::after { content: '⌄'; margin-left: 8px; }
-.range-options[open] summary::after { content: '⌃'; }
-.range-filter { padding: 12px 16px; background: var(--surface); border-radius: 12px; }
 .selected-period { margin: 12px 0; }
 .inset-grouped { background: var(--surface); border-radius: 12px; }
 .recording-list-header, .recording-row-link { display: grid; grid-template-columns: 112px minmax(0, 1fr) 72px 88px; column-gap: 20px; align-items: center; height: 44px; padding: 0 16px; }
@@ -173,10 +166,8 @@ mark { background: var(--mark); color: var(--text); border-radius: 2px; }
   .list-heading { padding-top: 24px; }
   .search-form { gap: 8px; }
   .sync-panel { margin-bottom: 20px; gap: 4px 12px; }
-  .segmented-control { flex-basis: 100%; }
-  .date-filter { width: 100%; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; }
-  .range-filter { grid-template-columns: auto minmax(0, 1fr); }
-  .range-filter button { grid-column: 1 / -1; }
+  .date-filter { width: 100%; display: grid; grid-template-columns: auto minmax(0, 1fr); }
+  .date-actions { grid-column: 1 / -1; }
   .recording-grid { grid-template-columns: minmax(0, 1fr); }
   .recording-card { padding: 20px; }
   .recording-card h2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
