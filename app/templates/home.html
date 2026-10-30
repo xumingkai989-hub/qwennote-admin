@@ -53,7 +53,11 @@
             {% if card.summary %}<p class="card-summary">{{ card.summary }}</p>{% endif %}
             {% if card.duration %}<span class="duration-pill" aria-label="录音时长">录音 · {{ card.duration }}</span>{% endif %}
             <div class="card-footer">
-              <span class="badge badge-{{ status }}">{{ status_label }}</span>
+              {% if recording.tags %}<span class="card-labels">{% endif %}<span class="badge badge-{{ status }}">{{ status_label }}</span>
+              {% if recording.tags %}<span class="recording-tags" title="{{ recording.tags | join(' · ') }}">
+                {% for tag in recording.tags[:3] %}<span class="tag-pill">{{ tag }}</span>{% endfor %}
+                {% if recording.tags | length > 3 %}<span class="tag-pill" title="{{ recording.tags | join(' · ') }}">+{{ recording.tags | length - 3 }}</span>{% endif %}
+              </span></span>{% endif %}
               <span class="card-created"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><time class="recording-time" datetime="{{ recording.created_at.isoformat() }}">{{ recording.created_at.strftime('%H:%M') }} 创建</time></span>
             </div>
           </a>

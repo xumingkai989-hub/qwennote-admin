@@ -8,6 +8,7 @@ User=qwennote
 Group=qwennote
 WorkingDirectory=/opt/qwennote/current
 EnvironmentFile=/etc/qwennote/qwennote.env
+EnvironmentFile=-/etc/claude/deepseek.qwennote.env
 Environment=PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 Environment=LD_LIBRARY_PATH=/opt/qwennote/current/.sqlite/lib
 ExecStart=/opt/qwennote/current/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8090

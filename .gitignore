@@ -13,3 +13,4 @@ data/
 .scratch/
 *.egg-info/
 *.sync.lock
+*.tag.lock

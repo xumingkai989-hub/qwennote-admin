@@ -1,3 +1,5 @@
+import logging
+
 from contextlib import AbstractContextManager
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta
@@ -28,6 +30,8 @@ class SyncRun:
 
 
 class SyncStore(Protocol):
+    def get_recording(self, recording_id: str): ...
+
     def sync_lock(self) -> AbstractContextManager[None]: ...
 
     def start_sync(self, started_at: str) -> int: ...
@@ -48,6 +52,7 @@ def run_sync(source: MinutesSource, store: SyncStore, *, backfill_days: int = 90
         fetched = inserted = updated = 0
         errors = []
         seen = set()
+        tag_ids = []
         refresh_before = getattr(source, 'refresh_count', 0)
         try:
             if hasattr(source, 'sync_window'):
@@ -70,12 +75,16 @@ def run_sync(source: MinutesSource, store: SyncStore, *, backfill_days: int = 90
                         errors.append(f'录音 {meta.recording_id}：详情拉取失败，请重试')
                         continue
                     try:
+                        previous = store.get_recording(meta.recording_id)
                         outcome = store.upsert_recording(meta, detail, datetime.now(SHANGHAI).isoformat())
                     except Exception:
                         errors.append(f'录音 {meta.recording_id}：校验或入库失败，请重试')
                         continue
                     inserted += outcome == 'inserted'
                     updated += outcome == 'updated'
+                    if previous is None or (previous.title, previous.summary_md, previous.transcript_md) != (
+                            meta.title or '', detail.summary_md or '', detail.transcript_md or ''):
+                        tag_ids.append(meta.recording_id)
         except TokenRefreshError:
             errors.append('千问 OAuth 续期失败，请检查 token 文件、授权或网络后重试')
         except Exception:
@@ -85,4 +94,10 @@ def run_sync(source: MinutesSource, store: SyncStore, *, backfill_days: int = 90
                       '\n'.join(errors) if errors else None,
                       int(getattr(source, 'refresh_count', 0) > refresh_before))
         store.finish_sync(run)
+        # Tags are optional enrichment; never turn a successful sync into failure.
+        try:
+            from app.tag import run_tags
+            run_tags(store, recording_ids=tag_ids, force=True)
+        except Exception:
+            logging.getLogger(__name__).warning('打标批次失败；录音同步已完成')
         return run

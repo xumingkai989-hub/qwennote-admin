@@ -15,6 +15,7 @@ from app.store import SQLiteStore
 
 @pytest.fixture(autouse=True)
 def no_network(monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
     def blocked(*args, **kwargs):
         raise AssertionError("Tests must not access the network")
 

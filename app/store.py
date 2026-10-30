@@ -2,7 +2,7 @@ import fcntl
 import hmac
 import sqlite3
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Iterator, Protocol
@@ -31,6 +31,7 @@ class RecordingCard:
     duration_min: int | None
     has_transcript: bool
     has_summary: bool
+    tags: tuple[str, ...] = field(default=(), kw_only=True)
 
     @property
     def status(self) -> tuple[str, str]:
@@ -116,6 +117,7 @@ class SQLiteStore:
     def _connect(self) -> Iterator[sqlite3.Connection]:
         conn = sqlite3.connect(self.db_path, timeout=10)
         conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys = ON")
         try:
             with conn:
                 yield conn
@@ -211,6 +213,26 @@ class SQLiteStore:
                 conn.execute("INSERT INTO recordings_nullable SELECT * FROM recordings")
                 conn.execute("DROP TABLE recordings")
                 conn.execute("ALTER TABLE recordings_nullable RENAME TO recordings")
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS recording_tags (
+                    recording_id TEXT NOT NULL REFERENCES recordings(recording_id) ON DELETE CASCADE,
+                    tag TEXT NOT NULL,
+                    position INTEGER NOT NULL CHECK (position BETWEEN 1 AND 5),
+                    model TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    PRIMARY KEY (recording_id, tag)
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS tag_runs (
+                    id INTEGER PRIMARY KEY, started_at TEXT NOT NULL, finished_at TEXT,
+                    attempted INTEGER NOT NULL DEFAULT 0, succeeded INTEGER NOT NULL DEFAULT 0,
+                    failed INTEGER NOT NULL DEFAULT 0, error TEXT,
+                    input_tokens INTEGER NOT NULL DEFAULT 0, output_tokens INTEGER NOT NULL DEFAULT 0,
+                    cache_read_input_tokens INTEGER NOT NULL DEFAULT 0,
+                    cache_creation_input_tokens INTEGER NOT NULL DEFAULT 0
+                )
+            """)
             if 'media_type' not in {row['name'] for row in conn.execute('PRAGMA table_info(recordings)')}:
                 conn.execute('ALTER TABLE recordings ADD COLUMN media_type TEXT')
             if 'refreshed_token' not in {row['name'] for row in conn.execute('PRAGMA table_info(sync_runs)')}:
@@ -307,10 +329,12 @@ class SQLiteStore:
                 'ORDER BY created_at DESC, recording_id DESC LIMIT 20 OFFSET ?',
                 (*params, (page - 1) * 20),
             ).fetchall()
+            tags = self._tags_for(conn, rows)
         return RecordingPage([
             StoredRecording(row['recording_id'], row['title'], datetime.fromisoformat(row['created_at']),
                             row['duration_min'], bool(row['has_transcript']), bool(row['has_summary']),
-                            row['summary_md'] or '', row['transcript_md'] or '')
+                            row['summary_md'] or '', row['transcript_md'] or '',
+                            tags=tags.get(row['recording_id'], ()))
             for row in rows
         ], total, page, pages)
 
@@ -333,10 +357,12 @@ class SQLiteStore:
                 'ORDER BY created_at DESC, recording_id DESC LIMIT ? OFFSET ?',
                 (*params, limit if limit is not None else -1, offset),
             ).fetchall()
+            tags = self._tags_for(conn, rows)
         return RecordingBatch([
             StoredRecording(row['recording_id'], row['title'], datetime.fromisoformat(row['created_at']),
                             row['duration_min'], bool(row['has_transcript']), bool(row['has_summary']),
-                            row['summary_md'] or '', row['transcript_md'] or '')
+                            row['summary_md'] or '', row['transcript_md'] or '',
+                            tags=tags.get(row['recording_id'], ()))
             for row in rows
         ], total)
 
@@ -401,9 +427,11 @@ class SQLiteStore:
                 'ORDER BY created_at DESC, recording_id DESC LIMIT 20 OFFSET ?',
                 (*bounds, (page - 1) * 20),
             ).fetchall()
+            tags = self._tags_for(conn, rows)
         return RecordingPage([
             RecordingCard(row['recording_id'], row['title'], datetime.fromisoformat(row['created_at']),
-                          row['duration_min'], bool(row['has_transcript']), bool(row['has_summary']))
+                          row['duration_min'], bool(row['has_transcript']), bool(row['has_summary']),
+                          tags=tags.get(row['recording_id'], ()))
             for row in rows
         ], total, page, pages)
 
@@ -471,6 +499,9 @@ class SQLiteStore:
                 'search_text = excluded.search_text, media_type = excluded.media_type, synced_at = excluded.synced_at',
                 (meta.recording_id, *values, synced_at),
             )
+            if old and any((old[key] or '') != (value or '') for key, value in (
+                    ('title', meta.title), ('summary_md', detail.summary_md), ('transcript_md', detail.transcript_md))):
+                conn.execute('DELETE FROM recording_tags WHERE recording_id = ?', (meta.recording_id,))
             return 'updated' if old else 'inserted'
 
     def get_recording(self, recording_id: str) -> StoredRecording | None:
@@ -479,6 +510,7 @@ class SQLiteStore:
                 'SELECT recording_id, title, created_at, duration_min, has_transcript, has_summary, '
                 'summary_md, transcript_md FROM recordings WHERE recording_id = ?', (recording_id,),
             ).fetchone()
+            tags = self._tags_for(conn, [row] if row else [])
         if row is None:
             return None
         return StoredRecording(
@@ -486,8 +518,77 @@ class SQLiteStore:
             created_at=datetime.fromisoformat(row['created_at']).astimezone(SHANGHAI),
             duration_min=row['duration_min'], has_transcript=bool(row['has_transcript']),
             has_summary=bool(row['has_summary']), summary_md=row['summary_md'] or '',
-            transcript_md=row['transcript_md'] or '',
+            transcript_md=row['transcript_md'] or '', tags=tags.get(recording_id, ()),
         )
+
+    @staticmethod
+    def _tags_for(conn, rows) -> dict[str, tuple[str, ...]]:
+        ids = [row['recording_id'] for row in rows]
+        if not ids:
+            return {}
+        grouped = {}
+        for row in conn.execute(
+            'SELECT recording_id, tag FROM recording_tags WHERE recording_id IN (' +
+            ','.join('?' for _ in ids) + ') ORDER BY position', ids,
+        ):
+            grouped.setdefault(row['recording_id'], []).append(row['tag'])
+        return {key: tuple(value) for key, value in grouped.items()}
+
+    @contextmanager
+    def tag_lock(self):
+        # Serialize CLI and web batches; each batch permits two HTTP requests.
+        with self.db_path.with_suffix(self.db_path.suffix + '.tag.lock').open('a') as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(lock, fcntl.LOCK_UN)
+
+    def tag_candidates(self, recording_ids=None, *, force=False):
+        with self._connect() as conn:
+            rows = conn.execute("""
+                SELECT recording_id FROM recordings
+                WHERE ? OR NOT EXISTS (
+                    SELECT 1 FROM recording_tags t WHERE t.recording_id = recordings.recording_id)
+                ORDER BY created_at DESC, recording_id DESC
+            """, (force,)).fetchall()
+        selected = None if recording_ids is None else set(recording_ids)
+        return [recording for row in rows
+                if selected is None or row['recording_id'] in selected
+                if (recording := self.get_recording(row['recording_id'])) is not None]
+
+    def replace_tags(self, recording, tags, model, created_at):
+        with self._connect() as conn:
+            conn.execute('BEGIN IMMEDIATE')
+            current = conn.execute(
+                'SELECT title, summary_md, transcript_md FROM recordings WHERE recording_id = ?',
+                (recording.recording_id,),
+            ).fetchone()
+            if current is None or tuple(value or '' for value in current) != (
+                    recording.title, recording.summary_md, recording.transcript_md):
+                raise ValueError('Recording changed during tagging')
+            conn.execute('DELETE FROM recording_tags WHERE recording_id = ?', (recording.recording_id,))
+            conn.executemany(
+                'INSERT INTO recording_tags (recording_id, tag, position, model, created_at) VALUES (?, ?, ?, ?, ?)',
+                [(recording.recording_id, tag, position, model, created_at)
+                 for position, tag in enumerate(tags, 1)],
+            )
+
+    def start_tag_run(self, started_at):
+        with self._connect() as conn:
+            conn.execute("UPDATE tag_runs SET finished_at = ?, error = '上次打标进程中断' WHERE finished_at IS NULL",
+                         (started_at,))
+            return conn.execute('INSERT INTO tag_runs (started_at) VALUES (?)', (started_at,)).lastrowid
+
+    def finish_tag_run(self, run):
+        with self._connect() as conn:
+            conn.execute("""
+                UPDATE tag_runs SET finished_at = :finished_at, attempted = :attempted,
+                    succeeded = :succeeded, failed = :failed, error = :error,
+                    input_tokens = :input_tokens, output_tokens = :output_tokens,
+                    cache_read_input_tokens = :cache_read_input_tokens,
+                    cache_creation_input_tokens = :cache_creation_input_tokens WHERE id = :id
+            """, run)
 
     @staticmethod
     def _matching_users(conn: sqlite3.Connection, *identifiers: str | None) -> list[sqlite3.Row]:

@@ -345,3 +345,30 @@ LD_LIBRARY_PATH=/opt/qwennote/current/.sqlite/lib \
 Python 回归 **458 passed**（保留原有 455 项，日期筛选用例改为忽略参数，新增 3 项搜索日期参数用例）；JavaScript **19 passed**；Chrome 首页布局回归 **1 passed**，涵盖 1440 / 390 / 320px、浅色 / 深色。无日期控件、无筛选/清除文案、带日期的 total 与全量相同、分页不携带日期、搜索往返、分组、标签和空状态均通过。
 
 部署命令为 `python3 scripts/deploy.py --app-only`。真实数据主页截图（1440 / 390）、测试日志、发布目录与文件哈希验收保存在仓库外 `../qwennote-admin-artifacts/05c-20261030/`；不公开业务截图。
+
+## 工单 07：会议标签
+
+应用通过 `httpx` 直接调用 DeepSeek Anthropic 兼容 `/v1/messages`，不启动 Claude CLI。
+默认模型 `deepseek-flash`；读取 `ANTHROPIC_AUTH_TOKEN`（不回显）、`ANTHROPIC_BASE_URL`、`ANTHROPIC_MODEL`。
+Web 和定时同步 systemd 单元均可选加载 `/etc/claude/deepseek.qwennote.env`；缺 key 时每批只记录一条 WARNING，保持同步成功。
+
+- 输入是标题、总结前 1500 字、转写前 2000 字；被截断字段带 `[已截断]`。
+- 提示词优先限制在 11 个受控词，只在完全不匹配时允许一个 `其他:` 加最多 6 字的自由标签。
+- 严格解析 `{"tags":["..."]}`，去重保序、最多 5 个。为满足兼容要求，词表外或不合 `其他:` 规则的字符串仍保留并记录不含原始输出的 WARNING。
+- JSON/结构错误重试一次；429 最多两次退避（1、2 秒，尊重最高 10 秒的数值 Retry-After）。每条全部请求及退避共用 30 秒总时限；最多两条并发。不同进程批次通过数据库旁 `.tag.lock` 串行，避免 CLI 与同步同时超出并发上限。
+- 单条失败保存空标签、记录安全错误码，继续其他记录。`tag_runs` 保存每批计数与四项 API usage 统计，包括 JSON 重试的消耗；不记录 API key、响应正文或转写内容。
+- 同步后只对本次新增或标题/总结/转写有变化的录音打标；仅时长变化不触发。内容变化即时清除旧标签；写回前复核内容，防止并发更新后写入过期标签。
+- 启动自动迁移 `recording_tags` 与 `tag_runs`，应用连接开启外键，删除录音级联删除标签。
+- 首页状态后展示最多 3 个标签与 `+N`；title 包含全部标签，支持深色模式和窄屏换行。无标签不渲染该区域。
+
+补跑（已加载环境与 SQLite 动态库的应用运行环境）：
+
+```bash
+python -m app.tag --all          # 只补缺标签；重复运行跳过已有标签
+python -m app.tag --all --force  # 全量覆盖；失败的录音最终为空标签
+```
+
+生产补跑可用临时 systemd 服务，以 `qwennote` 用户执行并复用两份 EnvironmentFile；不得通过命令参数传入真实 key。
+现有 `scripts/deploy.py --app-only` 保持不修改 nginx 或 systemd 单元的约定。本工单发布后须单独安装仓库中 `qwennote.service`、`qwennote-sync.service` 两个单元，再 `systemctl daemon-reload` 和重启 `qwennote.service`，让新增 EnvironmentFile 生效。
+
+离线验证：`python -m pytest -q`；`tests/test_tags.py` 通过假 HTTP transport 覆盖 API、持久化、同步与页面。`tests/tags_layout.cjs` 检查 1440/390/320 宽度与浅深色模式，读取 `tests/render_detail_layout.py` 生成的 `home-tags.html`，不请求外网。

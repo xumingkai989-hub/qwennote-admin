@@ -51,6 +51,13 @@ def render(output):
                 html = response.text.replace('http://testserver/static/', 'static/')
                 html = re.sub(r'name="csrf_token" value="[^"]*"', 'name="csrf_token" value="layout-fixture"', html)
                 (output / f'{name}.html').write_text(html)
+            for recording in store.read_recordings(limit=None).items:
+                store.replace_tags(recording, ['AI Tutor', '中台与数据看板', '模考系统', '导师中心', '述职'],
+                                   'fixture-model', '2026-10-30T12:00:00+08:00')
+            html = client.get('/').text.replace('http://testserver/static/', 'static/')
+            html = re.sub(r'name="csrf_token" value="[^"]*"', 'name="csrf_token" value="layout-fixture"', html)
+            (output / 'home-tags.html').write_text(html)
+
 
 
 if __name__ == '__main__':
