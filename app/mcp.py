@@ -4,6 +4,7 @@ Provider responses and credentials must never appear in exceptions or logs.
 """
 import fcntl
 import json
+import math
 import os
 import tempfile
 import time as clock
@@ -242,11 +243,12 @@ class McpMinutesSource(HttpMinutesSource):
             for page in self._pages('get_minutes_transcription', {
                     'taskUuid': recording_id, 'maxResults': 500, 'direction': 0}):
                 filtered = filtered or _flag(page.get('filtered', False))
-                paragraphs.extend(_items(page, 'paragraphs'))
+                for paragraph in _items(page, 'paragraphs'):
+                    text = _paragraph_text(paragraph)
+                    if text is not None:
+                        paragraphs.append(text)
             has_transcript = bool(paragraphs) and not filtered
-            transcript = ''.join(
-                f"[{_relative(p['startTime'])}–{_relative(p['endTime'])}] {_text(p['speakerName'])}\n\n"
-                f"{_text(p['content'])}\n\n" for p in paragraphs) if has_transcript else None
+            transcript = ''.join(paragraphs) if has_transcript else None
             return RecordingDetail(recording_id,
                 _optional_text(summary.get('fullSummary')) if has_summary else None,
                 transcript, has_transcript, has_summary, _optional_text(basic.get('mediaType')))
@@ -259,6 +261,25 @@ class McpMinutesSource(HttpMinutesSource):
         """Optional metadata lookup; an unavailable private recording is a normal result."""
         self._initialize()
         return self._call('get_minutes_media_url', {'taskUuid': recording_id})
+
+
+def _paragraph_text(paragraph: dict) -> str | None:
+    """Skip invalid paragraph fields without hiding a malformed response structure."""
+    content = paragraph.get('content')
+    if not isinstance(content, str) or not content:
+        return None
+    start, end = paragraph.get('startTime'), paragraph.get('endTime')
+    for offset in (start, end):
+        if (type(offset) not in (int, float) or offset < 0
+                or (type(offset) is float and not math.isfinite(offset))):
+            return None
+    speaker = paragraph.get('speakerName')
+    if speaker is None or speaker == '':
+        speaker = '未标注发言人'
+    elif not isinstance(speaker, str):
+        return None
+    return (f'[{_relative(int(start))}–{_relative(int(end))}] {speaker}\n\n'
+            f'{content}\n\n')
 
 
 def _relative(milliseconds):

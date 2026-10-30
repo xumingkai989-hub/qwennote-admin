@@ -142,6 +142,96 @@ def test_full_transcription_format_and_basic_info(setup_source):
     assert len(calls) == 2 and calls[1]['nextToken'] == 'transcript-two'
 
 
+@pytest.fixture
+def detail_pages(setup_source, monkeypatch):
+    source, _, _ = setup_source
+    pages = [{'paragraphs': []}]
+    monkeypatch.setattr(source, '_pages', lambda name, arguments: iter(pages))
+    return source, pages
+
+
+def paragraph(**changes):
+    return {'speakerName': '发言人', 'startTime': 120, 'endTime': 5320,
+            'content': '保留正文', **changes}
+
+
+@pytest.mark.parametrize('speaker', [None, ''])
+def test_detail_missing_speaker_preserves_paragraph(detail_pages, speaker):
+    source, pages = detail_pages
+    pages[0]['paragraphs'] = [paragraph(speakerName=speaker)]
+    detail = source.get_detail('real-1')
+    assert detail.has_transcript
+    assert detail.transcript_md == '[00:00.120–00:05.320] 未标注发言人\n\n保留正文\n\n'
+
+
+@pytest.mark.parametrize('changes', [
+    {'content': None}, {'content': ''}, {'content': 123}, {'content': []},
+    {'startTime': '120'}, {'startTime': None}, {'startTime': True},
+    {'endTime': '5320'}, {'endTime': None}, {'endTime': False},
+    {'startTime': -1}, {'endTime': -1},
+    {'startTime': float('nan')}, {'endTime': float('inf')},
+    {'speakerName': 123},
+])
+def test_detail_invalid_paragraph_does_not_discard_other_pages(detail_pages, changes):
+    source, pages = detail_pages
+    pages[0]['paragraphs'] = [paragraph(**changes)]
+    pages.append({'paragraphs': [paragraph()]})
+    detail = source.get_detail('real-1')
+    assert detail.has_transcript
+    assert detail.transcript_md == '[00:00.120–00:05.320] 发言人\n\n保留正文\n\n'
+
+
+@pytest.mark.parametrize('missing', ['content', 'startTime', 'endTime'])
+def test_detail_missing_required_paragraph_field_is_skipped(detail_pages, missing):
+    source, pages = detail_pages
+    invalid = paragraph()
+    del invalid[missing]
+    pages[0]['paragraphs'] = [invalid, paragraph()]
+    assert source.get_detail('real-1').transcript_md.count('保留正文') == 1
+
+
+def test_detail_missing_speaker_key_uses_placeholder(detail_pages):
+    source, pages = detail_pages
+    value = paragraph()
+    del value['speakerName']
+    pages[0]['paragraphs'] = [value]
+    assert '未标注发言人' in source.get_detail('real-1').transcript_md
+
+
+@pytest.mark.parametrize('paragraphs', [[], [paragraph(content=None)],
+    [paragraph(content=None), paragraph(startTime=None), paragraph(endTime='bad')]])
+def test_detail_no_valid_paragraphs_returns_without_transcript(detail_pages, paragraphs):
+    source, pages = detail_pages
+    pages[0]['paragraphs'] = paragraphs
+    detail = source.get_detail('real-1')
+    assert not detail.has_transcript
+    assert detail.transcript_md is None
+
+
+def test_detail_numeric_float_offsets_are_formatted(detail_pages):
+    source, pages = detail_pages
+    pages[0]['paragraphs'] = [paragraph(startTime=120.0, endTime=5320.5)]
+    assert source.get_detail('real-1').transcript_md.startswith('[00:00.120–00:05.320]')
+
+
+def test_detail_no_summary_ignores_full_summary(setup_source):
+    source, server, _ = setup_source
+    server.summary = False
+    detail = source.get_detail('real-1')
+    assert not detail.has_summary and detail.summary_md is None
+    assert detail.has_transcript
+
+
+@pytest.mark.parametrize('page', [{}, {'paragraphs': None},
+    {'paragraphs': [None]}, {'paragraphs': 'invalid'}])
+def test_detail_broken_paragraph_structure_still_fails(detail_pages, page):
+    from app.minutes import MinutesSourceError
+    source, pages = detail_pages
+    pages[:] = [page]
+    with pytest.raises(MinutesSourceError, match='千问录音详情拉取失败'):
+        source.get_detail('real-1')
+
+
 def test_filtered_and_no_summary_page(setup_source, settings, fake_auth):
     source, server, _ = setup_source
     server.filtered, server.summary = True, False
