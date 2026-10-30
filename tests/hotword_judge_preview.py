@@ -18,7 +18,7 @@ def build(directory):
     async def lifespan(application):
         async with base(application):
             store = app.state.store
-            store.add_hotword('小红直播', '小鹿直播')
+            store.add_hotword('小鹿直播', '小红直播')
             for suffix in ['summary', 'transcript', 'mobile', 'dark']:
                 approve_rules(store, 'preview-' + suffix)
             yield

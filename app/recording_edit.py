@@ -51,7 +51,9 @@ def diff_suggestions(original: str, content: str) -> list[dict[str, str]]:
             left = text[max(0, start - 6):start].split('\n')[-1].split('\r')[-1].split('\t')[-1]
             right = text[end:end + 6].split('\n')[0].split('\r')[0].split('\t')[0]
             return left + text[start:end] + right
-        item = {'source': snippet(original, i, end_i), 'target': snippet(content, j, end_j)}
+        item = {'aliases': snippet(original, i, end_i), 'term': snippet(content, j, end_j)}
+        if not meaningful(item['aliases']):
+            continue
         try:
             validate_hotword(**item)
         except ValueError:
@@ -126,10 +128,14 @@ def install_recording_edit(app, *, sessions, authorize, csrf, valid_csrf, sessio
         view = fields.get('view', [field])[0]
         if field not in ('summary', 'transcript') or view not in ('summary', 'transcript'):
             return result({'detail': '请检查热词字段。'}, 400)
+        try:
+            decision_id = int(fields.get('decision_id', [''])[0])
+        except ValueError:
+            return result({'detail': '请指定要撤销的热词位置。'}, 400)
         store = app.state.store
         if await run_in_threadpool(store.get_recording, recording_id) is None:
             return result({'detail': '录音不存在。'}, 404)
-        await run_in_threadpool(store.revoke_hotword, recording_id, hotword_id, field)
+        await run_in_threadpool(store.revoke_hotword, recording_id, hotword_id, field, decision_id)
         return RedirectResponse('/recordings/' + quote(recording_id, safe='') + '?view=' + view,
                                 status_code=303, headers={'Cache-Control': 'no-store'})
 
@@ -143,7 +149,7 @@ def install_recording_edit(app, *, sessions, authorize, csrf, valid_csrf, sessio
             if not isinstance(items, list) or not 1 <= len(items) <= 3:
                 raise ValueError
             for item in items:
-                if (not isinstance(item, dict) or set(item) != {'source', 'target'}
+                if (not isinstance(item, dict) or set(item) != {'term', 'aliases'}
                         or not all(isinstance(value, str) for value in item.values())):
                     raise ValueError
                 validate_hotword(**item)

@@ -76,8 +76,8 @@ class ApiKey:
 @dataclass(frozen=True)
 class Hotword:
     id: int
-    source: str
-    target: str
+    term: str
+    aliases: str
     note: str
     enabled: bool
     hits: int
@@ -103,9 +103,9 @@ class Store(SyncStore, Protocol):
 
     def list_hotwords(self) -> list[Hotword]: ...
 
-    def add_hotword(self, source: str, target: str, note: str = '') -> None: ...
+    def add_hotword(self, term: str, aliases: str = '', note: str = '') -> None: ...
 
-    def update_hotword(self, hotword_id: int, source: str, target: str, note: str) -> bool: ...
+    def update_hotword(self, hotword_id: int, term: str, aliases: str, note: str) -> bool: ...
 
     def delete_hotword(self, hotword_id: int) -> bool: ...
 
@@ -213,16 +213,6 @@ class SQLiteStore:
                     status_code INTEGER NOT NULL,
                     at TEXT NOT NULL
                 );
-                CREATE TABLE IF NOT EXISTS hotwords (
-                    id INTEGER PRIMARY KEY,
-                    source TEXT NOT NULL UNIQUE,
-                    target TEXT NOT NULL,
-                    note TEXT NOT NULL DEFAULT '',
-                    enabled INTEGER NOT NULL DEFAULT 1,
-                    hits INTEGER NOT NULL DEFAULT 0,
-                    created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL
-                );
                 CREATE TABLE IF NOT EXISTS recording_overrides (
                     recording_id TEXT NOT NULL,
                     field TEXT NOT NULL CHECK (field IN ('summary','transcript')),
@@ -230,17 +220,6 @@ class SQLiteStore:
                     updated_at TEXT NOT NULL,
                     PRIMARY KEY (recording_id, field)
                 );
-                CREATE TABLE IF NOT EXISTS recording_hotword_decisions (
-                    recording_id TEXT NOT NULL,
-                    hotword_id INTEGER NOT NULL,
-                    field TEXT NOT NULL CHECK (field IN ('summary','transcript')),
-                    decision TEXT NOT NULL CHECK (decision IN ('apply','skip')),
-                    reason TEXT NOT NULL DEFAULT '',
-                    decided_at TEXT NOT NULL,
-                    PRIMARY KEY (recording_id, hotword_id, field)
-                );
-                CREATE INDEX IF NOT EXISTS hotword_decision_counts
-                    ON recording_hotword_decisions(hotword_id, decision, recording_id);
                 CREATE TABLE IF NOT EXISTS settings (
                     key TEXT PRIMARY KEY NOT NULL,
                     value TEXT NOT NULL
@@ -268,6 +247,8 @@ class SQLiteStore:
             # Rebuild the legacy primary key atomically. Its ID type is unknown:
             # retain the original value in both subject and open_id, without guessing.
             conn.execute('BEGIN IMMEDIATE')
+            from app.hotword_migration import migrate_hotwords
+            migrate_hotwords(conn)
             user_columns = {row['name'] for row in conn.execute('PRAGMA table_info(users)')}
             if 'subject' not in user_columns:
                 conn.execute("""
@@ -396,71 +377,86 @@ class SQLiteStore:
     def list_hotwords(self) -> list[Hotword]:
         with self._connect() as conn:
             return [Hotword(**{**dict(row), 'enabled': bool(row['enabled'])}) for row in conn.execute(
-                '''SELECT h.*, (SELECT COUNT(DISTINCT d.recording_id)
+                """SELECT h.*, (SELECT COUNT(DISTINCT d.recording_id)
                    FROM recording_hotword_decisions d JOIN recordings r USING(recording_id)
-                   WHERE d.hotword_id=h.id AND d.decision='apply' AND h.enabled=1
+                   WHERE d.hotword_id=h.id AND d.revoked=0 AND h.enabled=1
                    AND NOT EXISTS (SELECT 1 FROM recording_overrides o
                      WHERE o.recording_id=d.recording_id AND o.field=d.field)) AS applied_records
-                   FROM hotwords h ORDER BY length(source) DESC, h.id''')]
+                   FROM hotwords h ORDER BY length(term) DESC, h.id""")]
 
     def hotword_decisions(self, recording_id):
         with self._connect() as conn:
             return [dict(row) for row in conn.execute(
-                'SELECT * FROM recording_hotword_decisions WHERE recording_id=? ORDER BY hotword_id, field',
+                'SELECT * FROM recording_hotword_decisions WHERE recording_id=? ORDER BY hotword_id, field, start_offset, id',
                 (recording_id,))]
 
-    def save_hotword_decisions(self, recording, rules, decisions, previous):
-        """Commit a judged snapshot only while source, rules and decisions still match."""
+    def hotword_checks(self, recording_id):
+        with self._connect() as conn:
+            return [dict(row) for row in conn.execute(
+                'SELECT * FROM recording_hotword_checks WHERE recording_id=? ORDER BY hotword_id, field', (recording_id,))]
+
+    def save_hotword_decisions(self, recording, rules, decisions, previous, checks=None):
+        """Commit only the unchanged recording/rule/decision snapshot. Archive changes via triggers."""
+        from app.hotwords import validate_decision
+        from app.recording_content import strip_origin_markers
+        for d in decisions:
+            rule = next(r for r in rules if r.id == d['hotword_id'])
+            validate_decision(d, strip_origin_markers(getattr(recording, d['field'] + '_md')), rule.term)
         with self._connect() as conn:
             conn.execute('BEGIN IMMEDIATE')
             current = conn.execute('SELECT * FROM recordings WHERE recording_id=?', (recording.recording_id,)).fetchone()
             if current is None or any((current[key] or '') != (getattr(recording, key) or '')
                     for key in ('title', 'summary_md', 'transcript_md', 'has_summary', 'has_transcript')):
                 return False
-            active = [(r['id'], r['source'], r['target'], r['updated_at']) for r in conn.execute(
-                'SELECT * FROM hotwords WHERE enabled=1 ORDER BY length(source) DESC, id')]
-            if active != [(r.id, r.source, r.target, r.updated_at) for r in rules]:
+            active = [(r['id'], r['term'], r['aliases'], r['updated_at']) for r in conn.execute(
+                'SELECT * FROM hotwords WHERE enabled=1 ORDER BY length(term) DESC, id')]
+            if active != [(r.id, r.term, r.aliases, r.updated_at) for r in rules]:
                 return False
             existing = [dict(row) for row in conn.execute(
-                'SELECT * FROM recording_hotword_decisions WHERE recording_id=? ORDER BY hotword_id, field',
+                'SELECT * FROM recording_hotword_decisions WHERE recording_id=? ORDER BY hotword_id, field, start_offset, id',
                 (recording.recording_id,))]
             if existing != previous:
                 return False
             at = datetime.now(timezone.utc).isoformat()
-            conn.executemany('''INSERT INTO recording_hotword_decisions
-                (recording_id, hotword_id, field, decision, reason, decided_at) VALUES (?,?,?,?,?,?)
-                ON CONFLICT(recording_id, hotword_id, field) DO UPDATE SET
-                decision=excluded.decision, reason=excluded.reason, decided_at=excluded.decided_at''',
-                [(recording.recording_id, d['hotword_id'], d['field'], d['decision'], d['reason'], at) for d in decisions])
+            # A forced rejudge archives former approvals and never erases manual revocation.
+            for check in checks or []:
+                conn.execute('DELETE FROM recording_hotword_decisions WHERE recording_id=? AND hotword_id=? AND field=? AND revoked=0',
+                             (recording.recording_id, check['hotword_id'], check['field']))
+                conn.execute("""INSERT INTO recording_hotword_checks VALUES (?,?,?,?,?,?)
+                    ON CONFLICT(recording_id,hotword_id,field) DO UPDATE SET
+                    status=excluded.status, reason=excluded.reason, decided_at=excluded.decided_at""",
+                    (recording.recording_id, check['hotword_id'], check['field'], check['status'], check['reason'], at))
+            for d in decisions:
+                conn.execute("""INSERT INTO recording_hotword_decisions
+                    (recording_id,hotword_id,field,span,replacement,reason,decided_at,start_offset,end_offset)
+                    VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(recording_id,hotword_id,field,span,start_offset)
+                    DO NOTHING""", (recording.recording_id, d['hotword_id'], d['field'], d['span'], d['replacement'],
+                    d['reason'], at, d['start_offset'], d['end_offset']))
         return True
 
-    def revoke_hotword(self, recording_id, hotword_id, field):
+    def revoke_hotword(self, recording_id, hotword_id, field, decision_id):
         with self._connect() as conn:
-            return conn.execute("""UPDATE recording_hotword_decisions
-                SET decision='skip', reason='manual_revoke', decided_at=?
-                WHERE recording_id=? AND hotword_id=? AND field=? AND decision='apply'""",
-                (datetime.now(timezone.utc).isoformat(), recording_id, hotword_id, field)).rowcount > 0
+            return conn.execute("""UPDATE recording_hotword_decisions SET revoked=1
+                WHERE id=? AND recording_id=? AND hotword_id=? AND field=? AND revoked=0""",
+                (decision_id, recording_id, hotword_id, field)).rowcount > 0
 
     def hotword_presentation(self, recording_id):
         from app.hotwords import HotwordApplier
         from app.recording_content import strip_origin_markers
         recording = self.get_recording(recording_id)
         rules = [r for r in self.list_hotwords() if r.enabled]
-        decisions = {(d['hotword_id'], d['field']): d for d in self.hotword_decisions(recording_id)}
+        checks = {(d['hotword_id'], d['field']) for d in self.hotword_checks(recording_id)}
         overrides = self.get_overrides(recording_id)
         applied = []
-        pending = not decisions
+        pending = False
         for field in ('summary', 'transcript'):
-            pending |= any((r.id, field) not in decisions for r in rules)
             if field in overrides or not getattr(recording, 'has_' + field):
                 continue
-            applier = HotwordApplier([r for r in rules if decisions.get((r.id, field), {}).get('decision') == 'apply'])
+            pending |= any((r.id, field) not in checks for r in rules)
+            applier = HotwordApplier(self._active_hotword_decisions(recording_id, field))
             applier.apply_hotwords(strip_origin_markers(getattr(recording, field + '_md')), markdown=field != 'transcript')
-            for r in rules:
-                if applier.hits[r.id]:
-                    applied.append({**decisions[r.id, field], 'source': r.source, 'target': r.target,
-                                    'count': applier.hits[r.id]})
-        return {'pending': pending, 'applied': applied, 'count': sum(d['count'] for d in applied)}
+            applied.extend({**d, 'count': 1} for d in applier.decisions if d['id'] in applier.applied_ids)
+        return {'pending': pending, 'applied': applied, 'count': len(applied)}
 
     def get_overrides(self, recording_id: str) -> dict[str, dict]:
         with self._connect() as conn:
@@ -491,40 +487,42 @@ class SQLiteStore:
     def bulk_add_hotwords(self, items: list[dict]) -> dict[str, int]:
         from app.hotwords import validate_hotword
         for item in items:
-            validate_hotword(item['source'], item['target'])
+            validate_hotword(**item)
         now = datetime.now(timezone.utc).isoformat()
         added = 0
         with self._connect() as conn:
             conn.execute('BEGIN IMMEDIATE')
             for item in items:
                 added += conn.execute(
-                    'INSERT INTO hotwords (source,target,created_at,updated_at) VALUES (?,?,?,?) '
-                    'ON CONFLICT(source) DO NOTHING',
-                    (item['source'], item['target'], now, now)).rowcount
+                    'INSERT INTO hotwords (term,aliases,created_at,updated_at) VALUES (?,?,?,?) '
+                    'ON CONFLICT(term) DO NOTHING',
+                    (item['term'], item.get('aliases', ''), now, now)).rowcount
         return {'added': added, 'existing': len(items) - added}
 
-    def add_hotword(self, source: str, target: str, note: str = '') -> None:
+    def add_hotword(self, term: str, aliases: str = '', note: str = '') -> None:
         from app.hotwords import validate_hotword
-        validate_hotword(source, target, note)
+        validate_hotword(term, aliases, note)
         now = datetime.now(timezone.utc).isoformat()
         with self._connect() as conn:
-            conn.execute('INSERT INTO hotwords (source, target, note, created_at, updated_at) '
-                         'VALUES (?, ?, ?, ?, ?)', (source, target, note, now, now))
+            conn.execute('INSERT INTO hotwords (term, aliases, note, created_at, updated_at) '
+                         'VALUES (?, ?, ?, ?, ?)', (term, aliases, note, now, now))
 
-    def update_hotword(self, hotword_id: int, source: str, target: str, note: str) -> bool:
+    def update_hotword(self, hotword_id: int, term: str, aliases: str, note: str) -> bool:
         from app.hotwords import validate_hotword
-        validate_hotword(source, target, note)
+        validate_hotword(term, aliases, note)
         with self._connect() as conn:
             conn.execute('BEGIN IMMEDIATE')
-            old = conn.execute('SELECT source, target FROM hotwords WHERE id=?', (hotword_id,)).fetchone()
-            if old and (old['source'], old['target']) != (source, target):
+            old = conn.execute('SELECT term, aliases FROM hotwords WHERE id=?', (hotword_id,)).fetchone()
+            if old and (old['term'], old['aliases']) != (term, aliases):
                 conn.execute('DELETE FROM recording_hotword_decisions WHERE hotword_id=?', (hotword_id,))
-            return conn.execute('UPDATE hotwords SET source=?, target=?, note=?, updated_at=? WHERE id=?',
-                                (source, target, note, datetime.now(timezone.utc).isoformat(), hotword_id)).rowcount > 0
+                conn.execute('DELETE FROM recording_hotword_checks WHERE hotword_id=?', (hotword_id,))
+            return conn.execute('UPDATE hotwords SET term=?, aliases=?, note=?, updated_at=? WHERE id=?',
+                                (term, aliases, note, datetime.now(timezone.utc).isoformat(), hotword_id)).rowcount > 0
 
     def delete_hotword(self, hotword_id: int) -> bool:
         with self._connect() as conn:
             conn.execute('DELETE FROM recording_hotword_decisions WHERE hotword_id=?', (hotword_id,))
+            conn.execute('DELETE FROM recording_hotword_checks WHERE hotword_id=?', (hotword_id,))
             return conn.execute('DELETE FROM hotwords WHERE id=?', (hotword_id,)).rowcount > 0
 
     def toggle_hotword(self, hotword_id: int) -> bool:
@@ -532,25 +530,21 @@ class SQLiteStore:
             return conn.execute('UPDATE hotwords SET enabled=1-enabled, updated_at=? WHERE id=?',
                                 (datetime.now(timezone.utc).isoformat(), hotword_id)).rowcount > 0
 
+    def _active_hotword_decisions(self, recording_id, field):
+        with self._connect() as conn:
+            return [dict(row) for row in conn.execute("""SELECT d.* FROM recording_hotword_decisions d
+                JOIN hotwords h ON d.hotword_id=h.id WHERE h.enabled=1 AND d.revoked=0
+                AND d.recording_id=? AND d.field=? ORDER BY length(d.span) DESC, d.id""", (recording_id, field))]
+
     def apply_hotwords(self, text: str, *, recording_id=None, field=None, markdown: bool = True) -> str:
         from app.hotwords import HotwordApplier
         if recording_id is None or field not in ('summary', 'transcript'):
             return text
-        # Read the approval and its exact rule together, so an edit cannot pair
-        # an old approval with a newly edited replacement target.
-        with self._connect() as conn:
-            rules = [Hotword(**dict(row)) for row in conn.execute('''SELECT h.* FROM hotwords h
-                JOIN recording_hotword_decisions d ON d.hotword_id=h.id
-                WHERE h.enabled=1 AND d.recording_id=? AND d.field=? AND d.decision='apply'
-                ORDER BY length(h.source) DESC, h.id''', (recording_id, field))]
-        if not text or not rules:
-            return text
-        applier = HotwordApplier(rules)
+        applier = HotwordApplier(self._active_hotword_decisions(recording_id, field))
         result = applier.apply_hotwords(text, markdown=markdown)
         if applier.hits:
             with self._connect() as conn:
-                conn.executemany('UPDATE hotwords SET hits=hits+? WHERE id=?',
-                                 [(count, hotword_id) for hotword_id, count in applier.hits.items()])
+                conn.executemany('UPDATE hotwords SET hits=hits+? WHERE id=?', list((n, i) for i, n in applier.hits.items()))
         return result
 
     def rebuild_search(self) -> None:
@@ -774,6 +768,7 @@ class SQLiteStore:
                     ('summary_md', detail.summary_md), ('transcript_md', detail.transcript_md),
                     ('has_summary', int(detail.has_summary)), ('has_transcript', int(detail.has_transcript)))):
                 conn.execute('DELETE FROM recording_hotword_decisions WHERE recording_id=?', (meta.recording_id,))
+                conn.execute('DELETE FROM recording_hotword_checks WHERE recording_id=?', (meta.recording_id,))
             return 'updated' if old else 'inserted'
 
     def get_recording(self, recording_id: str) -> StoredRecording | None:

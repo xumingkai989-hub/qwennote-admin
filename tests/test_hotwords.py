@@ -41,12 +41,26 @@ def approve_rules(store, recording_id='hotword', text=BODY):
         store.upsert_recording(RecordingMeta(recording_id, 'AI 例会', datetime(2026, 10, 29, 9, 30, tzinfo=SHANGHAI), 12),
                                RecordingDetail(recording_id, text, text, True, True), 'now')
     rules = [r for r in store.list_hotwords() if r.enabled]
-    assert store.save_hotword_decisions(store.get_recording(recording_id), rules,
-        [{'hotword_id': r.id, 'field': f, 'decision': 'apply', 'reason': '离线审核通过'}
-         for r in rules for f in ('summary', 'transcript')], store.hotword_decisions(recording_id))
+    recording = store.get_recording(recording_id)
+    decisions = []
+    for r in rules:
+        for f in ('summary', 'transcript'):
+            from app.recording_content import strip_origin_markers
+            body = strip_origin_markers(getattr(recording, f + '_md'))
+            for match in re.finditer(re.escape(r.aliases), body, re.IGNORECASE):
+                if not match.group() or len(match.group()) > 20:
+                    continue
+                decisions.append({'hotword_id': r.id, 'field': f, 'span': match.group(),
+                    'replacement': r.term, 'start_offset': match.start(), 'end_offset': match.end(),
+                    'reason': '离线审核通过'})
+    assert store.save_hotword_decisions(recording, rules, decisions, store.hotword_decisions(recording_id),
+        [{'hotword_id': r.id, 'field': f, 'status': 'apply', 'reason': '离线审核通过'}
+         for r in rules for f in ('summary', 'transcript')])
 
 
 def apply_approved(store, text, **kwargs):
+    store.upsert_recording(RecordingMeta('hotword', 'AI 例会', datetime(2026, 10, 29, 9, 30, tzinfo=SHANGHAI), 12),
+                           RecordingDetail('hotword', text, text, True, True), 'now')
     approve_rules(store, text=text)
     return store.apply_hotwords(text, recording_id='hotword', field='summary', **kwargs)
 
@@ -57,8 +71,8 @@ def populated(client, store):
         RecordingMeta('hotword', 'AI 例会', datetime(2026, 10, 29, 9, 30, tzinfo=SHANGHAI), 12),
         RecordingDetail('hotword', BODY, BODY, True, True), '2026-10-29T12:00:00+08:00')
     # The longer rule deliberately comes second.
-    store.add_hotword('AI', '人工智能')
-    store.add_hotword('AI Tutor', 'AI导师')
+    store.add_hotword('人工智能', 'AI')
+    store.add_hotword('AI导师', 'AI Tutor')
     approve_rules(store)
     key = 'qn_' + secrets.token_hex(16)
     store.create_api_key('offline-hotwords', hashlib.sha256(key.encode()).hexdigest())
@@ -75,30 +89,30 @@ def populated(client, store):
 ])
 def test_longest_first_and_case(store, text, expected):
     store.migrate()
-    store.add_hotword('AI', '人工智能')
-    store.add_hotword('AI Tutor', 'AI导师')
+    store.add_hotword('人工智能', 'AI')
+    store.add_hotword('AI导师', 'AI Tutor')
     assert apply_approved(store, text) == expected
 
 
 def test_one_pass_does_not_rescan_targets_or_cycle(store):
     store.migrate()
-    for source, target in [('A', 'B'), ('B', 'C'), ('C', 'A')]:
-        store.add_hotword(source, target)
+    for aliases, term in [('A', 'B'), ('B', 'C'), ('C', 'A')]:
+        store.add_hotword(term, aliases)
     assert apply_approved(store, 'A B C A') == 'B C A B'
-    assert {row.source: row.hits for row in store.list_hotwords()} == {'A': 2, 'B': 1, 'C': 1}
+    assert {row.aliases: row.hits for row in store.list_hotwords()} == {'A': 2, 'B': 1, 'C': 1}
 
 
 def test_chinese_exact_and_regex_metacharacters_are_literal(store):
     store.migrate()
-    store.add_hotword('千问', '通义千问')
-    store.add_hotword('C++', 'Cpp')
-    store.add_hotword('a.b', 'dot')
+    store.add_hotword('通义千问', '千问')
+    store.add_hotword('Cpp', 'C++')
+    store.add_hotword('dot', 'a.b')
     assert apply_approved(store, '千问 C++ a.b axb') == '通义千问 Cpp dot axb'
 
 
 def test_disabled_rules_do_not_match_or_count(store):
     store.migrate()
-    store.add_hotword('AI', '人工智能')
+    store.add_hotword('人工智能', 'AI')
     key = store.list_hotwords()[0].id
     assert store.toggle_hotword(key)
     assert apply_approved(store, 'AI ai') == 'AI ai'
@@ -123,21 +137,21 @@ def test_disabled_rules_do_not_match_or_count(store):
 ])
 def test_markdown_syntax_code_and_link_destinations_are_protected(store, text, expected, hits):
     store.migrate()
-    store.add_hotword('AI', '正确')
+    store.add_hotword('正确', 'AI')
     assert apply_approved(store, text) == expected
     assert store.list_hotwords()[0].hits == hits
 
 
-@pytest.mark.parametrize('target', ['**加粗**', '# 标题', '[点我](https://example.test)',
+@pytest.mark.parametrize('term', ['**加粗**', '# 标题', '[点我](https://example.test)',
                                   '<https://example.test>', '&copy;', '`代码`', 'A|B', r'反\斜杠'])
-def test_target_is_plain_text_and_does_not_create_markdown(store, target):
+def test_target_is_plain_text_and_does_not_create_markdown(store, term):
     store.migrate()
-    store.add_hotword('AI', target)
+    store.add_hotword(term, 'AI')
     markdown = apply_approved(store, 'AI')
     parser = MarkdownIt('commonmark', {'html': False})
     children = parser.parse(markdown)[1].children
-    assert [(token.type, token.content) for token in children] == [('text', target)]
-    assert apply_approved(store, 'AI', markdown=False) == target
+    assert [(token.type, token.content) for token in children] == [('text', term)]
+    assert apply_approved(store, 'AI', markdown=False) == term
 
 
 @pytest.mark.parametrize('path,fields', [
@@ -163,11 +177,11 @@ def test_five_exits_share_the_function_and_count_exact_hits(populated, store, mo
     if path == '/api/v1/recordings/hotword':
         assert response.json()['summary_md'] == response.json()['transcript_md'] == EXPECTED
     else:
-        # The editor now includes a second, hidden copy of the displayed source.
+        # The editor now includes a second, hidden copy of the displayed aliases.
         visible = re.sub(r'<form id="recording-editor".*?</form>|<script id="edit-(?:source|blocks)".*?</script>', '', response.text, flags=re.S)
         assert visible.count(EXPECTED) == fields
     assert BODY not in response.text
-    assert {row.source: row.hits for row in store.list_hotwords()} == {'AI Tutor': fields * 2, 'AI': fields}
+    assert {row.aliases: row.hits for row in store.list_hotwords()} == {'AI Tutor': fields * 2, 'AI': fields}
     assert recording_rows(store) == before
 
 
@@ -177,10 +191,10 @@ def test_counts_accumulate_only_requested_bodies_and_can_be_revoked(populated, s
                  '/recordings/hotword.md', '/api/v1/recordings/hotword',
                  '/api/v1/daily/2026-10-29?format=md']:
         assert populated.get(path).status_code == 200
-    assert {row.source: row.hits for row in store.list_hotwords()} == {'AI Tutor': 16, 'AI': 8}
+    assert {row.aliases: row.hits for row in store.list_hotwords()} == {'AI Tutor': 16, 'AI': 8}
     for path in ['/', '/hotwords', '/api/v1/recordings', '/api/v1/daily/2026-10-29?format=json']:
         assert populated.get(path).status_code == 200
-    assert {row.source: row.hits for row in store.list_hotwords()} == {'AI Tutor': 16, 'AI': 8}
+    assert {row.aliases: row.hits for row in store.list_hotwords()} == {'AI Tutor': 16, 'AI': 8}
     for word in store.list_hotwords():
         store.toggle_hotword(word.id)
     result = populated.get('/api/v1/recordings/hotword').json()
@@ -192,7 +206,7 @@ def test_counts_accumulate_only_requested_bodies_and_can_be_revoked(populated, s
 def test_special_target_displays_literally_in_both_views(populated, store, view):
     for word in store.list_hotwords():
         store.delete_hotword(word.id)
-    store.add_hotword('AI Tutor', '**词** [名称] <标签> &copy;')
+    store.add_hotword('**词** [名称] <标签> &copy;', 'AI Tutor')
     approve_rules(store)
     result = populated.get('/recordings/hotword?view=' + view)
     assert '**词** [名称] &lt;标签&gt; &amp;copy;' in result.text
@@ -203,7 +217,7 @@ def test_special_target_displays_literally_in_both_views(populated, store, view)
 @pytest.mark.parametrize('role', ['anonymous', 'member', 'inactive-admin'])
 @pytest.mark.parametrize('method,path', [('get', '/hotwords'), *[('post', path) for path in MUTATIONS]])
 def test_management_requires_active_admin(client, store, fake_auth, settings, method, path, role):
-    store.add_hotword('AI', '正确')
+    store.add_hotword('正确', 'AI')
     if role == 'member':
         fake_auth.user = FeishuUser('ou_hotword_member', '管理员', '')
         store.add_user(fake_auth.user)
@@ -222,7 +236,7 @@ def test_management_requires_active_admin(client, store, fake_auth, settings, me
 @pytest.mark.parametrize('kind', ['missing', 'tampered', 'other-session', 'no-cookie', 'duplicate', 'json'])
 def test_mutations_require_csrf(client, store, settings, path, kind):
     login(client)
-    store.add_hotword('AI', '正确')
+    store.add_hotword('正确', 'AI')
     token = csrf(client)
     before = store.list_hotwords()
     if kind == 'other-session':
@@ -230,7 +244,7 @@ def test_mutations_require_csrf(client, store, settings, path, kind):
     elif kind == 'no-cookie':
         client.cookies.delete('admin_csrf')
     data = {'csrf_token': '' if kind == 'missing' else 'wrong' if kind == 'tampered' else token,
-            'source': '改了', 'target': '变了'}
+            'aliases': '改了', 'term': '变了'}
     if kind == 'json':
         result = client.post(path, json=data)
     elif kind == 'duplicate':
@@ -245,18 +259,18 @@ def test_mutations_require_csrf(client, store, settings, path, kind):
 def test_administration_crud_navigation_and_cookie(client, store):
     login(client)
     page = client.get('/hotwords')
-    assert page.status_code == 200 and '暂无热词' in page.text
+    assert page.status_code == 200 and '还没有热词' in page.text
     assert 'href="/hotwords" aria-label="热词中心" data-label="热词中心" aria-current="page"' in page.text
     assert page.headers['cache-control'] == 'no-store'
     assert 'Path=/hotwords' in page.headers['set-cookie'] and 'HttpOnly' in page.headers['set-cookie']
-    assert post(client, source=' AI ', target=' 正确 ', note='备注').status_code == 303
+    assert post(client, aliases=' AI ', term=' 正确 ', note='备注').status_code == 303
     word, = store.list_hotwords()
-    assert (word.source, word.target, word.note, word.enabled, word.hits) == ('AI', '正确', '备注', True, 0)
+    assert (word.aliases, word.term, word.note, word.enabled, word.hits) == ('AI', '正确', '备注', True, 0)
     assert word.created_at and word.updated_at
     assert apply_approved(store, 'AI AI') == '正确 正确'
-    assert post(client, f'/hotwords/{word.id}/update', source='Tutor', target='导师', note='新备注').status_code == 303
+    assert post(client, f'/hotwords/{word.id}/update', aliases='Tutor', term='导师', note='新备注').status_code == 303
     updated, = store.list_hotwords()
-    assert (updated.source, updated.target, updated.note, updated.hits) == ('Tutor', '导师', '新备注', 2)
+    assert (updated.aliases, updated.term, updated.note, updated.hits) == ('Tutor', '导师', '新备注', 2)
     assert updated.created_at == word.created_at and updated.updated_at >= word.updated_at
     assert post(client, f'/hotwords/{word.id}/toggle').status_code == 303
     assert not store.list_hotwords()[0].enabled
@@ -266,47 +280,47 @@ def test_administration_crud_navigation_and_cookie(client, store):
 
 
 @pytest.mark.parametrize('fields', [
-    {'source': '', 'target': '好'}, {'source': '坏', 'target': ' '},
-    {'source': 'x' * 201, 'target': '好'}, {'source': '坏', 'target': 'x' * 501},
-    {'source': '坏', 'target': '好', 'note': 'x' * 1001},
-    {'source': '坏\n词', 'target': '好'}, {'source': '坏', 'target': '# 标题\n新增段落'},
+    {'term': '', 'aliases': '好'}, {'aliases': '坏', 'term': ' '},
+    {'aliases': 'x' * 1001, 'term': '好'}, {'aliases': '坏', 'term': 'x' * 501},
+    {'aliases': '坏', 'term': '好', 'note': 'x' * 1001},
+    {'aliases': '坏\n词', 'term': '好'}, {'aliases': '坏', 'term': '# 标题\n新增段落'},
 ])
 @pytest.mark.parametrize('path', ['/hotwords', '/hotwords/1/update'])
 def test_invalid_fields_never_write(client, store, path, fields):
     login(client)
-    store.add_hotword('AI', '正确')
+    store.add_hotword('正确', 'AI')
     before = store.list_hotwords()
     assert post(client, path, **fields).status_code == 400
     assert store.list_hotwords() == before
 
 
 @pytest.mark.parametrize('path', ['/hotwords', '/hotwords/2/update'])
-def test_duplicate_source_never_partially_updates(client, store, path):
+def test_duplicate_term_never_partially_updates(client, store, path):
     login(client)
-    store.add_hotword('AI', '正确')
-    store.add_hotword('Tutor', '导师')
+    store.add_hotword('正确', 'AI')
+    store.add_hotword('导师', 'Tutor')
     before = store.list_hotwords()
-    assert post(client, path, source='AI', target='改了', note='不该保存').status_code == 409
+    assert post(client, path, aliases='改了', term='正确', note='不该保存').status_code == 409
     assert store.list_hotwords() == before
 
 
 @pytest.mark.parametrize('action', ['update', 'delete', 'toggle'])
 def test_missing_hotword_is_404(client, action):
     login(client)
-    assert post(client, f'/hotwords/999/{action}', source='AI', target='正确').status_code == 404
+    assert post(client, f'/hotwords/999/{action}', aliases='AI', term='正确').status_code == 404
 
 
 def test_management_escapes_untrusted_fields(client, store):
     login(client)
     payload = '<script>alert(1)</script>'
-    assert post(client, source=payload, target=payload, note=payload).status_code == 303
+    assert post(client, aliases=payload, term=payload, note=payload).status_code == 303
     page = client.get('/hotwords')
     assert payload not in page.text and '&lt;script&gt;' in page.text
 
 
 def test_migration_is_idempotent_preserves_rules_and_override_constraint(store):
     store.migrate()
-    store.add_hotword('AI', '正确')
+    store.add_hotword('正确', 'AI')
     apply_approved(store, 'AI')
     before = store.list_hotwords()
     with store._connect() as conn:

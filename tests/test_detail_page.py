@@ -171,8 +171,8 @@ def test_invalid_export_part_falls_back_to_all(detail_client, part):
 def test_export_part_only_applies_hotwords_to_exported_content(detail_client, store, part):
     detail_client.add(summary='总结小{origin:1}红直播', transcript='转写小{origin:2}红直播')
     original = store.get_recording('detail')
-    store.add_hotword('小红直播', '小鹿直播')
-    store.add_hotword('origin', '不应先替换')
+    store.add_hotword('小鹿直播', '小红直播')
+    store.add_hotword('不应先替换', 'origin')
     from test_hotwords import approve_rules
     approve_rules(store, 'detail')
     response = detail_client.get('/recordings/detail.md?part=' + part)
@@ -180,7 +180,7 @@ def test_export_part_only_applies_hotwords_to_exported_content(detail_client, st
     assert '小红直播' not in response.text
     assert ('总结小鹿直播' in response.text) == (part != 'transcript')
     assert ('转写小鹿直播' in response.text) == (part != 'summary')
-    assert {word.source: word.hits for word in store.list_hotwords()} == {
+    assert {word.aliases: word.hits for word in store.list_hotwords()} == {
         '小红直播': 2 if part == 'all' else 1, 'origin': 0}
     assert store.get_recording('detail') == original
 

@@ -4,7 +4,7 @@ const fs=require('node:fs');
 const path=require('node:path');
 const {chromium}=require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const base='http://127.0.0.1:8769';
-const out=path.resolve(process.env.JUDGE_ARTIFACTS || '../qwennote-admin-artifacts/hotword-judge-16-20261030');
+const out=path.resolve(process.env.JUDGE_ARTIFACTS || '../qwennote-admin-artifacts/hotword-standard-17-20261030');
 
 test('hotword trace, undo and pending state on desktop/mobile/dark',async()=>{
  fs.mkdirSync(out,{recursive:true});
@@ -14,6 +14,13 @@ test('hotword trace, undo and pending state on desktop/mobile/dark',async()=>{
    const page=await browser.newPage({viewport:{width,height:1000},colorScheme});
    const errors=[];page.on('pageerror',e=>errors.push(e.message));
    await page.route('**/*',r=>new URL(r.request().url()).origin===base?r.continue():r.abort());
+   await page.goto(`${base}/hotwords`);
+   const form = page.locator('form[action="/hotwords"]');
+   assert.deepEqual(await form.locator('label').allTextContents(), ['标准词（必填）','别名提示（选填，逗号分隔）','备注（选填）']);
+   assert.equal(await form.locator('input[required]').count(), 1);
+   assert.equal(await page.locator('input[name="source"], input[name="target"]').count(), 0);
+   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth), false);
+   await page.screenshot({path:path.join(out,`hotword-center-${name}.png`),fullPage:true});
    await page.goto(`${base}/recordings/preview-${suffix}?view=summary`);
    assert.equal(await page.locator('#hotword-trace summary').innerText(),'热词已应用 2 处');
    await page.locator('#hotword-trace summary').click();

@@ -41,12 +41,12 @@ def install_hotwords(app, *, settings, templates, sessions, authorize, valid_csr
         fields = await parse_form(request, max_bytes=32768)
         if not isinstance(fields, dict):
             return fields
-        values = {name: fields.get(name, [''])[0].strip() for name in ('source', 'target', 'note')}
+        values = {name: fields.get(name, [''])[0].strip() for name in ('term', 'aliases', 'note')}
         if action in ('add', 'update'):
             try:
                 validate_hotword(**values)
             except ValueError:
-                return render(request, error='原词和替换词不能为空，须为单行；最多分别为 200、500 字，备注最多 1000 字。',
+                return render(request, error='标准词必填，最多 500 字；别名提示和备注最多 1000 字，均须为单行。',
                               status=400, draft=values if action == 'add' else None)
         store = app.state.store
 
@@ -61,7 +61,7 @@ def install_hotwords(app, *, settings, templates, sessions, authorize, valid_csr
         try:
             found = await run_in_threadpool(apply)
         except sqlite3.IntegrityError:
-            return render(request, error='原词已存在，请编辑已有热词。', status=409,
+            return render(request, error='标准词已存在，请编辑已有热词。', status=409,
                           draft=values if action == 'add' else None)
         if not found:
             return render(request, error='热词不存在，请刷新后重试。', status=404)

@@ -176,7 +176,7 @@ test('rich layout stays fixed, Markdown and timestamps survive edits, mobile scr
       const response=page.waitForResponse(r=>r.url().endsWith('/edit'));
       await content.press('Meta+Enter');
       const result=await (await response).json();assert.equal(result.saved,true);
-      assert.deepEqual(result.suggestions,[{source:view==='summary'?'小红直播与 **': ' 1 段：小红直播与 AI',target:view==='summary'?'小鹿直播与 **': ' 1 段：小鹿直播与 AI'}]);
+      assert.deepEqual(result.suggestions,[{aliases:view==='summary'?'小红直播与 **': ' 1 段：小红直播与 AI',term:view==='summary'?'小鹿直播与 **': ' 1 段：小鹿直播与 AI'}]);
       await page.locator('#hotword-suggestions').waitFor({state:'visible'});
       await Promise.all([page.waitForNavigation(),page.locator('#dismiss-hotwords').click()]);
       const saved=await page.locator('#edit-source').textContent().then(JSON.parse);

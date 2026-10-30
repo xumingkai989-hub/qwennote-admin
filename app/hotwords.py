@@ -14,62 +14,66 @@ FENCE = re.compile(r'^ {0,3}(`{3,}|~{3,})')
 STRUCTURE_LINE = re.compile(r'^ {0,3}(?:([-*_])(?:[ \t]*\1){2,}[ \t]*|[=-]+[ \t]*|\[[^\]]+\]:.*|\|?[ :|-]+\|?[ \t]*)$')
 
 
-def validate_hotword(source: str, target: str, note: str = '') -> None:
-    if (not source.strip() or not target.strip()
-            or any(len(value) > limit for value, limit in [(source, 200), (target, 500), (note, 1000)])
-            or any(ord(char) < 32 or ord(char) == 127 for value in (source, target, note) for char in value)):
-        raise ValueError('Hotwords must be nonempty, bounded single-line text')
+def validate_hotword(term: str, aliases: str = '', note: str = '') -> None:
+    if (not term.strip()
+            or any(len(value) > limit for value, limit in [(term, 500), (aliases, 1000), (note, 1000)])
+            or any(ord(char) < 32 or ord(char) == 127 for value in (term, aliases, note) for char in value)):
+        raise ValueError('Hotwords must have a standard term and bounded single-line hints')
+
+
+def validate_decision(row, text, term):
+    start, end, span = row['start_offset'], row['end_offset'], row['span']
+    if (row['field'] not in ('summary', 'transcript') or type(start) is not int or type(end) is not int
+            or not isinstance(span, str) or not 1 <= len(span) <= 20 or start < 0
+            or end != start + len(span) or text[start:end] != span or row['replacement'] != term):
+        raise ValueError('Decision must address an exact original occurrence')
+
+
+def body_ranges(text):
+    """Absolute ranges of editable Markdown body text; structure/code/URLs stay protected."""
+    offset, fence_char, fence_width = 0, '', 0
+    for line in text.splitlines(keepends=True):
+        marker = FENCE.match(line)
+        if fence_char:
+            if (marker and marker[1][0] == fence_char and len(marker[1]) >= fence_width
+                    and not line[marker.end():].strip()):
+                fence_char = ''
+        elif marker:
+            fence_char, fence_width = marker[1][0], len(marker[1])
+        elif not (line.startswith('    ') or line.startswith('\t') or STRUCTURE_LINE.match(line.rstrip('\r\n'))):
+            prefix = STRUCTURE_PREFIX.match(line)
+            head = prefix.end() if prefix else 0
+            start = head
+            for protected in PROTECTED_INLINE.finditer(line, head):
+                if protected.start() > start:
+                    yield offset + start, offset + protected.start()
+                start = protected.end()
+            if start < len(line):
+                yield offset + start, offset + len(line)
+        offset += len(line)
 
 
 class HotwordApplier:
-    def __init__(self, rules):
-        # Stable ID order breaks equal-length ties. Regex alternatives are tried
-        # left to right at each source position, so no replacement is rescanned.
-        self.rules = sorted(rules, key=lambda row: (-len(row.source), row.id))
-        self.pattern = (re.compile('|'.join(f'(?P<r{row.id}>{re.escape(row.source)})'
-                                           for row in self.rules), re.IGNORECASE)
-                        if self.rules else None)
-        self.by_id = {row.id: row for row in self.rules}
+    def __init__(self, decisions):
+        self.decisions = sorted(decisions, key=lambda d: (-len(d['span']), d['id']))
         self.hits = Counter()
-
-    def _replace(self, text: str, markdown: bool) -> str:
-        if self.pattern is None:
-            return text
-        def replacement(match):
-            hotword_id = int(match.lastgroup[1:])
-            self.hits[hotword_id] += 1
-            target = self.by_id[hotword_id].target
-            return MARKDOWN_SPECIAL.sub(r'\\\1', target) if markdown else target
-        return self.pattern.sub(replacement, text)
+        self.applied_ids = set()
 
     def apply_hotwords(self, text: str, *, markdown: bool = True) -> str:
-        output = []
-        fence_char = ''
-        fence_width = 0
-        for line in text.splitlines(keepends=True):
-            marker = FENCE.match(line)
-            if fence_char:
-                output.append(line)
-                if (marker and marker[1][0] == fence_char and len(marker[1]) >= fence_width
-                        and not line[marker.end():].strip()):
-                    fence_char = ''
+        # Validate against original coordinates; select longest spans before touching text.
+        # Replacements are never rescanned, and equal text elsewhere is left alone.
+        ranges = list(body_ranges(text))
+        selected = []
+        for d in self.decisions:
+            start, end = d['start_offset'], d['end_offset']
+            if (text[start:end] != d['span'] or end - start != len(d['span'])
+                    or not any(left <= start and end <= right for left, right in ranges)
+                    or any(start < b and end > a for a, b, _ in selected)):
                 continue
-            if marker:
-                fence_char, fence_width = marker[1][0], len(marker[1])
-                output.append(line)
-                continue
-            if line.startswith('    ') or line.startswith('\t') or STRUCTURE_LINE.match(line.rstrip('\r\n')):
-                output.append(line)
-                continue
-            prefix = STRUCTURE_PREFIX.match(line)
-            head = line[:prefix.end()] if prefix else ''
-            body = line[len(head):]
-            parts = []
-            start = 0
-            for protected in PROTECTED_INLINE.finditer(body):
-                parts.append(self._replace(body[start:protected.start()], markdown))
-                parts.append(protected.group())
-                start = protected.end()
-            parts.append(self._replace(body[start:], markdown))
-            output.append(head + ''.join(parts))
-        return ''.join(output)
+            target = MARKDOWN_SPECIAL.sub(r'\\\1', d['replacement']) if markdown else d['replacement']
+            selected.append((start, end, target))
+            self.applied_ids.add(d['id'])
+            self.hits[d['hotword_id']] += 1
+        for start, end, target in sorted(selected, reverse=True):
+            text = text[:start] + target + text[end:]
+        return text
