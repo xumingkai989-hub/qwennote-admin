@@ -2,12 +2,25 @@
 {% block content %}
   {% set status, status_label = recording.status %}
   <header class="detail-header">
-    <a id="back-to-list" href="{{ back_url }}">← 返回列表</a>
-    <div class="detail-actions">
-      <button id="copy-markdown" type="button" data-markdown-url="{{ url_for('recording_markdown', recording_id=recording.recording_id) }}">复制 Markdown</button>
-      <a class="filter-link" href="{{ url_for('recording_markdown', recording_id=recording.recording_id) }}">下载 .md</a>
+    <a id="back-to-list" href="{{ back_url }}" aria-label="返回列表"><span aria-hidden="true">←</span></a>
+    <div class="detail-heading">
+      <div class="detail-title-row">
+        <h1 title="{{ title }}">{{ title }}</h1>
+        <span class="badge badge-{{ status }}">{{ status_label }}</span>
+      </div>
+      <div class="detail-meta">
+        <time datetime="{{ recording.created_at.isoformat() }}">{{ recording.created_at.strftime('%Y-%m-%d %H:%M') }}</time>
+        <span aria-hidden="true"> · </span>
+        <span>{{ (recording.duration_min ~ ' 分钟') if recording.duration_min is not none else '—' }}</span>
+      </div>
     </div>
-    <h1>{{ title }}</h1>
+    <div id="detail-export" class="detail-export">
+      <button id="export-button" class="secondary" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="export-menu">导出 <span aria-hidden="true">▾</span></button>
+      <div id="export-menu" class="export-menu" role="menu" aria-labelledby="export-button" hidden>
+        <button id="copy-markdown" type="button" role="menuitem" tabindex="-1" data-markdown-url="{{ url_for('recording_markdown', recording_id=recording.recording_id) }}">复制 Markdown</button>
+        <a id="download-markdown" role="menuitem" tabindex="-1" href="{{ url_for('recording_markdown', recording_id=recording.recording_id) }}">下载 .md</a>
+      </div>
+    </div>
   </header>
   <nav class="detail-view-switch" aria-label="录音内容视图">
     <div class="segmented-control">
@@ -16,12 +29,6 @@
       {% endfor %}
     </div>
   </nav>
-  <div class="card-meta detail-meta">
-    <time datetime="{{ recording.created_at.isoformat() }}">{{ recording.created_at.strftime('%Y-%m-%d %H:%M') }}</time>
-    <span>{{ (recording.duration_min ~ ' 分钟') if recording.duration_min is not none else '—' }}</span>
-    <span class="badge badge-{{ status }}">{{ status_label }}</span>
-  </div>
-  <p class="time-note">时间为笔记创建时间，非录音开始时间（Asia/Shanghai）</p>
   <p id="copy-status" role="status" aria-live="polite"></p>
   <div id="copy-fallback" hidden>
     <label for="markdown-source">Markdown 原文（可全选复制）</label>
@@ -44,11 +51,10 @@
       <h2 id="transcript-heading" class="visually-hidden">转写原文</h2>
       {% if recording.has_transcript %}
         <div id="transcript-toolbar" class="transcript-toolbar">
-          <span class="transcript-count">转录全文 · {{ segments | length }} 段</span>
+          <span class="transcript-count">{{ segments | length }} 段</span>
           <div class="transcript-tools">
             <input id="transcript-search" type="search" placeholder="搜索本场" aria-label="搜索本场" aria-controls="transcript-segments" autocomplete="off">
             <button id="copy-transcript" type="button" class="text-button">复制全文</button>
-            <a class="filter-link" href="{{ url_for('recording_markdown', recording_id=recording.recording_id) }}">下载 .md</a>
           </div>
         </div>
         <div id="transcript-segments" class="transcript-segments">
@@ -77,5 +83,5 @@
     </section>
   {% endif %}
   <div id="transcript-toast" class="transcript-toast" role="status" aria-live="polite" hidden></div>
-  <script src="{{ url_for('static', path='detail.js') }}?v=20261030-04c" defer></script>
+  <script src="{{ url_for('static', path='detail.js') }}?v=20261030-04e" defer></script>
 {% endblock %}

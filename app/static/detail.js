@@ -1,10 +1,67 @@
 'use strict';
 const copyButton = document.getElementById('copy-markdown');
+const exportButton = document.getElementById('export-button');
+const exportMenu = document.getElementById('export-menu');
+const exportContainer = document.getElementById('detail-export');
+const exportItems = Array.from(exportMenu.querySelectorAll('[role="menuitem"]'));
+function closeExport(restoreFocus = false) {
+  exportMenu.hidden = true;
+  exportButton.setAttribute('aria-expanded', 'false');
+  if (restoreFocus) exportButton.focus();
+}
+function openExport(index = 0) {
+  exportMenu.hidden = false;
+  exportButton.setAttribute('aria-expanded', 'true');
+  exportItems[index].focus();
+}
+exportButton.addEventListener('click', () => {
+  if (exportMenu.hidden) openExport();
+  else closeExport(true);
+});
+exportButton.addEventListener('keydown', event => {
+  if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+    event.preventDefault();
+    openExport(event.key === 'ArrowUp' ? exportItems.length - 1 : 0);
+  }
+});
+exportMenu.addEventListener('keydown', event => {
+  const index = exportItems.indexOf(document.activeElement);
+  if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+    event.preventDefault();
+    const step = event.key === 'ArrowDown' ? 1 : -1;
+    exportItems[(index + step + exportItems.length) % exportItems.length].focus();
+  } else if (event.key === 'Home' || event.key === 'End') {
+    event.preventDefault();
+    exportItems[event.key === 'Home' ? 0 : exportItems.length - 1].focus();
+  } else if (event.key === 'Enter' || event.key === ' ') {
+    event.preventDefault();
+    if (!event.repeat && index !== -1) exportItems[index].click();
+  }
+});
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape' && !exportMenu.hidden) {
+    event.preventDefault();
+    closeExport(true);
+  }
+});
+for (const eventName of ['click', 'focusin']) {
+  document.addEventListener(eventName, event => {
+    if (!exportContainer.contains(event.target)) closeExport();
+  });
+}
+document.getElementById('download-markdown').addEventListener('click', () => closeExport(true));
+let copyPending = false;
+let copyTimer;
 copyButton.addEventListener('click', async () => {
+  closeExport(true);
+  if (copyPending) return;
   const source = document.getElementById('markdown-source');
   const status = document.getElementById('copy-status');
-  copyButton.disabled = true;
-  status.textContent = '正在获取 Markdown…';
+  copyPending = true;
+  clearTimeout(copyTimer);
+  copyButton.setAttribute('aria-disabled', 'true');
+  copyButton.textContent = '复制 Markdown';
+  status.textContent = '';
   try {
     const response = await fetch(copyButton.dataset.markdownUrl, { credentials: 'same-origin', cache: 'no-store' });
     if (!response.ok || !response.headers.get('content-type')?.startsWith('text/markdown')) {
@@ -14,7 +71,8 @@ copyButton.addEventListener('click', async () => {
     try {
       await navigator.clipboard.writeText(source.value);
       document.getElementById('copy-fallback').hidden = true;
-      status.textContent = 'Markdown 已复制';
+      copyButton.textContent = '已复制';
+      copyTimer = setTimeout(() => { copyButton.textContent = '复制 Markdown'; }, 800);
     } catch (error) {
       document.getElementById('copy-fallback').hidden = false;
       source.focus();
@@ -25,7 +83,8 @@ copyButton.addEventListener('click', async () => {
   } catch (error) {
     status.textContent = '获取 Markdown 失败，请重试或使用下载 .md。';
   } finally {
-    copyButton.disabled = false;
+    copyPending = false;
+    copyButton.setAttribute('aria-disabled', 'false');
   }
 });
 

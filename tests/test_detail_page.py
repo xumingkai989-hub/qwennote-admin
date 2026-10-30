@@ -34,7 +34,7 @@ def test_detail_markdown_and_metadata(detail_client):
     response = detail_client.get('/recordings/detail')
     assert response.status_code == 200
     html = response.text
-    for text in ['项目例会', '2026-10-29 09:30', '12 分钟', '已转录', '时间为笔记创建时间',
+    for text in ['项目例会', '2026-10-29 09:30', '12 分钟', '已转录',
                  '<h1 class="summary-h1">会议总结</h1>', '<ul>', '<strong>行动事项</strong>', '<blockquote>', '<pre><code',
                  '复制 Markdown', '下载 .md']:
         assert text in html
@@ -283,11 +283,57 @@ def test_transcript_speaker_is_escaped(detail_client):
 
 def test_transcript_toolbar_and_focusable_container(detail_client):
     html = detail_client.get('/recordings/detail?view=transcript').text
-    assert '转录全文 · 2 段' in html
+    assert '<span class="transcript-count">2 段</span>' in html
+    assert '转录全文' not in html
     assert 'id="transcript-search" type="search"' in html
     assert 'id="transcript-segments"' in html
     assert html.count('class="transcript-segment" tabindex="0" role="button"') == 2
     assert 'id="copy-transcript"' in html and 'id="transcript-toast"' in html
+
+
+@pytest.mark.parametrize('view', ['summary', 'transcript'])
+def test_compact_header_has_single_export_menu(detail_client, view):
+    html = detail_client.get('/recordings/detail?view=' + view).text
+    header = re.search(r'<header class="detail-header">(.*?)</header>', html, re.S)[1]
+    assert re.search(r'id="back-to-list"[^>]*aria-label="返回列表"', header)
+    assert '<h1 title="项目例会">项目例会</h1>' in header
+    assert 'class="detail-meta"' in header and 'class="badge badge-complete"' in header
+    assert re.search(r'id="export-button"[^>]*aria-haspopup="menu"[^>]*aria-expanded="false"', header)
+    menu = re.search(r'<div id="export-menu"[^>]*role="menu"[^>]*hidden>(.*?)</div>', header, re.S)[1]
+    assert menu.count('role="menuitem"') == 2
+    for label in ['复制 Markdown', '下载 .md']:
+        assert menu.count(label) == 1 and html.count(label) == 1
+    download = re.search(r'<a id="download-markdown"[^>]*>', menu)[0]
+    assert 'href="http://testserver/recordings/detail.md"' in download
+    # Preserve the existing link attributes and server Content-Disposition filename.
+    assert ' download' not in download
+    assert '时间为笔记创建时间' not in html and '非录音开始时间' not in html
+
+
+def test_detail_return_preserves_date_range(detail_client):
+    html = detail_client.get('/recordings/detail?from=2026-10-01&to=2026-10-30').text
+    back = unescape(re.search(r'id="back-to-list"[^>]*href="([^"]+)"', html)[1])
+    assert urlsplit(back).path == '/'
+    assert parse_qs(urlsplit(back).query) == {
+        'from': ['2026-10-01'], 'to': ['2026-10-30'], 'page': ['1'],
+    }
+
+
+@pytest.mark.parametrize('view', ['summary', 'transcript'])
+def test_no_segment_count_without_transcript(detail_client, view):
+    detail_client.add(transcript='')
+    html = detail_client.get('/recordings/detail?view=' + view).text
+    assert 'transcript-count' not in html
+    assert not re.search(r'\d+ 段', html)
+
+
+def test_header_full_title_attribute_is_escaped(detail_client):
+    title = '很长的录音标题' * 20 + '"><img src=x onerror=alert(1)>'
+    detail_client.add(title=title)
+    html = detail_client.get('/recordings/detail').text
+    heading = re.search(r'<header.*?<h1 title="([^"]*)">(.*?)</h1>', html, re.S)
+    assert unescape(heading[1]) == title and unescape(heading[2]) == title
+    assert '<img src=x' not in html
 
 
 def test_speaker_palette_is_stable_and_accessible():
