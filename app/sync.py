@@ -97,7 +97,8 @@ def run_sync(source: MinutesSource, store: SyncStore, *, backfill_days: int = 90
         # Tags are optional enrichment; never turn a successful sync into failure.
         try:
             from app.tag import run_tags
-            run_tags(store, recording_ids=tag_ids, force=True)
+            if not hasattr(store, 'get_settings') or store.get_settings().tag_enabled:
+                run_tags(store, recording_ids=tag_ids, force=True)
         except Exception:
             logging.getLogger(__name__).warning('打标批次失败；录音同步已完成')
         return run

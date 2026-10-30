@@ -182,7 +182,8 @@ test('rich layout stays fixed, Markdown and timestamps survive edits, mobile scr
       const saved=await page.locator('#edit-source').textContent().then(JSON.parse);
       assert.equal(saved.trim(),initialSource.replace('小红直播','小鹿直播').trim());
       assert.equal(await page.locator('#sidebar-links a[href="/search"]').count(),0);
-      assert.equal(await page.locator('#sidebar-links a').count(),3);
+      assert.deepEqual(await page.locator('#sidebar-links a').evaluateAll(links=>links.map(link=>link.getAttribute('href'))),
+        ['/','/hotwords','/assistant','/settings']);
       if(width===1440 && view==='summary')await page.screenshot({path:path.join(out,'navigation.png'),fullPage:true});
       await Promise.all([page.waitForNavigation(),page.locator('#revert-button').click()]);
       // Cancel restores the original markup; delegated copy/search still works afterwards.

@@ -154,7 +154,8 @@ activate)
     done
     test "$tls_healthy" = true
     if [[ "${QWENNOTE_APP_ONLY:-0}" != 1 ]]; then
-        systemctl enable --now qwennote-sync.timer qwennote-backup.timer
+        systemctl disable --now qwennote-sync.timer qwennote-tag-maintenance.timer
+        systemctl enable --now qwennote-tick.timer qwennote-backup.timer
     fi
     printf 'CURRENT=%s\n' "$(readlink -f /opt/qwennote/current)"
     ;;

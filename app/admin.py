@@ -73,6 +73,11 @@ def install_admin(app: FastAPI, *, settings: Settings, templates: Jinja2Template
                                        valid_csrf=valid_csrf, session_binding=session_binding,
                                        parse_form=parse_form)
 
+    from app.settings_admin import install_settings
+    install_settings(app, settings=settings, templates=templates, authorize=authorize,
+                     valid_csrf=valid_csrf, csrf=csrf, session_binding=session_binding,
+                     parse_form=parse_form)
+
     @app.get('/admin')
     def admin(request: Request):
         denied = authorize(request)

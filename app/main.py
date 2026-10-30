@@ -339,7 +339,9 @@ def create_app(
         if origin and origin != str(request.base_url).rstrip('/'):
             return JSONResponse({'detail': '请求来源无效'}, status_code=403)
         try:
-            run = run_sync(source, store, backfill_days=settings.backfill_days)
+            backfill = (store.get_settings(backfill_days=settings.backfill_days).backfill_days
+                        if hasattr(store, 'get_settings') else settings.backfill_days)
+            run = run_sync(source, store, backfill_days=backfill)
         except SyncInProgress:
             return JSONResponse({'detail': '同步正在进行，请稍后重试'}, status_code=409,
                                 headers={'Cache-Control': 'no-store'})

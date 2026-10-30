@@ -14,3 +14,4 @@ data/
 *.egg-info/
 *.sync.lock
 *.tag.lock
+*.scheduler.lock

@@ -446,3 +446,9 @@ systemctl list-timers --all qwennote-tag-maintenance.timer
 本单以卡片正文就地 contenteditable 替代工单 11 的 textarea；编辑入口改为工具条铅笔，支持对勾完成、取消、Cmd/Ctrl+Enter 和 Esc。保存沿用 override 与热词询问。展示管线先剥离 `{origin:...}`，再应用热词，五个出口保持一致，数据库原始内容不变。左侧去掉搜索入口，首页搜索框和 `/search` 路由保留。
 
 验收 **777 项 Python + 19 项 JavaScript + 2 项编辑浏览器 + 8 项布局浏览器通过**。实现约定、验证范围与命令见 [工单 12](docs/ui-fixes-12.md)。报告、截图与部署证据放仓库外 `../qwennote-admin-artifacts/ui-12-20261030/`。
+
+### 设置中心与统一调度（工单 14）
+
+管理员通过 `/settings` 配置自动同步、固定时间 / 小时间隔、补拉天数、自动标签与词表维护时间、数据保留。每天 03:00 / 05:00 的旧 timer 停用，统一由每 10 分钟唤醒的 `qwennote-tick.timer` 读取数据库设置；修改设置不需要修改 systemd 时间。网页手动同步使用已保存的补拉天数，关闭自动标签也会停止同步后的自动打标。
+
+先 `python3 scripts/deploy.py --app-only`，再在服务器执行 `bash /opt/qwennote/current/scripts/install_scheduler.sh`。原 `install_tag_maintenance.sh` 兼容入口现也安装统一 tick。回滚到旧版前先停用 tick，再按需恢复旧 timer，避免重复调度。新增表仅 `settings` 和 `scheduler_state`；详细调度 / 失败 / 清理 / 回滚口径与验证见 [工单 14](docs/settings-14.md)。本单全量 871 项 Python、21 项 JavaScript、4 项业务浏览器与 8 项布局浏览器通过。

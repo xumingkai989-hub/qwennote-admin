@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block main_attributes %} class="settings-page"{% endblock %}
+{% block content %}
+<div class="list-heading"><h1>设置中心</h1></div>
+<p class="settings-status" role="status">{% if saved %}<strong>已保存</strong> · {% endif %}{% if next_runs.sync %}下次同步 {{ next_runs.sync.strftime('%m-%d %H:%M') }}{% else %}自动同步已关闭{% endif %}</p>
+{% if error %}<p class="settings-error" role="alert">{{ error }}</p>{% endif %}
+<form method="post" action="/settings" class="settings-form">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <fieldset>
+    <legend>同步</legend>
+    <div class="settings-group">
+      <div class="settings-row">
+        <label for="sync_enabled">自动同步</label>
+        <input id="sync_enabled" name="sync_enabled" type="checkbox" role="switch" value="true"{% if preferences.sync_enabled %} checked{% endif %} aria-describedby="sync-enabled-help">
+        <p id="sync-enabled-help">关闭后仍可在会议页手动同步。</p>
+      </div>
+      <div class="settings-row">
+        <label for="sync_time">每天同步时间</label>
+        <input id="sync_time" name="sync_time" type="time" required value="{{ preferences.sync_time }}" aria-describedby="sync-time-help">
+        <p id="sync-time-help">Asia/Shanghai；间隔为 0 时生效，设定时间后首次检查时执行，最多延后 10 分钟。</p>
+      </div>
+      <div class="settings-row">
+        <label for="sync_interval_hours">同步间隔（小时）</label>
+        <input id="sync_interval_hours" name="sync_interval_hours" type="number" min="0" max="999999" step="1" required value="{{ preferences.sync_interval_hours }}" aria-describedby="sync-interval-help">
+        <p id="sync-interval-help">0 表示每天固定时间；正整数表示从上次执行的小时起每 N 小时，新启用时立即执行一次。</p>
+      </div>
+      <div class="settings-row">
+        <label for="backfill_days">首次 / 补拉天数</label>
+        <input id="backfill_days" name="backfill_days" type="number" min="1" max="999999" step="1" required value="{{ preferences.backfill_days }}" aria-describedby="backfill-help">
+        <p id="backfill-help">包含今天；同时用于手动与自动同步，至少 1 天。</p>
+      </div>
+    </div>
+  </fieldset>
+  <fieldset>
+    <legend>标签</legend>
+    <div class="settings-group">
+      <div class="settings-row">
+        <label for="tag_enabled">自动打标签</label>
+        <input id="tag_enabled" name="tag_enabled" type="checkbox" role="switch" value="true"{% if preferences.tag_enabled %} checked{% endif %} aria-describedby="tag-enabled-help">
+        <p id="tag-enabled-help">关闭后停止同步时的自动打标与每日词表维护，已有标签保留。</p>
+      </div>
+      <div class="settings-row">
+        <label for="tag_time">词表维护时间</label>
+        <input id="tag_time" name="tag_time" type="time" required value="{{ preferences.tag_time }}" aria-describedby="tag-time-help">
+        <p id="tag-time-help">Asia/Shanghai，每天一次；自动打标签开启时生效。</p>
+      </div>
+    </div>
+  </fieldset>
+  <fieldset>
+    <legend>数据保留</legend>
+    <div class="settings-group">
+      <div class="settings-row">
+        <label for="retention_days">保留天数</label>
+        <input id="retention_days" name="retention_days" type="number" min="0" max="999999" step="1" required value="{{ preferences.retention_days }}" aria-describedby="retention-help">
+        <p id="retention-help">0 表示永久保留；正整数每天删除创建时间早于 N 天的录音、标签与人工编辑，无法还原。补拉范围更大时，同步可能再次拉回源记录。</p>
+      </div>
+    </div>
+  </fieldset>
+  <div class="settings-actions"><button type="submit">保存设置</button></div>
+</form>
+{% endblock %}

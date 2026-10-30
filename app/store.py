@@ -1,5 +1,6 @@
 import fcntl
 import hmac
+import json
 import sqlite3
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -224,6 +225,14 @@ class SQLiteStore:
                     updated_at TEXT NOT NULL,
                     PRIMARY KEY (recording_id, field)
                 );
+                CREATE TABLE IF NOT EXISTS settings (
+                    key TEXT PRIMARY KEY NOT NULL,
+                    value TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS scheduler_state (
+                    job TEXT PRIMARY KEY,
+                    last_run_at TEXT
+                );
             """)
             # Rebuild the legacy primary key atomically. Its ID type is unknown:
             # retain the original value in both subject and open_id, without guessing.
@@ -335,6 +344,23 @@ class SQLiteStore:
             UPDATE recordings SET search_text =
                 coalesce(title, '') || char(10) || coalesce(summary_md, '') || char(10) || coalesce(transcript_md, '')
         """)
+
+    def get_settings(self, *, backfill_days=90):
+        from app.automation import AutomationSettings
+        values = AutomationSettings(backfill_days=backfill_days).values()
+        with self._connect() as conn:
+            values.update({row['key']: json.loads(row['value']) for row in
+                           conn.execute('SELECT key, value FROM settings') if row['key'] in values})
+        return AutomationSettings(**values)
+
+    def save_settings(self, values):
+        from app.automation import AutomationSettings
+        # Validate the entire snapshot before opening a write transaction.
+        validated = AutomationSettings(**values.values())
+        with self._connect() as conn:
+            conn.executemany('INSERT INTO settings (key, value) VALUES (?, ?) '
+                             'ON CONFLICT(key) DO UPDATE SET value=excluded.value',
+                             [(key, json.dumps(value)) for key, value in validated.values().items()])
 
     def list_hotwords(self) -> list[Hotword]:
         with self._connect() as conn:

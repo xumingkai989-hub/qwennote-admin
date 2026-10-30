@@ -15,7 +15,8 @@ def test_startup_migrates_only_required_tables_and_seeds_admin(client, settings)
         tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         required = {"users", "recordings", "sync_runs", "api_keys", "api_audit", "recording_tags", "tag_runs",
                     "tags", "tag_aliases", "assistant_config", "tag_change_log",
-                    "tag_merge_proposals", "tag_semantic_checks", "hotwords", "recording_overrides"}
+                    "tag_merge_proposals", "tag_semantic_checks", "hotwords", "recording_overrides",
+                    "settings", "scheduler_state"}
         assert required | {"recordings_fts"} <= tables
         assert all(t in required or t.startswith("recordings_fts") for t in tables)
         assert conn.execute("SELECT COUNT(*) FROM recordings").fetchone()[0] == 0

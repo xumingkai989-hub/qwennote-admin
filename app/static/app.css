@@ -431,3 +431,30 @@ p.assistant-note { margin: 12px 0 0; }
 #hotword-options span { min-width: 0; }
 
 .edit-trace[hidden] { display: none; }
+
+/* Settings: field descriptions explain scheduling and deletion consequences. */
+.settings-page { max-width: 820px; }
+.settings-status { margin: 10px 0 24px; color: var(--secondary); font-size: 14px; }
+.settings-status strong { color: var(--success-text); font-weight: 500; }
+.settings-error { padding: 12px 16px; border-radius: 12px; color: var(--danger); background: var(--surface); }
+.settings-form fieldset { min-width: 0; margin: 0 0 24px; padding: 0; border: 0; }
+.settings-form legend { padding: 0 0 10px 16px; font-size: 17px; font-weight: 600; }
+.settings-group { overflow: hidden; border: 1px solid var(--separator); border-radius: 14px; background: var(--surface); }
+.settings-row { display: grid; grid-template-columns: minmax(0, 1fr) 152px; align-items: center; gap: 4px 20px; padding: 14px 18px; }
+.settings-row + .settings-row { border-top: 1px solid var(--separator); }
+.settings-row label { display: flex; align-items: center; min-height: 44px; font-size: 15px; cursor: pointer; }
+.settings-row > input { width: 100%; }
+.settings-row > p { grid-column: 1 / -1; margin: 0; font-size: 12px; line-height: 1.6; color: var(--secondary); overflow-wrap: anywhere; }
+.settings-row input[role="switch"] { appearance: none; justify-self: end; position: relative; width: 48px; height: 30px; min-height: 30px; padding: 0; border: 0; border-radius: 20px; background: var(--control); cursor: pointer; }
+.settings-row input[role="switch"]::after { content: ''; position: absolute; left: 3px; top: 3px; width: 24px; height: 24px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px #0002; transition: transform .15s; }
+.settings-row input[role="switch"]:checked { background: var(--success); }
+.settings-row input[role="switch"]:checked::after { transform: translateX(18px); }
+.settings-actions { display: flex; justify-content: flex-end; }
+@media (max-width: 480px) {
+  .settings-row { grid-template-columns: minmax(0, 1fr) 122px; gap: 4px 12px; padding: 12px 14px; }
+  .settings-form legend { padding-left: 14px; }
+  .settings-actions button { width: 100%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .settings-row input[role="switch"]::after { transition: none; }
+}

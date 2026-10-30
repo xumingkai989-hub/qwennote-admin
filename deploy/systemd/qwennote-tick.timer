@@ -1,0 +1,11 @@
+[Unit]
+Description=QwenNote scheduler every ten minutes
+
+[Timer]
+OnCalendar=*-*-* *:0/10:00 Asia/Shanghai
+Persistent=true
+AccuracySec=1s
+Unit=qwennote-tick.service
+
+[Install]
+WantedBy=timers.target

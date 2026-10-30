@@ -1,0 +1,23 @@
+[Unit]
+Description=QwenNote settings-driven scheduler tick
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=qwennote
+Group=qwennote
+WorkingDirectory=/opt/qwennote/current
+EnvironmentFile=/etc/qwennote/qwennote.env
+EnvironmentFile=-/etc/claude/deepseek.qwennote.env
+Environment=PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+Environment=LD_LIBRARY_PATH=/opt/qwennote/current/.sqlite/lib
+ExecStart=/opt/qwennote/current/.venv/bin/python -m app.scheduler_tick
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/qwennote/data
+StandardOutput=journal
+StandardError=journal
