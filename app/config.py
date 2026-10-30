@@ -17,6 +17,8 @@ class Settings:
     backfill_days: int = 90
 
     def __post_init__(self):
+        if self.admin_open_id.strip() and not self.admin_open_ids:
+            raise ValueError("ADMIN_OPEN_ID must contain at least one identity")
         if self.minutes_source not in {"http", "fixture"}:
             raise ValueError("QWENNOTE_SOURCE must be http or fixture")
         if self.minutes_source == "fixture" and self.minutes_fixture_dir is None:
@@ -28,6 +30,11 @@ class Settings:
         uri = urlsplit(self.feishu_redirect_uri)
         if uri.scheme not in {"http", "https"} or not uri.netloc:
             raise ValueError("FEISHU_REDIRECT_URI must be an absolute HTTP(S) URL")
+
+    @property
+    def admin_open_ids(self) -> tuple[str, ...]:
+        return tuple(dict.fromkeys(value.strip() for value in self.admin_open_id.split(',')
+                                   if value.strip()))
 
     @property
     def secure_cookies(self) -> bool:

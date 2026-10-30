@@ -21,7 +21,7 @@ def install_admin(app: FastAPI, *, settings: Settings, templates: Jinja2Template
         if open_id is None:
             return login_redirect()
         user = app.state.store.get_user(open_id)
-        if user is None or not user.is_active or open_id != settings.admin_open_id:
+        if user is None or not user.is_active or open_id not in settings.admin_open_ids:
             return error_page(request, 403, '无访问权限', '仅管理员可以管理白名单。')
         return None
 

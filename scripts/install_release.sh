@@ -110,10 +110,12 @@ activate)
     fi
     ln -s "$release" /opt/qwennote/.current-deploy-$$
     mv -Tf /opt/qwennote/.current-deploy-$$ /opt/qwennote/current
-    install -m 644 deploy/systemd/qwennote* /etc/systemd/system/
-    systemd-analyze verify /etc/systemd/system/qwennote*.service /etc/systemd/system/qwennote*.timer
-    systemctl daemon-reload
-    systemctl enable --now qwennote.service
+    if [[ "${QWENNOTE_APP_ONLY:-0}" != 1 ]]; then
+        install -m 644 deploy/systemd/qwennote* /etc/systemd/system/
+        systemd-analyze verify /etc/systemd/system/qwennote*.service /etc/systemd/system/qwennote*.timer
+        systemctl daemon-reload
+        systemctl enable --now qwennote.service
+    fi
     systemctl restart qwennote.service
     healthy=false
     for attempt in {1..20}; do
@@ -134,9 +136,11 @@ activate)
         echo 'Application health check failed; stopped before nginx activation.' >&2
         exit 1
     fi
-    install -m 644 deploy/nginx/qwennote.conf /etc/nginx/conf.d/qwennote.conf
-    nginx -t
-    systemctl reload nginx
+    if [[ "${QWENNOTE_APP_ONLY:-0}" != 1 ]]; then
+        install -m 644 deploy/nginx/qwennote.conf /etc/nginx/conf.d/qwennote.conf
+        nginx -t
+        systemctl reload nginx
+    fi
     # nginx reload returns before new workers necessarily accept TLS connections.
     tls_healthy=false
     for attempt in {1..20}; do
@@ -147,7 +151,9 @@ activate)
         sleep 1
     done
     test "$tls_healthy" = true
-    systemctl enable --now qwennote-sync.timer qwennote-backup.timer
+    if [[ "${QWENNOTE_APP_ONLY:-0}" != 1 ]]; then
+        systemctl enable --now qwennote-sync.timer qwennote-backup.timer
+    fi
     printf 'CURRENT=%s\n' "$(readlink -f /opt/qwennote/current)"
     ;;
 *) echo 'Unknown phase' >&2; exit 2 ;;

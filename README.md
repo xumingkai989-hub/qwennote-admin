@@ -21,7 +21,7 @@ cp .env.example .env
 | `FEISHU_REDIRECT_URI` | 完整回调 URL，路径 `/auth/callback`，必填 |
 | `SESSION_SECRET` | 至少 32 字节的随机签名密钥，必填 |
 | `DB_PATH` | SQLite 文件位置，自动创建父目录与表，必填 |
-| `ADMIN_OPEN_ID` | 唯一管理员身份（同时首次启动加入白名单），必填 |
+| `ADMIN_OPEN_ID` | 管理员 open_id，支持逗号分隔多值（如 `on_a,on_b`）；各项去空白、忽略空项与重复项，启动时均加入白名单，必填 |
 | `QWENNOTE_SOURCE` | `http`（默认）或显式指定 `fixture` |
 | `QWENNOTE_MCP_TOKEN` | HTTP 模式必填的 Bearer 凭据；仅从环境读取，不落库 |
 | `QWENNOTE_FIXTURE_DIR` | fixture 模式必填，本地 JSON 目录；示例 `./tests/fixtures/minutes` |
@@ -40,6 +40,8 @@ cp .env.example .env
 - 启动以 WAL 模式幂等迁移；兼容工单 01 的 NOT NULL 录音表，保留旧行并放开可空时长、总结及转写字段。管理员种子不覆盖现有姓名、停用状态或加入时间。
 
 `GET /auth/callback` 校验非空 code 和与浏览器匹配的 state，换身份后检查白名单。成功 302 到 `/` 并写 HttpOnly、SameSite=Lax session cookie；白名单外或停用返回 403。Session 8 小时，state 10 分钟；每次首页及同步重新检查白名单。飞书失败返回通用 502 页面，不输出服务商响应或凭据。
+
+白名单外或停用的 OAuth 回调 403 页面明确提示没有访问权限，展示飞书姓名和 open_id，方便交给管理员处理；姓名与 ID 均自动 HTML 转义。成功登录页不展示 open_id。拒绝时仅记录一条 WARNING：`auth: whitelist miss open_id=on_xxx name=present`，无姓名时 `name=<redacted-if-empty>`；日志只含 ID 与姓名是否存在，不输出姓名原文、授权码、token、请求头或 cookie。403 响应禁止缓存并禁用 Referer 转发。
 
 `create_app(settings=..., feishu_auth=..., store=..., minutes_source=...)` 支持替换依赖。路由也可通过 `get_feishu_auth`、`get_store`、`get_minutes_source` 与 `dependency_overrides` 注入；迁移始终使用工厂传入的 Store。
 
@@ -102,7 +104,7 @@ PY
 .venv/bin/python -m pytest -q
 ```
 
-290 项测试通过，其中工单 03 新增 30 项、工单 04 新增 27 项、工单 05 新增 36 项、工单 06 新增 63 项、工单 07 新增 52 项。使用 TestClient、FakeMinutesSource、假 FeishuAuth、临时 SQLite 和 httpx.MockTransport；自动阻断 socket、DNS 及真实 HTTP transport，不需要环境密钥。覆盖已有登录与同步、MCP 握手/JSON/SSE/分页/异常，以及上海跨日默认筛选、指定日期/昨天/含首尾区间、四态与时长、创建时间排序与同时间分页、20/5 分页不重复及筛选保留、空状态、非法参数、正文不进入 HTML、静态 CSS、搜索表单和退出。API 与 CLI 的新增覆盖见下文。保留 Starlette 对 AnyIO 别名的既有弃用警告。
+307 项测试通过（包含原有 294 项与本次 13 项身份诊断、多管理员和部署模式测试），其中工单 03 新增 30 项、工单 04 新增 27 项、工单 05 新增 36 项、工单 06 新增 63 项、工单 07 新增 52 项。使用 TestClient、FakeMinutesSource、假 FeishuAuth、临时 SQLite 和 httpx.MockTransport；自动阻断 socket、DNS 及真实 HTTP transport，不需要环境密钥。覆盖已有登录与同步、MCP 握手/JSON/SSE/分页/异常，以及上海跨日默认筛选、指定日期/昨天/含首尾区间、四态与时长、创建时间排序与同时间分页、20/5 分页不重复及筛选保留、空状态、非法参数、正文不进入 HTML、静态 CSS、搜索表单和退出。API 与 CLI 的新增覆盖见下文。保留 Starlette 对 AnyIO 别名的既有弃用警告。
 
 工单 03 在本机 Chrome 对 TestClient 渲染的合成数据页面进行了独立布局检查（不加入 pytest 或项目依赖）：320/375/390px 下卡片单列、1280px 下两列；指定日期、区间、第 2 页与空状态均无横向溢出，实际文字最小 14px。长标题与长用户名也不撑宽页面。该检查不包含真实飞书、千问联调或实体手机。
 
@@ -210,7 +212,7 @@ curl --silent --show-error --include --header @- \
 
 ## 后台白名单管理（工单 07）
 
-`GET /admin` 仅允许配置 `ADMIN_OPEN_ID` 对应的活动白名单用户访问，不依赖数据库角色或姓名；普通用户返回现有 error 模板的 403 页面，未登录使用现有飞书授权跳转。管理页与搜索响应均禁止缓存，并设置 `Referrer-Policy: no-referrer`。
+`GET /admin` 仅允许配置 `ADMIN_OPEN_ID` 中任一 ID 对应的活动白名单用户访问，不依赖数据库角色或姓名；普通用户返回现有 error 模板的 403 页面，未登录使用现有飞书授权跳转。管理页与搜索响应均禁止缓存，并设置 `Referrer-Policy: no-referrer`。
 
 - `GET /admin?q=姓名或邮箱`：显示至多 20 个联系人，包含姓名、部门、邮箱与“添加”按钮。姓名、部门、邮箱、查询和隐藏表单字段均经过 Jinja 自动转义；不展示手机号、性别、令牌等其他敏感字段。搜索结果只用于本次响应，不写入数据库。
 - `POST /admin/users`：URL 编码表单包含 `open_id`、`name`、`avatar_url`、`csrf_token`。只保存被选中者的 ID、姓名、头像及白名单状态与加入时间。以 `open_id` 为唯一主键幂等 upsert；重复添加保留原加入时间，已移除者再次添加恢复启用。
@@ -234,6 +236,8 @@ curl --silent --show-error --include --header @- \
 ```sh
 python3 scripts/deploy.py
 ```
+
+已部署站点只更新应用时运行 `python3 scripts/deploy.py --app-only`：沿用相同归档、SHA-256 校验、新 release 准备与 `current` 原子切换，保留 `previous` 供回滚；仅重启应用并验证 HTTPS，不改 nginx、证书、systemd 单元或定时器，并核对全部 nginx conf 的部署前后哈希。
 
 脚本复用 `~/.hermes/digital-agent/tools/swas_run.py`，显式指定实例；记录主站部署前状态和其他 nginx conf 的哈希。打包排除 Git、venv、data、env、scratch 和缓存，base64 按 48,000 字符分 part；该实例实测整块命令被 `CmdContent.ExceedLimit` 拒绝，因此每 part 用最多 12,000 字符的命令顺序追加。服务端 SHA-256 校验成功才解包到 UTC 命名的 `/opt/qwennote/releases/YYYYMMDDTHHMMSSZ/`。日志在本机 `/tmp/qwennote-deploy-logs/<UTC时间戳>/`，不包含生成的环境变量值。远端失败即停止；修复后可重新执行，产生新的 release。
 

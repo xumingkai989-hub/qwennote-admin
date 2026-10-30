@@ -1,3 +1,4 @@
+import logging
 import secrets
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta
@@ -22,6 +23,7 @@ from app.store import SQLiteStore, Store
 from app.sync import SyncInProgress, run_sync
 
 AUTHORIZE_URL = "https://accounts.feishu.cn/open-apis/authen/v1/authorize"
+logger = logging.getLogger(__name__)
 
 
 def list_filters(request: Request, *, all_dates: bool = False) -> dict:
@@ -90,7 +92,8 @@ def create_app(
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         app.state.store.migrate()
-        app.state.store.seed_admin(settings.admin_open_id)
+        for open_id in settings.admin_open_ids:
+            app.state.store.seed_admin(open_id)
         yield
 
     app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
@@ -121,10 +124,12 @@ def create_app(
         response.headers["Referrer-Policy"] = "no-referrer"
         return response
 
-    def error_page(request: Request, status: int, title: str, message: str) -> Response:
+    def error_page(request: Request, status: int, title: str, message: str, *,
+                   denied_open_id: str | None = None, denied_name: str = "") -> Response:
         return finish_callback(templates.TemplateResponse(
             request=request, name="error.html",
-            context={"title": title, "message": message}, status_code=status,
+            context={"title": title, "message": message,
+                     "denied_open_id": denied_open_id, "denied_name": denied_name}, status_code=status,
         ))
 
     def web_access_error(request: Request, open_id: str | None, message: str) -> Response:
@@ -299,7 +304,10 @@ def create_app(
             return error_page(request, 502, "登录失败", "飞书认证暂时失败，请重新登录。")
         user = store.get_user(identity.open_id)
         if user is None or not user.is_active:
-            return error_page(request, 403, "无访问权限", "你的账号不在访问白名单中。")
+            logger.warning("auth: whitelist miss open_id=%s name=%s", identity.open_id,
+                           "present" if identity.name else "<redacted-if-empty>")
+            return error_page(request, 403, "无访问权限", "你没有访问权限，你的账号不在访问白名单中。",
+                              denied_open_id=identity.open_id, denied_name=identity.name)
         store.update_profile(identity)
         response = RedirectResponse("/", status_code=302)
         set_cookie(response, "session", sessions.encode(identity.open_id), SESSION_MAX_AGE)

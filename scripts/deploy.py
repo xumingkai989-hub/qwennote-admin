@@ -18,6 +18,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--helper', type=Path, default=Path.home() / '.hermes/digital-agent/tools/swas_run.py')
     parser.add_argument('--log-dir', type=Path, default=Path('/tmp/qwennote-deploy-logs'))
+    parser.add_argument('--app-only', action='store_true',
+                        help='Update an existing application without changing nginx, certificates or units')
     args = parser.parse_args()
     os.environ['SWAS_INSTANCE_ID'] = INSTANCE
     spec = importlib.util.spec_from_file_location('swas_run', args.helper)
@@ -40,6 +42,7 @@ def main():
         return output
 
     print('RELEASE=' + release, flush=True)
+    nginx_filter = '' if args.app_only else ' ! -name qwennote.conf'
     remote('preflight', '''
 test -x /usr/bin/python3.11
 if ss -lntp | grep -E ':8090[[:space:]]'; then
@@ -52,10 +55,10 @@ curl --max-time 30 -sS -o /dev/null -w '%{http_code}\\n' https://mingkai.xin/
 systemctl is-active dashboard-shell.service
 install -d -m 755 /opt/qwennote/releases
 install -d -m 700 /opt/qwennote/deploy-audit
-find /etc/nginx/conf.d -maxdepth 1 -type f -name '*.conf' ! -name qwennote.conf -exec sha256sum {} + > /opt/qwennote/deploy-audit/''' + stamp + '''.nginx-before
+find /etc/nginx/conf.d -maxdepth 1 -type f -name '*.conf' ''' + nginx_filter + ''' -exec sha256sum {} + > /opt/qwennote/deploy-audit/''' + stamp + '''.nginx-before
 cat /opt/qwennote/deploy-audit/''' + stamp + '''.nginx-before
 ''')
-    archive = Path('/tmp/qwennote.tar.gz')
+    archive = logs / 'qwennote.tar.gz'
     # Exclude credentials, local data, caches, scratch and macOS metadata as well.
     subprocess.run(['tar', 'czf', str(archive), '--exclude=.git', '--exclude=.venv',
                     '--exclude=data', '--exclude=.scratch', '--exclude=.env', '--exclude=.env.*',
@@ -81,9 +84,11 @@ cat /opt/qwennote/deploy-audit/''' + stamp + '''.nginx-before
            'sha256sum /tmp/qwennote.tar.gz\nmkdir ' + release + '\n' +
            'tar xzf /tmp/qwennote.tar.gz -C ' + release)
     (logs / 'archive.sha256').write_text(digest + '\n')
-    for phase in ('prepare', 'certificate', 'activate'):
+    phases = ('prepare', 'activate') if args.app_only else ('prepare', 'certificate', 'activate')
+    mode = 'QWENNOTE_APP_ONLY=1 ' if args.app_only else ''
+    for phase in phases:
         print('PHASE=' + phase, flush=True)
-        remote(phase, f'bash {release}/scripts/install_release.sh {phase} {release}', timeout=900)
+        remote(phase, f'{mode}bash {release}/scripts/install_release.sh {phase} {release}', timeout=900)
     remote('regression', 'sha256sum -c /opt/qwennote/deploy-audit/' + stamp + '.nginx-before\n' +
            "printf 'MAIN_AFTER='\ncurl --max-time 30 -sS -o /dev/null -w '%{http_code}\\n' https://mingkai.xin/\n" +
            'systemctl is-active dashboard-shell.service\nnginx -t')
