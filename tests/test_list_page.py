@@ -1,5 +1,6 @@
 from datetime import datetime
 from html.parser import HTMLParser
+import re
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
@@ -96,6 +97,43 @@ def test_default_is_shanghai_today_sorted_by_created_time(list_client, add_recor
     assert response.headers['cache-control'] == 'no-store'
 
 
+def test_list_newest_created_at_first_with_descending_id_tiebreaker(list_client, add_recording):
+    # Deliberately insert in an order that differs from both sort keys.
+    add_recording('z-older', '2026-10-28T23:59:00+08:00')
+    add_recording('a-newest', '2026-10-30T00:01:00+08:00')
+    add_recording('a-middle', '2026-10-29T10:14:00+08:00')
+    add_recording('z-newest', '2026-10-30T00:01:00+08:00')
+    add_recording('z-middle', '2026-10-29T10:14:00+08:00')
+    response = list_client.get('/?from=2026-10-28&to=2026-10-30')
+    assert response.status_code == 200
+    assert Page(response.text).cards == [
+        'z-newest', 'a-newest', 'z-middle', 'a-middle', 'z-older',
+    ]
+
+
+def test_list_time_always_includes_month_day_and_hour_minute(list_client, add_recording):
+    add_recording('today-early', '2026-10-29T00:01:00+08:00')
+    add_recording('today-late', '2026-10-29T10:14:00+08:00')
+    add_recording('yesterday', '2026-10-28T23:59:00+08:00')
+    html = list_client.get('/?from=2026-10-28&to=2026-10-29').text
+    times = re.findall(r'<time class="recording-time"[^>]*>([^<]+)</time>', html)
+    assert len(times) == 3
+    assert all(re.fullmatch(r'\d{2}-\d{2} \d{2}:\d{2}', value) for value in times)
+    assert times == ['10-29 10:14', '10-29 00:01', '10-28 23:59']
+
+
+def test_apple_grouped_list_and_dark_mode_markers(list_client):
+    html = list_client.get('/').text
+    assert 'class="recording-list inset-grouped"' in html
+    assert 'class="quick-filters segmented-control"' in html
+    assert 'href="#date"' in html
+    css = list_client.get('/static/app.css').text
+    assert '@media (prefers-color-scheme: dark)' in css
+    assert '.inset-grouped' in css
+    assert '"SF Pro Text"' in css
+    assert 'outline: 2px solid var(--accent)' in css
+
+
 @pytest.mark.parametrize('query,expected', [
     ({'date': '2026-10-28'}, ['day-28']),
     ({'from': '2026-10-27', 'to': '2026-10-28'}, ['day-28', 'day-27']),
@@ -126,7 +164,7 @@ def test_row_metadata_four_states_and_no_recording_bodies(list_client, add_recor
     assert Page(html).badges == {
         'complete': '已转录', 'transcript-only': '仅转写', 'summary-only': '仅总结', 'empty': '未转录',
     }
-    assert '>09:30</time>' in html
+    assert '>10-29 09:30</time>' in html
     assert '18 分</span>' in html and '—' in html
     assert '时间均为笔记创建时间，非录音开始时间' in html
     assert 'SUMMARY_BODY_PRIVATE' not in html and 'TRANSCRIPT_BODY_PRIVATE' not in html

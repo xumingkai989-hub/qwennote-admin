@@ -63,7 +63,7 @@ cp .env.example .env
 
 每页 20 条，由 SQL `COUNT(*)` 与 `LIMIT 20 OFFSET ?` 在同一读事务完成；使用创建时间索引，列表查询只选 ID、标题、创建时间、时长和两个状态标记，不读取或渲染 `summary_md`、`transcript_md`。四态依次为：两者都有→已转录（绿）、仅转写→仅转写（蓝）、仅总结→仅总结（黄）、两者都无→未转录（灰）。时长为 null 时显示“—”，0 显示“0 分钟”。
 
-页面由 Jinja2 渲染，样式集中于 `app/static/app.css`。640px 及以下卡片为单列，较宽屏幕为两列，字号不小于 14px。标题链接到 `/recordings/{id}`；顶部搜索框按回车或点击“搜索”提交 `/search?q=...`。
+页面由 Jinja2 渲染，样式集中于 `app/static/app.css`。普通列表为 inset grouped 单列：桌面显示时间、标题、时长与状态四列，720px 以下每条记录以标题和元信息分行展示；搜索结果卡片在 640px 以下单列，较宽屏幕为两列。整行链接到 `/recordings/{id}`；搜索框按回车或点击“搜索”提交 `/search?q=...`。
 
 ## 数据源
 
@@ -106,9 +106,11 @@ PY
 .venv/bin/python -m pytest -q
 ```
 
-307 项测试通过（包含原有 294 项与本次 13 项身份诊断、多管理员和部署模式测试），其中工单 03 新增 30 项、工单 04 新增 27 项、工单 05 新增 36 项、工单 06 新增 63 项、工单 07 新增 52 项。使用 TestClient、FakeMinutesSource、假 FeishuAuth、临时 SQLite 和 httpx.MockTransport；自动阻断 socket、DNS 及真实 HTTP transport，不需要环境密钥。覆盖已有登录与同步、MCP 握手/JSON/SSE/分页/异常，以及上海跨日默认筛选、指定日期/昨天/含首尾区间、四态与时长、创建时间排序与同时间分页、20/5 分页不重复及筛选保留、空状态、非法参数、正文不进入 HTML、静态 CSS、搜索表单和退出。API 与 CLI 的新增覆盖见下文。保留 Starlette 对 AnyIO 别名的既有弃用警告。
+334 项测试通过（工单 03c 保留原有 331 项，新增 3 项：跨天完整时间、乱序数据的创建时间与 ID 倒序、Apple 分组与深色 CSS 标记）。使用 TestClient、FakeMinutesSource、假 FeishuAuth、临时 SQLite 和 httpx.MockTransport；自动阻断 socket、DNS 及真实 HTTP transport，不需要环境密钥。覆盖已有登录与同步、MCP 握手/JSON/SSE/分页/异常，以及上海跨日默认筛选、指定日期/昨天/含首尾区间、四态与时长、创建时间排序与同时间分页、20/5 分页不重复及筛选保留、空状态、非法参数、正文不进入 HTML、静态 CSS、搜索表单和退出。API 与 CLI 的新增覆盖见下文。保留 Starlette 对 AnyIO 别名的既有弃用警告。
 
-工单 03 在本机 Chrome 对 TestClient 渲染的合成数据页面进行了独立布局检查（不加入 pytest 或项目依赖）：320/375/390px 下卡片单列、1280px 下两列；指定日期、区间、第 2 页与空状态均无横向溢出，实际文字最小 14px。长标题与长用户名也不撑宽页面。该检查不包含真实飞书、千问联调或实体手机。
+工单 03c 使用系统字体和纯 CSS 实现 Apple 风格：34px Large Title 随页面滚出，紧凑品牌栏固定；12px 圆角 inset grouped 列表、44px 桌面行、日期分段控件与四态胶囊徽标；`prefers-color-scheme: dark` 提供独立深色色值。列表时间始终为 `MM-DD HH:MM`，详情保留 `YYYY-MM-DD HH:MM`，时间口径均为笔记创建时间，排序沿用 `created_at DESC, recording_id DESC`。原有日期区间筛选收在可展开的「日期区间」中，选中区间时自动展开。
+
+本机 Chrome 对 TestClient 渲染的跨天合成数据进行了独立布局检查（不加入 pytest 或项目依赖）：1440px 浅色/深色、720px 桌面边界、390px 浅色和 320px 深色均无横向溢出；手机标题最多两行，交互目标至少 44×44px，键盘焦点描边 2px。另核对详情时间、空状态和第 2 页。三张交付截图来自合成数据页面，不包含生产业务数据，也不代表真实飞书、千问联调或实体手机验收。
 
 
 ## 详情与 Markdown 导出（工单 04）
