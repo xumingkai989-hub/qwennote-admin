@@ -59,12 +59,16 @@
       <div class="date-cards">
         {% for card in group['items'] %}
         {% set recording = card.recording %}
+        {% set status, status_label = recording.status %}
         <article class="timeline-card" data-recording-id="{{ recording.recording_id }}">
           <a class="timeline-card-link" href="/recordings/{{ recording.recording_id | urlencode }}{{ detail_query }}">
-            <div class="card-title-row"><h3 class="recording-title" title="{{ recording.title or '未命名录音' }}">{{ recording.title or '未命名录音' }}</h3>{% if not recording.has_transcript %}<span class="badge badge-empty">未转录</span>{% endif %}</div>
+            <div class="card-title-row"><h3 class="recording-title" title="{{ recording.title or '未命名录音' }}">{{ recording.title or '未命名录音' }}</h3></div>
             {% if card.summary %}<p class="card-summary">{{ card.summary }}</p>{% endif %}
             {% if card.duration %}<span class="duration-pill" aria-label="录音时长">录音 · {{ card.duration }}</span>{% endif %}
-            <div class="card-footer"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><time class="recording-time" datetime="{{ recording.created_at.isoformat() }}">{{ recording.created_at.strftime('%H:%M') }} 创建</time></div>
+            <div class="card-footer">
+              <span class="badge badge-{{ status }}">{{ status_label }}</span>
+              <span class="card-created"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><time class="recording-time" datetime="{{ recording.created_at.isoformat() }}">{{ recording.created_at.strftime('%H:%M') }} 创建</time></span>
+            </div>
           </a>
         </article>
         {% endfor %}

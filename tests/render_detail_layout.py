@@ -40,9 +40,10 @@ def render(output):
             transcript = '\n\n'.join(f'[00:0{i}:00.000–00:0{i}:30.000] 发言人 {i % 2 + 1}\n\n{paragraph}\n\n补充说明：继续核对完整内容与段落间距。' for i in range(6))
             for i in range(8):
                 key = f'layout-{i}'
+                has_transcript, has_summary = [(True, True), (False, False), (True, False), (False, True)][i % 4]
                 store.upsert_recording(
                     RecordingMeta(key, '项目例会：页面布局与长文本阅读验收' if i == 0 else f'项目讨论 {i}', datetime(2026, 10, 30-i//3, 12-i, tzinfo=SHANGHAI), 30),
-                    RecordingDetail(key, summary, transcript, True, True), '2026-10-30T12:00:00+08:00',
+                    RecordingDetail(key, summary if has_summary else '', transcript if has_transcript else '', has_transcript, has_summary), '2026-10-30T12:00:00+08:00',
                 )
             for name, url in [('home', '/'), ('summary', '/recordings/layout-0?view=summary'), ('transcript', '/recordings/layout-0?view=transcript')]:
                 response = client.get(url)

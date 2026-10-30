@@ -1,6 +1,7 @@
 from datetime import datetime
 from html.parser import HTMLParser
 import re
+from xml.etree import ElementTree
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
@@ -179,7 +180,8 @@ def test_card_badges_follow_transcript_state_and_only_excerpt_is_rendered(list_c
                       duration=None if recording_id == 'empty' else 18)
     html = list_client.get('/').text
     assert Page(html).badges == {
-        'summary-only': '未转录', 'empty': '未转录',
+        'complete': '已转录', 'transcript-only': '仅转写',
+        'summary-only': '仅总结', 'empty': '未转录',
     }
     assert '>09:30 创建</time>' in html
     assert '录音 · 18分</span>' in html
@@ -419,7 +421,8 @@ def test_no_summary_has_no_empty_paragraph(list_client, store, summary, has_summ
     html = list_client.get('/').text
     assert 'class="card-summary"' not in html
     assert 'class="duration-pill"' not in html
-    assert '10:59 创建' in html and '未转录' in html
+    assert '10:59 创建' in html
+    assert Page(html).badges['empty-preview'] == ('仅总结' if has_summary else '未转录')
 
 
 @pytest.mark.parametrize('minutes,expected', [(None, ''), (0, '0分'), (18, '18分'), (60, '1小时'), (90, '1小时30分')])
@@ -460,3 +463,58 @@ def test_summary_escape_and_no_player_or_tags(list_client, store):
     assert '<p class="card-summary">摘要 &amp; 正文</p>' in html
     assert '录音 · 1小时30分' in html and '10:59 创建' in html
     assert all(value not in html for value in ('onerror', '<audio', '播放', 'tag-chip', '上次同步时间'))
+
+
+@pytest.mark.parametrize('transcript,summary,status,label', [
+    (True, True, 'complete', '已转录'),
+    (True, False, 'transcript-only', '仅转写'),
+    (False, True, 'summary-only', '仅总结'),
+    (False, False, 'empty', '未转录'),
+])
+def test_home_status_badge_and_creation_time_share_footer(
+    list_client, add_recording, transcript, summary, status, label,
+):
+    add_recording('status-card', transcript=transcript, summary=summary)
+    html = list_client.get('/').text
+    card = ElementTree.fromstring(re.search(r'<article\b.*?</article>', html, re.S)[0])
+    link = card.find("./a[@class='timeline-card-link']")
+    footer = link.find("./div[@class='card-footer']")
+    assert footer is not None and list(link)[-1] is footer
+    badge = footer.find(f"./span[@class='badge badge-{status}']")
+    assert badge is not None and badge.text == label
+    assert list(footer)[0] is badge
+    created = footer.find("./span[@class='card-created']")
+    assert created is not None and list(footer)[-1] is created
+    assert created.find("./time[@class='recording-time']").text == '09:30 创建'
+    assert len(card.findall(".//span[@class='badge badge-" + status + "']")) == 1
+    title_row = link.find("./div[@class='card-title-row']")
+    assert title_row.find('./span') is None
+
+
+@pytest.mark.parametrize('status,light_bg,light_text,dark_bg,dark_text', [
+    ('complete', '#E7F7EC', '#1B7F3B', '#1C3A26', '#85D9A0'),
+    ('transcript-only', '#E8F0FF', '#2551A8', '#16233F', '#9BBCFF'),
+    ('summary-only', '#FFF4E5', '#9A5B00', '#3A2A12', '#F5C77E'),
+    ('empty', '#F2F2F7', '#6B6B70', '#2C2C2E', '#AEAEB2'),
+])
+def test_home_status_palette_and_dark_contrast(
+    list_client, status, light_bg, light_text, dark_bg, dark_text,
+):
+    css = list_client.get('/static/app.css').text
+    light = re.search(r'(?m)^\.timeline \{([^}]+)\}', css)[1]
+    dark = re.search(
+        r'@media \(prefers-color-scheme: dark\) \{\s*\.timeline \{([^}]+)\}', css,
+    )[1]
+    for block, bg, text in [(light, light_bg, light_text), (dark, dark_bg, dark_text)]:
+        assert f'--status-{status}-bg: {bg};' in block
+        assert f'--status-{status}-text: {text};' in block
+    rule = re.search(r'\.timeline \.badge-' + status + r' \{([^}]+)\}', css)[1]
+    assert f'background: var(--status-{status}-bg);' in rule
+    assert f'color: var(--status-{status}-text);' in rule
+
+    def luminance(color):
+        channels = [int(color[i:i + 2], 16) / 255 for i in (1, 3, 5)]
+        linear = [v / 12.92 if v <= .04045 else ((v + .055) / 1.055) ** 2.4 for v in channels]
+        return sum(v * weight for v, weight in zip(linear, (.2126, .7152, .0722)))
+
+    assert (luminance(dark_text) + .05) / (luminance(dark_bg) + .05) >= 4.5

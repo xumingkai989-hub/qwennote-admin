@@ -32,6 +32,17 @@ test('home timeline, cards and controls fit desktop/mobile and both color scheme
                 dotY: heading.getBoundingClientRect().y + parseFloat(dot.top) + 4,
                 dotWidth: dot.width, marginTop: getComputedStyle(group).marginTop};
             }),
+            statuses: [...document.querySelectorAll('.timeline-card')].map(card => {
+              const badge = card.querySelector('.badge');
+              const created = card.querySelector('.card-created');
+              const footer = card.querySelector('.card-footer');
+              const b = badge.getBoundingClientRect(), c = created.getBoundingClientRect(), f = footer.getBoundingClientRect();
+              const style = getComputedStyle(badge);
+              return {label: badge.textContent, x: b.x, right: b.right, centerY: b.y + b.height / 2,
+                timeX: c.x, timeRight: c.right, timeCenterY: c.y + c.height / 2, footerX: f.x, footerRight: f.right,
+                background: style.backgroundColor, color: style.color, fontSize: style.fontSize,
+                padding: style.padding, radius: style.borderRadius};
+            }),
             gap: getComputedStyle(document.querySelector('.date-cards')).gap,
             cardBackground: getComputedStyle(document.querySelector('.timeline-card')).backgroundColor,
             cardBorder: getComputedStyle(document.querySelector('.timeline-card')).borderColor,
@@ -43,6 +54,25 @@ test('home timeline, cards and controls fit desktop/mobile and both color scheme
           };
         });
         assert.equal(measurements.scrollWidth, width);
+        const palette = colorScheme === 'dark' ? {
+          '已转录': ['rgb(28, 58, 38)', 'rgb(133, 217, 160)'],
+          '仅转写': ['rgb(22, 35, 63)', 'rgb(155, 188, 255)'],
+          '仅总结': ['rgb(58, 42, 18)', 'rgb(245, 199, 126)'],
+          '未转录': ['rgb(44, 44, 46)', 'rgb(174, 174, 178)'],
+        } : {
+          '已转录': ['rgb(231, 247, 236)', 'rgb(27, 127, 59)'],
+          '仅转写': ['rgb(232, 240, 255)', 'rgb(37, 81, 168)'],
+          '仅总结': ['rgb(255, 244, 229)', 'rgb(154, 91, 0)'],
+          '未转录': ['rgb(242, 242, 247)', 'rgb(107, 107, 112)'],
+        };
+        assert.deepEqual(new Set(measurements.statuses.map(s => s.label)), new Set(Object.keys(palette)));
+        for (const status of measurements.statuses) {
+          assert.deepEqual([status.background, status.color], palette[status.label]);
+          assert.equal(status.fontSize, '12px'); assert.equal(status.padding, '3px 8px'); assert.equal(status.radius, '999px');
+          assert.equal(status.x, status.footerX); assert.equal(status.timeRight, status.footerRight);
+          assert.ok(status.right < status.timeX); assert.equal(status.centerY, status.timeCenterY);
+        }
+
         assert.equal(measurements.button.width, 44); assert.equal(measurements.button.height, 44);
         assert.equal(measurements.frame.width, Math.min(width, 1120));
         assert.equal(measurements.card.x - measurements.list.x, 20);
