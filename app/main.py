@@ -18,7 +18,7 @@ from app.feishu import FeishuAuth, FeishuAuthError, HttpFeishuAuth
 from app.home_presentation import date_groups
 from app.minutes import FixtureMinutesSource, HttpMinutesSource, MinutesSource, SHANGHAI
 from app.public_api import install_public_api
-from app.recording_content import (download_disposition, export_markdown, render_summary,
+from app.recording_content import (apply_recording_hotwords, download_disposition, export_markdown, render_summary,
                                    transcript_segments, transcript_presentation)
 from app.search import search_snippets
 from app.session import SESSION_MAX_AGE, STATE_MAX_AGE, SignedCookie
@@ -259,6 +259,7 @@ def create_app(
         recording, error = recording_for_request(request, store, recording_id)
         if error is not None:
             return error
+        recording = apply_recording_hotwords(recording, store.apply_hotwords)
         return Response(export_markdown(recording), media_type='text/markdown', headers={
             'Content-Disposition': download_disposition(recording.title),
             'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff',
@@ -282,6 +283,8 @@ def create_app(
         view = request.query_params.get('view', default_view)
         if view not in ('summary', 'transcript'):
             view = default_view
+        recording = apply_recording_hotwords(
+            recording, lambda text: store.apply_hotwords(text, markdown=view != 'transcript'), fields=(view,))
         return templates.TemplateResponse(request=request, name='detail.html', context={
             'title': recording.title or '未命名录音', 'recording': recording, 'back_url': back_url,
             'view': view,

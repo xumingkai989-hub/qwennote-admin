@@ -16,14 +16,14 @@ def install_admin(app: FastAPI, *, settings: Settings, templates: Jinja2Template
                   sessions: SignedCookie, error_page, login_redirect) -> None:
     csrf = SignedCookie(settings.session_secret, salt='admin-csrf', max_age=SESSION_MAX_AGE)
 
-    def authorize(request: Request):
+    def authorize(request: Request, *, message='仅管理员可以管理白名单。'):
         open_id = sessions.decode(request.cookies.get('session'))
         if open_id is None:
             return login_redirect()
         user = app.state.store.get_user(open_id)
         if user is None or not user.is_active or not set(settings.admin_open_ids).intersection(
                 (user.subject, user.union_id, user.open_id)):
-            return error_page(request, 403, '无访问权限', '仅管理员可以管理白名单。')
+            return error_page(request, 403, '无访问权限', message)
         return None
 
     def session_binding(request: Request) -> str:
@@ -59,6 +59,11 @@ def install_admin(app: FastAPI, *, settings: Settings, templates: Jinja2Template
     install_assistant(app, settings=settings, templates=templates, sessions=sessions,
                       authorize=authorize, valid_csrf=valid_csrf, csrf=csrf,
                       session_binding=session_binding, parse_form=parse_form, error_page=error_page)
+
+    from app.hotword_admin import install_hotwords
+    install_hotwords(app, settings=settings, templates=templates, sessions=sessions,
+                     authorize=authorize, valid_csrf=valid_csrf, csrf=csrf,
+                     session_binding=session_binding, parse_form=parse_form, error_page=error_page)
 
     @app.get('/admin')
     def admin(request: Request):

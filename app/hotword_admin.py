@@ -1,0 +1,84 @@
+"""Small administrator interface sharing the session-bound admin CSRF boundary."""
+import secrets
+import sqlite3
+
+from fastapi import Request
+from fastapi.responses import RedirectResponse
+from starlette.concurrency import run_in_threadpool
+
+from app.session import SESSION_MAX_AGE
+from app.hotwords import validate_hotword
+
+
+def install_hotwords(app, *, settings, templates, sessions, authorize, valid_csrf,
+                     csrf, session_binding, parse_form, error_page):
+    def access(request):
+        if sessions.decode(request.cookies.get('session')) is None:
+            return error_page(request, 403, '无访问权限', '仅管理员可以管理热词。')
+        return authorize(request, message='仅管理员可以管理热词。')
+
+    def render(request, *, error='', status=200, draft=None):
+        token = request.cookies.get('admin_csrf', '')
+        if not valid_csrf(request, token):
+            token = csrf.encode(session_binding(request) + ':' + secrets.token_urlsafe(32))
+        response = templates.TemplateResponse(request=request, name='hotwords.html', context={
+            'title': '热词中心', 'hotwords': app.state.store.list_hotwords(),
+            'csrf_token': token, 'error': error, 'draft': draft or {},
+        }, status_code=status, headers={'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer'})
+        response.set_cookie('admin_csrf', token, max_age=SESSION_MAX_AGE, httponly=True,
+                            secure=settings.secure_cookies, samesite='lax', path='/hotwords')
+        return response
+
+    @app.get('/hotwords')
+    def hotwords(request: Request):
+        denied = access(request)
+        return denied if denied is not None else render(request)
+
+    async def mutate(request, action, hotword_id=None):
+        denied = access(request)
+        if denied is not None:
+            return denied
+        fields = await parse_form(request, max_bytes=32768)
+        if not isinstance(fields, dict):
+            return fields
+        values = {name: fields.get(name, [''])[0].strip() for name in ('source', 'target', 'note')}
+        if action in ('add', 'update'):
+            try:
+                validate_hotword(**values)
+            except ValueError:
+                return render(request, error='原词和替换词不能为空，须为单行；最多分别为 200、500 字，备注最多 1000 字。',
+                              status=400, draft=values if action == 'add' else None)
+        store = app.state.store
+
+        def apply():
+            if action == 'add':
+                store.add_hotword(**values)
+                return True
+            if action == 'update':
+                return store.update_hotword(hotword_id, **values)
+            return getattr(store, action + '_hotword')(hotword_id)
+
+        try:
+            found = await run_in_threadpool(apply)
+        except sqlite3.IntegrityError:
+            return render(request, error='原词已存在，请编辑已有热词。', status=409,
+                          draft=values if action == 'add' else None)
+        if not found:
+            return render(request, error='热词不存在，请刷新后重试。', status=404)
+        return RedirectResponse('/hotwords', status_code=303, headers={'Cache-Control': 'no-store'})
+
+    @app.post('/hotwords')
+    async def add(request: Request):
+        return await mutate(request, 'add')
+
+    @app.post('/hotwords/{hotword_id}/update')
+    async def update(request: Request, hotword_id: int):
+        return await mutate(request, 'update', hotword_id)
+
+    @app.post('/hotwords/{hotword_id}/delete')
+    async def delete(request: Request, hotword_id: int):
+        return await mutate(request, 'delete', hotword_id)
+
+    @app.post('/hotwords/{hotword_id}/toggle')
+    async def toggle(request: Request, hotword_id: int):
+        return await mutate(request, 'toggle', hotword_id)

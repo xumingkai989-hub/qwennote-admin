@@ -72,7 +72,31 @@ class ApiKey:
     last_used_at: str | None
 
 
+@dataclass(frozen=True)
+class Hotword:
+    id: int
+    source: str
+    target: str
+    note: str
+    enabled: bool
+    hits: int
+    created_at: str
+    updated_at: str
+
+
 class Store(SyncStore, Protocol):
+    def apply_hotwords(self, text: str, *, markdown: bool = True) -> str: ...
+
+    def list_hotwords(self) -> list[Hotword]: ...
+
+    def add_hotword(self, source: str, target: str, note: str = '') -> None: ...
+
+    def update_hotword(self, hotword_id: int, source: str, target: str, note: str) -> bool: ...
+
+    def delete_hotword(self, hotword_id: int) -> bool: ...
+
+    def toggle_hotword(self, hotword_id: int) -> bool: ...
+
     def create_api_key(self, name: str, key_hash: str) -> ApiKey: ...
 
     def list_api_keys(self) -> list[ApiKey]: ...
@@ -174,6 +198,23 @@ class SQLiteStore:
                     path TEXT NOT NULL,
                     status_code INTEGER NOT NULL,
                     at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS hotwords (
+                    id INTEGER PRIMARY KEY,
+                    source TEXT NOT NULL UNIQUE,
+                    target TEXT NOT NULL,
+                    note TEXT NOT NULL DEFAULT '',
+                    enabled INTEGER NOT NULL DEFAULT 1,
+                    hits INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS recording_overrides (
+                    recording_id TEXT NOT NULL,
+                    field TEXT NOT NULL CHECK (field IN ('summary','transcript')),
+                    content_md TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY (recording_id, field)
                 );
             """)
             # Rebuild the legacy primary key atomically. Its ID type is unknown:
@@ -286,6 +327,48 @@ class SQLiteStore:
             UPDATE recordings SET search_text =
                 coalesce(title, '') || char(10) || coalesce(summary_md, '') || char(10) || coalesce(transcript_md, '')
         """)
+
+    def list_hotwords(self) -> list[Hotword]:
+        with self._connect() as conn:
+            return [Hotword(**{**dict(row), 'enabled': bool(row['enabled'])}) for row in conn.execute(
+                'SELECT * FROM hotwords ORDER BY length(source) DESC, id')]
+
+    def add_hotword(self, source: str, target: str, note: str = '') -> None:
+        from app.hotwords import validate_hotword
+        validate_hotword(source, target, note)
+        now = datetime.now(timezone.utc).isoformat()
+        with self._connect() as conn:
+            conn.execute('INSERT INTO hotwords (source, target, note, created_at, updated_at) '
+                         'VALUES (?, ?, ?, ?, ?)', (source, target, note, now, now))
+
+    def update_hotword(self, hotword_id: int, source: str, target: str, note: str) -> bool:
+        from app.hotwords import validate_hotword
+        validate_hotword(source, target, note)
+        with self._connect() as conn:
+            return conn.execute('UPDATE hotwords SET source=?, target=?, note=?, updated_at=? WHERE id=?',
+                                (source, target, note, datetime.now(timezone.utc).isoformat(), hotword_id)).rowcount > 0
+
+    def delete_hotword(self, hotword_id: int) -> bool:
+        with self._connect() as conn:
+            return conn.execute('DELETE FROM hotwords WHERE id=?', (hotword_id,)).rowcount > 0
+
+    def toggle_hotword(self, hotword_id: int) -> bool:
+        with self._connect() as conn:
+            return conn.execute('UPDATE hotwords SET enabled=1-enabled, updated_at=? WHERE id=?',
+                                (datetime.now(timezone.utc).isoformat(), hotword_id)).rowcount > 0
+
+    def apply_hotwords(self, text: str, *, markdown: bool = True) -> str:
+        from app.hotwords import HotwordApplier
+        rules = [row for row in self.list_hotwords() if row.enabled]
+        if not text or not rules:
+            return text
+        applier = HotwordApplier(rules)
+        result = applier.apply_hotwords(text, markdown=markdown)
+        if applier.hits:
+            with self._connect() as conn:
+                conn.executemany('UPDATE hotwords SET hits=hits+? WHERE id=?',
+                                 [(count, hotword_id) for hotword_id, count in applier.hits.items()])
+        return result
 
     def rebuild_search(self) -> None:
         self.migrate()

@@ -10,10 +10,10 @@
     <button id="navigation-close" class="navigation-button" type="button" aria-label="关闭导航"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M6 18 18 6"/></svg></button>
   </div>
   <nav id="sidebar-links">
-    {% for href, label, icon in [('/', '会议', 'meeting'), ('/search', '搜索', 'search'), ('/assistant', 'AI 助手配置', 'assistant')] %}
-    {% if icon != 'assistant' or navigation_admin %}
+    {% for href, label, icon in [('/', '会议', 'meeting'), ('/search', '搜索', 'search'), ('/hotwords', '热词中心', 'hotwords'), ('/assistant', 'AI 助手配置', 'assistant')] %}
+    {% if icon in ('meeting', 'search') or navigation_admin %}
     <a class="navigation-link" href="{{ href }}" aria-label="{{ label }}" data-label="{{ label }}"{% if request.url.path == href or (href == '/' and request.url.path.startswith('/recordings/')) %} aria-current="page"{% endif %}>
-      <svg viewBox="0 0 24 24" aria-hidden="true">{% if icon == 'meeting' %}<rect x="3" y="4" width="18" height="16" rx="3"/><path d="M3 9h18M8 2v4M16 2v4M7 13h3M7 16h7"/>{% elif icon == 'search' %}<circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/>{% else %}<path d="m12 3 2.6 6.4L21 12l-6.4 2.6L12 21l-2.6-6.4L3 12l6.4-2.6Z"/>{% endif %}</svg>
+      <svg viewBox="0 0 24 24" aria-hidden="true">{% if icon == 'meeting' %}<rect x="3" y="4" width="18" height="16" rx="3"/><path d="M3 9h18M8 2v4M16 2v4M7 13h3M7 16h7"/>{% elif icon == 'search' %}<circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/>{% elif icon == 'hotwords' %}<path d="M4 5h10M9 3v2M6 5c0 6 6 9 8 9M12 5c0 6-6 9-8 9M14 21l4-10 4 10M15.5 17h5"/>{% else %}<path d="m12 3 2.6 6.4L21 12l-6.4 2.6L12 21l-2.6-6.4L3 12l6.4-2.6Z"/>{% endif %}</svg>
       <span class="navigation-label" data-label="{{ label }}">{{ label }}</span>
     </a>
     {% endif %}

@@ -2,6 +2,8 @@
 import hashlib
 import json
 import re
+from dataclasses import replace
+from collections.abc import Callable
 from urllib.parse import quote
 
 from app.store import StoredRecording
@@ -24,6 +26,15 @@ SPEAKER_PALETTE = (
     ('#F0EDE6', '#665B43', '#D0C5AC'),
     ('#EEEAFE', '#57469B', '#BEB3EF'),
 )
+
+
+def apply_recording_hotwords(recording: StoredRecording, apply_hotwords: Callable[[str], str],
+                            *, fields=('summary', 'transcript')) -> StoredRecording:
+    """Project only requested bodies; never write the original recording back."""
+    return replace(recording, **{
+        field + '_md': apply_hotwords(getattr(recording, field + '_md'))
+        for field in fields if getattr(recording, 'has_' + field)
+    })
 
 
 def format_offset(milliseconds: int) -> str:

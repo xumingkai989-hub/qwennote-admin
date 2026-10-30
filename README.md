@@ -411,3 +411,15 @@ systemctl list-timers --all qwennote-tag-maintenance.timer
 离线测试新增 41 项，覆盖归一化、迁移幂等、使用量与 id 决胜、录音改写去重、语义建议与 null 去重、认证缺失/异常重试、接受/拒绝/合并链、提示词原文与空词表、事务回滚及调度合同。沿用全套测试的网络阻断 fixture；原有测试不删除。
 
 本次全量离线验收：**527 项 Python + 19 项 JavaScript 通过**（原有 486 项 Python 保留，新增 41 项；仅更新启动测试的必需表名单）。部署与首次实际维护结果单独保存到仓库外 `../qwennote-admin-artifacts/tags-08-20261030/`，不公开业务数据。
+
+### 热词中心（工单 10）
+
+管理员可从左侧「热词中心」进入 `/hotwords`，新增、编辑、删除或启停原词与替换词，查看累计命中次数。四个 POST 接口均复用管理员鉴权和会话绑定的 CSRF；原词、替换词和备注只接受单行文本，长度上限分别为 200、500、1000 字。
+
+详情总结、详情转写、`.md` 导出、单条录音 API 的两个正文和 daily Markdown 都通过 `SQLiteStore.apply_hotwords()` 替换。`apply_recording_hotwords()` 只复制需要展示的字段，不写回 `recordings`；停用或删除规则后立即恢复原文。标题、列表、搜索索引和 daily JSON 的元信息不替换。
+
+规则按原词长度降序、ID 升序组成转义后的正则分支，忽略英文大小写；单次 `re.sub` 的回调直接返回目标词，替换结果不会再进入匹配。保留 Markdown 的结构标记、代码及链接目的地，只替换正文与链接标签；目标词中的 Markdown 特殊符号按纯文本转义。转写页使用同一函数的 `markdown=False` 输出纯文本，其匹配、保护区域和计数逻辑相同。
+
+每次实际处理正文时按各规则的匹配次数，用 `hits=hits+?` 原子累加；详情页只计算当前选中视图，下载和两个正文 API 分别计算总结及转写。刷新或重复导出会继续累加。新增 `recording_overrides` 表仅供后续编辑功能使用，本单不读写覆盖内容。
+
+离线测试位于 `tests/test_hotwords.py`；全套继续启用 `tests/conftest.py` 的网络阻断。启动迁移测试只在必需表白名单中加入 `hotwords` 和 `recording_overrides`，保留禁止额外建表、FTS、原始字段和管理员初始化的断言。部署使用 `python3 scripts/deploy.py --app-only`，不修改 nginx 或其他站点。

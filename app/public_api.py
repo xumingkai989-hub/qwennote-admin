@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse, Response
 from starlette.concurrency import run_in_threadpool
 
 from app.store import RecordingCard, StoredRecording
+from app.recording_content import apply_recording_hotwords
 
 
 def parse_date(value: str) -> date:
@@ -117,6 +118,7 @@ def install_public_api(app: FastAPI) -> None:
         item = request.app.state.store.get_recording(recording_id)
         if item is None:
             raise HTTPException(404, 'recording not found')
+        item = apply_recording_hotwords(item, request.app.state.store.apply_hotwords)
         return {**recording_item(item), 'summary_md': item.summary_md, 'transcript_md': item.transcript_md}
 
     @router.get('/daily/{day}')
@@ -127,7 +129,9 @@ def install_public_api(app: FastAPI) -> None:
             raise HTTPException(400, 'invalid parameters')
         batch = request.app.state.store.read_recordings(selected, selected, limit=None)
         if format == 'md':
-            return Response(daily_markdown(day, batch.items), media_type='text/markdown')
+            items = [apply_recording_hotwords(item, request.app.state.store.apply_hotwords)
+                     for item in batch.items]
+            return Response(daily_markdown(day, items), media_type='text/markdown')
         return {'date': day, 'count': batch.total, 'recordings': [recording_item(item) for item in batch.items]}
 
     @router.get('/search')

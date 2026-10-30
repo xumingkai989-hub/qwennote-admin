@@ -329,6 +329,15 @@ mark { background: var(--mark); color: var(--text); border-radius: 2px; }
 }
 
 /* Persistent navigation shares the remaining viewport with every page. */
+.hotword-form { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; }
+.hotword-form label { display: grid; gap: 6px; flex: 1 1 180px; min-width: 0; font-size: 14px; }
+.hotword-form input { width: 100%; min-width: 0; }
+.hotwords-table { min-width: 680px; }
+.hotwords-scroll-note { display: none; }
+.hotwords-table td, .hotwords-table th { overflow-wrap: anywhere; }
+.hotwords-table summary { min-height: 44px; padding: 12px 8px; cursor: pointer; white-space: nowrap; }
+.hotword-edit { min-width: 200px; max-width: 300px; margin-block: 12px; }
+.hotword-edit label { flex-basis: 100%; }
 .has-navigation { --sidebar-width: 220px; }
 .has-navigation.navigation-collapsed { --sidebar-width: 64px; }
 .has-navigation .page-content { margin-left: var(--sidebar-width); }
@@ -390,5 +399,6 @@ p.assistant-note { margin: 12px 0 0; }
   .assistant-heading { padding-top: 24px; }
   .assistant-heading h1 { font-size: 28px; }
   .assistant-section { padding: 18px 16px; }
+  .hotwords-scroll-note { display: block; margin-bottom: 12px; }
   .proposal-list li { flex-wrap: wrap; }
 }
