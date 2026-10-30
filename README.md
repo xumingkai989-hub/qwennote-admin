@@ -423,3 +423,20 @@ systemctl list-timers --all qwennote-tag-maintenance.timer
 每次实际处理正文时按各规则的匹配次数，用 `hits=hits+?` 原子累加；详情页只计算当前选中视图，下载和两个正文 API 分别计算总结及转写。刷新或重复导出会继续累加。新增 `recording_overrides` 表仅供后续编辑功能使用，本单不读写覆盖内容。
 
 离线测试位于 `tests/test_hotwords.py`；全套继续启用 `tests/conftest.py` 的网络阻断。启动迁移测试只在必需表白名单中加入 `hotwords` 和 `recording_overrides`，保留禁止额外建表、FTS、原始字段和管理员初始化的断言。部署使用 `python3 scripts/deploy.py --app-only`，不修改 nginx 或其他站点。
+
+
+### 内容编辑与热词建议（工单 11）
+
+详情总结和转写右上角的「编辑」仅管理员可见。正文切换为等宽 textarea（行高 1.6、最小高度 360px），保存或取消。保存只 upsert `recording_overrides(recording_id, field, content_md, updated_at)`，不会修改基础录音、搜索索引或自动创建热词。手动内容优先于同步内容和热词替换，详情、Markdown 导出、单条正文 API 与 daily Markdown 保持一致。空内容也是有效 override；两字段独立保存和还原。顶部显示上海时间编辑痕迹，管理员可一键删除该字段 override，恢复最新同步内容及现有热词规则。同步仍只更新基础表。
+
+- `POST /recordings/{id}/edit`：URL 编码 `field=summary|transcript`、`content`、`csrf_token`（也接受 `csrf`）；返回 `saved/updated_at/edited_at/suggestions` JSON。
+- `POST /recordings/{id}/revert`：相同鉴权与 CSRF，提交 `field`，幂等删除该字段 override。
+- `POST /hotwords/bulk`：相同鉴权与 CSRF，`items` 是 1–3 条 `{source,target}` 的 JSON 数组字符串；事务内插入，按 source 唯一约束跳过，返回 `added/existing/message`。只有弹层中明确点击「存入选中的 N 条」才发送此请求。
+
+复用原有会话绑定签名 CSRF、表单解析与管理员判定。详情使用独立的 `recording_csrf` HttpOnly cookie（根路径），避免 `/admin`、`/hotwords`、`/assistant` 的同名局部 cookie 互相遮蔽；不是新的鉴权机制。非管理员直接 POST 返回 403。正文上限 200000 字。
+
+保存成功后，以当前实际展示文本（前一 override 或应用现有热词后的同步内容）和新文本运行标准库 `difflib.SequenceMatcher` 字符级比较；先裁去相同首尾，关闭 autojunk，避免重复汉字吞掉修改。只取 replace/insert；过滤仅改变空白或 Unicode 标点的片段，取两侧各至多 6 字上下文形成 source/target。上下文遇换行或制表符截止；不符合热词单行及长度约束的片段跳过，去重后最多 3 条。删除片段不建议，纯标点/空格修改不弹层。没有可替换原词的空文档新增也不建议。建议默认全选，支持取消部分、全不选、「不用了」和 Escape；热词失败不撤销正文保存。
+
+本单验收 **749 项 Python + 19 项 JavaScript 通过**，新增 59 项 Python 用例；4 组浏览器场景通过。离线回归：`.venv/bin/python -m pytest -q`（原 690 项全部保留）；`node --test tests/detail_interactions.cjs tests/home_interactions.cjs`。本地浏览器验收先运行 `.venv/bin/python tests/recording_edit_preview.py`，再用本机 Playwright / Chrome 运行 `node --test tests/recording_edit_browser.cjs`（环境变量 `PLAYWRIGHT_MODULE`、`CHROME_PATH` 指定已安装依赖）。预览仅绑定 127.0.0.1，合成数据库退出即删，浏览器阻断所有外部 URL；覆盖总结/转写、取消、保存失败重试、勾选数量、忽略询问、批量失败重试、还原与纯标点不询问，以及 1440/390/320px 浅深色截图。
+
+发布沿用 `python3 scripts/deploy.py --app-only`，不改 nginx 或其他站点。验收报告、截图和部署日志放仓库外 `../qwennote-admin-artifacts/edit-11-20261030/`；不公开业务资料。

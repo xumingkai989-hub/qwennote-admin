@@ -18,7 +18,7 @@ test('home and padded detail cards share the same frame without content overflow
         await page.goto(pathToFileURL(path.join(directory, name + '.html')).href);
         await page.evaluate(() => document.fonts.ready);
         row[name] = await page.evaluate(name => {
-          const selector = name === 'home' ? '.recording-list' : '.detail-section';
+          const selector = name === 'home' ? '.recording-list' : '#detail-display .detail-section';
           const element = document.querySelector(selector);
           const {x, width} = element.getBoundingClientRect();
           const body = document.querySelector(name === 'summary' ? '.markdown-body p' : '.transcript-body');
@@ -71,7 +71,7 @@ test('home and padded detail cards share the same frame without content overflow
               document.querySelector('.transcript-paragraph').textContent += '\n' + word + '\n' + url;
               document.querySelector('.speaker-name').textContent = word;
             }
-            const card = document.querySelector('.detail-section');
+            const card = document.querySelector('#detail-display .detail-section');
             const bounds = card.getBoundingClientRect(), style = getComputedStyle(card);
             const left = bounds.left + parseFloat(style.paddingLeft), right = bounds.right - parseFloat(style.paddingRight);
             const selectors = name === 'summary' ? '.markdown-body p, .markdown-body pre, .summary-table, .markdown-body table, .markdown-body blockquote, .markdown-body ul, .markdown-body ol, .markdown-body li' : '.transcript-body, .transcript-paragraph, .speaker-name';

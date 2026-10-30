@@ -12,6 +12,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Resp
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+from app.recording_edit import EDIT_COOKIE, edit_timestamp
 from app.admin import install_admin
 from app.config import Settings
 from app.feishu import FeishuAuth, FeishuAuthError, HttpFeishuAuth
@@ -177,7 +178,7 @@ def create_app(
         response.headers["Cache-Control"] = "no-store"
         return response
 
-    install_admin(app, settings=settings, templates=templates, sessions=sessions,
+    edit_token = install_admin(app, settings=settings, templates=templates, sessions=sessions,
                   error_page=error_page, login_redirect=login_redirect)
 
     @app.get('/search', response_class=HTMLResponse)
@@ -259,7 +260,8 @@ def create_app(
         recording, error = recording_for_request(request, store, recording_id)
         if error is not None:
             return error
-        recording = apply_recording_hotwords(recording, store.apply_hotwords)
+        recording = apply_recording_hotwords(recording, store.apply_hotwords,
+                                            overrides=store.get_overrides(recording_id))
         return Response(export_markdown(recording), media_type='text/markdown', headers={
             'Content-Disposition': download_disposition(recording.title),
             'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff',
@@ -279,19 +281,28 @@ def create_app(
                 {**params, **filters['params'], 'page': filters['page']})
         except ValueError:
             back_url = '/'
+        overrides = store.get_overrides(recording_id)
+        recording = apply_recording_hotwords(recording, store.apply_hotwords, fields=(), overrides=overrides)
         default_view = 'summary' if recording.has_summary or not recording.has_transcript else 'transcript'
         view = request.query_params.get('view', default_view)
         if view not in ('summary', 'transcript'):
             view = default_view
         recording = apply_recording_hotwords(
-            recording, lambda text: store.apply_hotwords(text, markdown=view != 'transcript'), fields=(view,))
-        return templates.TemplateResponse(request=request, name='detail.html', context={
+            recording, lambda text: store.apply_hotwords(text, markdown=view != 'transcript'), fields=(view,), overrides=overrides)
+        can_edit = navigation_context(request)['navigation_admin']
+        token = edit_token(request) if can_edit else ''
+        response = templates.TemplateResponse(request=request, name='detail.html', context={
             'title': recording.title or '未命名录音', 'recording': recording, 'back_url': back_url,
-            'view': view,
+            'view': view, 'can_edit': can_edit, 'edit_csrf': token,
+            'edit_content': getattr(recording, view + '_md') if getattr(recording, 'has_' + view) else '',
+            'edited_at': edit_timestamp(overrides[view]['updated_at']) if view in overrides else None,
             'view_urls': {name: request.url.include_query_params(view=name) for name in ('summary', 'transcript')},
             'summary_html': render_summary(recording.summary_md) if view == 'summary' and recording.has_summary else None,
             'segments': transcript_presentation(transcript_segments(recording.transcript_md)) if view == 'transcript' and recording.has_transcript else [],
         }, headers={'Cache-Control': 'no-store'})
+        if can_edit:
+            set_cookie(response, EDIT_COOKIE, token, SESSION_MAX_AGE)
+        return response
 
     @app.post('/auth/logout')
     def logout(request: Request):

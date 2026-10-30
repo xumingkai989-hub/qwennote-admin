@@ -85,6 +85,14 @@ class Hotword:
 
 
 class Store(SyncStore, Protocol):
+    def get_overrides(self, recording_id: str) -> dict[str, dict]: ...
+
+    def save_override(self, recording_id: str, field: str, content: str) -> str: ...
+
+    def revert_override(self, recording_id: str, field: str) -> None: ...
+
+    def bulk_add_hotwords(self, items: list[dict]) -> dict[str, int]: ...
+
     def apply_hotwords(self, text: str, *, markdown: bool = True) -> str: ...
 
     def list_hotwords(self) -> list[Hotword]: ...
@@ -332,6 +340,47 @@ class SQLiteStore:
         with self._connect() as conn:
             return [Hotword(**{**dict(row), 'enabled': bool(row['enabled'])}) for row in conn.execute(
                 'SELECT * FROM hotwords ORDER BY length(source) DESC, id')]
+
+    def get_overrides(self, recording_id: str) -> dict[str, dict]:
+        with self._connect() as conn:
+            return {row['field']: dict(row) for row in conn.execute(
+                'SELECT field, content_md, updated_at FROM recording_overrides WHERE recording_id=?',
+                (recording_id,))}
+
+    def save_override(self, recording_id: str, field: str, content: str) -> str:
+        if field not in ('summary', 'transcript'):
+            raise ValueError('Invalid recording field')
+        now = datetime.now(timezone.utc).isoformat()
+        with self._connect() as conn:
+            conn.execute('BEGIN IMMEDIATE')
+            if not conn.execute('SELECT 1 FROM recordings WHERE recording_id=?', (recording_id,)).fetchone():
+                raise ValueError('Recording not found')
+            conn.execute('INSERT INTO recording_overrides (recording_id, field, content_md, updated_at) '
+                         'VALUES (?, ?, ?, ?) ON CONFLICT(recording_id, field) DO UPDATE SET '
+                         'content_md=excluded.content_md, updated_at=excluded.updated_at',
+                         (recording_id, field, content, now))
+        return now
+
+    def revert_override(self, recording_id: str, field: str) -> None:
+        if field not in ('summary', 'transcript'):
+            raise ValueError('Invalid recording field')
+        with self._connect() as conn:
+            conn.execute('DELETE FROM recording_overrides WHERE recording_id=? AND field=?', (recording_id, field))
+
+    def bulk_add_hotwords(self, items: list[dict]) -> dict[str, int]:
+        from app.hotwords import validate_hotword
+        for item in items:
+            validate_hotword(item['source'], item['target'])
+        now = datetime.now(timezone.utc).isoformat()
+        added = 0
+        with self._connect() as conn:
+            conn.execute('BEGIN IMMEDIATE')
+            for item in items:
+                added += conn.execute(
+                    'INSERT INTO hotwords (source,target,created_at,updated_at) VALUES (?,?,?,?) '
+                    'ON CONFLICT(source) DO NOTHING',
+                    (item['source'], item['target'], now, now)).rowcount
+        return {'added': added, 'existing': len(items) - added}
 
     def add_hotword(self, source: str, target: str, note: str = '') -> None:
         from app.hotwords import validate_hotword

@@ -29,12 +29,15 @@ SPEAKER_PALETTE = (
 
 
 def apply_recording_hotwords(recording: StoredRecording, apply_hotwords: Callable[[str], str],
-                            *, fields=('summary', 'transcript')) -> StoredRecording:
-    """Project only requested bodies; never write the original recording back."""
-    return replace(recording, **{
-        field + '_md': apply_hotwords(getattr(recording, field + '_md'))
-        for field in fields if getattr(recording, 'has_' + field)
-    })
+                            *, fields=('summary', 'transcript'), overrides=None) -> StoredRecording:
+    """Project overrides and hotwords onto a copy; never write the original back."""
+    changes = {}
+    for field, item in (overrides or {}).items():
+        changes.update({field + '_md': item['content_md'], 'has_' + field: bool(item['content_md'].strip())})
+    for field in fields:
+        if not (overrides and field in overrides) and getattr(recording, 'has_' + field):
+            changes[field + '_md'] = apply_hotwords(getattr(recording, field + '_md'))
+    return replace(recording, **changes)
 
 
 def format_offset(milliseconds: int) -> str:

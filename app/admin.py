@@ -1,6 +1,7 @@
 import hashlib
 import re
 import secrets
+from collections.abc import Callable
 from urllib.parse import parse_qs
 
 from fastapi import FastAPI, Request
@@ -13,7 +14,7 @@ from app.session import SESSION_MAX_AGE, SignedCookie
 
 
 def install_admin(app: FastAPI, *, settings: Settings, templates: Jinja2Templates,
-                  sessions: SignedCookie, error_page, login_redirect) -> None:
+                  sessions: SignedCookie, error_page, login_redirect) -> Callable[[Request], str]:
     csrf = SignedCookie(settings.session_secret, salt='admin-csrf', max_age=SESSION_MAX_AGE)
 
     def authorize(request: Request, *, message='仅管理员可以管理白名单。'):
@@ -30,14 +31,14 @@ def install_admin(app: FastAPI, *, settings: Settings, templates: Jinja2Template
         # Bind to a digest so the form token never carries the session itself.
         return hashlib.sha256(request.cookies.get('session', '').encode()).hexdigest()
 
-    def valid_csrf(request: Request, token: str) -> bool:
-        cookie = request.cookies.get('admin_csrf', '')
+    def valid_csrf(request: Request, token: str, *, cookie_name='admin_csrf') -> bool:
+        cookie = request.cookies.get(cookie_name, '')
         value = csrf.decode(cookie)
         return bool(token and cookie and value
                     and secrets.compare_digest(token.encode(), cookie.encode())
                     and value.startswith(session_binding(request) + ':'))
 
-    async def parse_form(request: Request, *, max_bytes=16384):
+    async def parse_form(request: Request, *, max_bytes=16384, cookie_name='admin_csrf'):
         # Native HTML forms use URL encoding; no multipart dependency or JSON
         # fallback. Reject duplicate fields, including ambiguous CSRF values.
         try:
@@ -51,7 +52,9 @@ def install_admin(app: FastAPI, *, settings: Settings, templates: Jinja2Template
                 raise ValueError
         except (ValueError, UnicodeError):
             return error_page(request, 403, '请求无效', 'CSRF 校验失败，请刷新管理页后重试。')
-        if not valid_csrf(request, fields.get('csrf_token', [''])[0]):
+        if 'csrf' in fields and 'csrf_token' in fields:
+            return error_page(request, 403, '请求无效', 'CSRF 校验失败，请刷新后重试。')
+        if not valid_csrf(request, fields.get('csrf_token', fields.get('csrf', ['']))[0], cookie_name=cookie_name):
             return error_page(request, 403, '请求无效', 'CSRF 校验失败，请刷新管理页后重试。')
         return fields
 
@@ -64,6 +67,11 @@ def install_admin(app: FastAPI, *, settings: Settings, templates: Jinja2Template
     install_hotwords(app, settings=settings, templates=templates, sessions=sessions,
                      authorize=authorize, valid_csrf=valid_csrf, csrf=csrf,
                      session_binding=session_binding, parse_form=parse_form, error_page=error_page)
+
+    from app.recording_edit import install_recording_edit
+    edit_token = install_recording_edit(app, sessions=sessions, authorize=authorize, csrf=csrf,
+                                       valid_csrf=valid_csrf, session_binding=session_binding,
+                                       parse_form=parse_form)
 
     @app.get('/admin')
     def admin(request: Request):
@@ -114,3 +122,5 @@ def install_admin(app: FastAPI, *, settings: Settings, templates: Jinja2Template
     @app.post('/admin/users/{open_id}/remove')
     async def remove_user(request: Request, open_id: str):
         return await mutation(request, open_id=open_id)
+
+    return edit_token

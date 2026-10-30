@@ -22,7 +22,7 @@ from test_login import login
 def render(output):
     output.mkdir(parents=True, exist_ok=True)
     (output / 'static').mkdir(exist_ok=True)
-    for name in ['app.css', 'detail.js', 'home.js', 'navigation.js', 'assistant.js']:
+    for name in ['app.css', 'detail.js', 'recording-edit.js', 'home.js', 'navigation.js', 'assistant.js']:
         (output / 'static' / name).write_bytes((ROOT / 'app/static' / name).read_bytes())
     with tempfile.TemporaryDirectory() as temp:
         settings = Settings(

@@ -11,6 +11,7 @@
       </div>
     </div>
     <div id="detail-export" class="detail-export">
+      {% if can_edit %}<button id="edit-button" class="text-button" type="button">编辑</button>{% endif %}
       <button id="export-button" class="secondary" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="export-menu">导出 <span aria-hidden="true">▾</span></button>
       <div id="export-menu" class="export-menu" role="menu" aria-labelledby="export-button" hidden>
         <button id="copy-markdown" type="button" role="menuitem" tabindex="-1" data-markdown-url="{{ url_for('recording_markdown', recording_id=recording.recording_id) }}">复制 Markdown</button>
@@ -35,6 +36,29 @@
     <label for="markdown-source">Markdown 原文</label>
     <textarea id="markdown-source" readonly></textarea>
   </div>
+  <div id="edit-trace" class="edit-trace"{% if not edited_at %} hidden{% endif %}>
+    <span id="edit-trace-label">{% if edited_at %}已手动编辑 · {{ edited_at }}{% endif %}</span>
+    {% if can_edit %}<button id="revert-button" class="text-button" type="button">还原</button>{% endif %}
+  </div>
+  {% if can_edit %}
+    <form id="recording-editor" class="detail-section" action="{{ url_for('edit', recording_id=recording.recording_id) }}" method="post" hidden>
+      <input name="csrf_token" type="hidden" value="{{ edit_csrf }}">
+      <input name="field" type="hidden" value="{{ view }}">
+      <label for="edit-content" class="visually-hidden">编辑{{ '总结' if view == 'summary' else '转写原文' }}</label>
+      <textarea id="edit-content" name="content" maxlength="200000">
+{{ edit_content }}</textarea>
+      <div class="edit-actions"><button id="save-edit" type="submit">保存</button><button id="cancel-edit" class="secondary" type="button">取消</button></div>
+    </form>
+    <p id="edit-status" role="status" aria-live="polite"></p>
+    <div id="saved-preview" class="detail-section saved-preview" hidden></div>
+    <dialog id="hotword-suggestions" aria-labelledby="hotword-suggestion-title">
+      <h2 id="hotword-suggestion-title"></h2>
+      <div id="hotword-options"></div>
+      <p id="hotword-status" role="status" aria-live="polite"></p>
+      <div class="edit-actions"><button id="save-hotwords" type="button"></button><button id="dismiss-hotwords" class="secondary" type="button">不用了</button></div>
+    </dialog>
+  {% endif %}
+  <div id="detail-display">
   {% if view == 'summary' %}
     <section class="detail-section summary-document" aria-labelledby="summary-heading">
       <h2 id="summary-heading" class="visually-hidden">总结</h2>
@@ -79,6 +103,8 @@
       {% else %}<p class="empty-state">这条录音还没有转写内容</p>{% endif %}
     </section>
   {% endif %}
+  </div>
   <div id="transcript-toast" class="transcript-toast" role="status" aria-live="polite" hidden></div>
   <script src="{{ url_for('static', path='detail.js') }}?v=20261030-04e" defer></script>
+  {% if can_edit %}<script src="{{ url_for('static', path='recording-edit.js') }}?v=20261030-11" defer></script>{% endif %}
 {% endblock %}

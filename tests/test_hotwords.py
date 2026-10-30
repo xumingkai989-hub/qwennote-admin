@@ -147,7 +147,9 @@ def test_five_exits_share_the_function_and_count_exact_hits(populated, store, mo
     if path == '/api/v1/recordings/hotword':
         assert response.json()['summary_md'] == response.json()['transcript_md'] == EXPECTED
     else:
-        assert response.text.count(EXPECTED) == fields
+        # The editor now includes a second, hidden copy of the displayed source.
+        visible = re.sub(r'<form id="recording-editor".*?</form>', '', response.text, flags=re.S)
+        assert visible.count(EXPECTED) == fields
     assert BODY not in response.text
     assert {row.source: row.hits for row in store.list_hotwords()} == {'AI Tutor': fields * 2, 'AI': fields}
     assert recording_rows(store) == before
@@ -178,7 +180,7 @@ def test_special_target_displays_literally_in_both_views(populated, store, view)
     result = populated.get('/recordings/hotword?view=' + view)
     assert '**词** [名称] &lt;标签&gt; &amp;copy;' in result.text
     assert '<strong>词</strong>' not in result.text
-    assert r'\*' not in result.text
+    assert r'\*' not in re.sub(r'<form id="recording-editor".*?</form>', '', result.text, flags=re.S)
 
 
 @pytest.mark.parametrize('role', ['anonymous', 'member', 'inactive-admin'])
