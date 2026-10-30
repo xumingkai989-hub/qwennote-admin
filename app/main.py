@@ -17,7 +17,8 @@ from app.config import Settings
 from app.feishu import FeishuAuth, FeishuAuthError, HttpFeishuAuth
 from app.minutes import FixtureMinutesSource, HttpMinutesSource, MinutesSource, SHANGHAI
 from app.public_api import install_public_api
-from app.recording_content import (download_disposition, export_markdown, render_summary, transcript_segments)
+from app.recording_content import (download_disposition, export_markdown, render_summary,
+                                   transcript_segments, transcript_presentation)
 from app.search import search_snippets
 from app.session import SESSION_MAX_AGE, STATE_MAX_AGE, SignedCookie
 from app.store import SQLiteStore, Store
@@ -275,7 +276,7 @@ def create_app(
             'view': view,
             'view_urls': {name: request.url.include_query_params(view=name) for name in ('summary', 'transcript')},
             'summary_html': render_summary(recording.summary_md) if view == 'summary' and recording.has_summary else None,
-            'segments': transcript_segments(recording.transcript_md) if view == 'transcript' and recording.has_transcript else [],
+            'segments': transcript_presentation(transcript_segments(recording.transcript_md)) if view == 'transcript' and recording.has_transcript else [],
         }, headers={'Cache-Control': 'no-store'})
 
     @app.post('/auth/logout')

@@ -44,8 +44,9 @@ def test_detail_markdown_and_metadata(detail_client):
 
 def test_transcript_preserves_segments_and_paragraphs(detail_client):
     html = detail_client.get('/recordings/detail?view=transcript').text
-    assert re.search(r'<[^>]*class="timestamp"[^>]*>\[00:00:00.360–00:00:26.760\]</', html)
-    assert re.search(r'<strong[^>]*>发言人 1</strong>', html)
+    assert re.search(r'<[^>]*class="timestamp"[^>]*>00:00</', html)
+    assert '<span class="speaker-avatar" aria-hidden="true">发</span>' in html
+    assert '<span class="speaker-name">发言人 1</span>' in html
     paragraphs = re.findall(r'<p class="transcript-paragraph">(.*?)</p>', html, re.S)
     assert paragraphs == ['第一段正文。', '第二段正文。', '补充一段。']
     assert html.count('class="transcript-segment"') == 2
@@ -83,6 +84,7 @@ def test_empty_content_branches(detail_client, summary, transcript, view, messag
     assert message in html and absent not in html
     assert re.search(r'class="view-option is-empty" aria-current="page"', html)
     assert 'aria-disabled=' not in html
+    assert 'id="transcript-toolbar"' not in html
 
 
 @pytest.mark.parametrize('suffix', ['', '.md'])
@@ -233,4 +235,80 @@ def test_short_timestamp_format(detail_client):
     detail_client.add(transcript='[00:00.360–00:26.760] 发言人 1\n\n正文')
     html = detail_client.get('/recordings/detail?view=transcript').text
     assert '[00:00.360–00:26.760]' in html
-    assert '<strong>发言人 1</strong>' in html
+    assert '<span class="speaker-name">发言人 1</span>' in html
+    assert re.search(r'class="timestamp"[^>]*>00:00</span>', html)
+
+
+def test_consecutive_speaker_has_no_repeated_avatar(detail_client):
+    detail_client.add(transcript=(
+        '[00:00.000–00:26.000] alice\n\n第一段\n\n'
+        '[00:26.000–01:20.000] alice\n\n第二段\n\n'
+        '[01:20.000–01:40.000] 王小明\n\n第三段\n\n'
+        '[01:40.000–02:00.000] alice\n\n第四段'))
+    html = detail_client.get('/recordings/detail?view=transcript').text
+    assert html.count('class="transcript-segment"') == 4
+    assert html.count('class="speaker-avatar"') == 3
+    assert html.count('class="speaker-name">alice</span>') == 2
+    assert '<span class="speaker-avatar" aria-hidden="true">A</span>' in html
+    assert '<span class="speaker-avatar" aria-hidden="true">王</span>' in html
+    second = html.split('class="transcript-segment"')[2].split('class="transcript-segment"')[0]
+    assert 'speaker-avatar' not in second and 'speaker-name' not in second
+    assert '>00:26</span>' in second and '>第二段</p>' in second
+
+
+@pytest.mark.parametrize('source,expected', [
+    ('00:01:20.000', '01:20'), ('01:20.999', '01:20'),
+    ('01:00:00.000', '60:00'), ('00:00.360', '00:00'),
+])
+def test_transcript_short_offset(detail_client, source, expected):
+    detail_client.add(transcript=f'[{source}–01:00:26.760] 王小明\n\n正文')
+    html = detail_client.get('/recordings/detail?view=transcript').text
+    assert re.search(r'class="timestamp"[^>]*>' + expected + '</span>', html)
+
+
+def test_millisecond_offset():
+    from app.recording_content import format_offset
+    assert format_offset(80000) == '01:20'
+
+
+def test_transcript_speaker_is_escaped(detail_client):
+    name = '<script>alert("speaker")</script>'
+    detail_client.add(transcript=f'[00:00.000–00:26.000] {name}\n\n正文<script>alert(1)</script>')
+    html = detail_client.get('/recordings/detail?view=transcript').text
+    assert '<script>alert' not in html
+    assert '&lt;script&gt;alert(&#34;speaker&#34;)&lt;/script&gt;' in html
+    assert '正文&lt;script&gt;alert(1)&lt;/script&gt;' in html
+    assert 'class="speaker-avatar" aria-hidden="true">&lt;</span>' in html
+
+
+def test_transcript_toolbar_and_focusable_container(detail_client):
+    html = detail_client.get('/recordings/detail?view=transcript').text
+    assert '转录全文 · 2 段' in html
+    assert 'id="transcript-search" type="search"' in html
+    assert 'id="transcript-segments"' in html
+    assert html.count('class="transcript-segment" tabindex="0" role="button"') == 2
+    assert 'id="copy-transcript"' in html and 'id="transcript-toast"' in html
+
+
+def test_speaker_palette_is_stable_and_accessible():
+    from app.recording_content import SPEAKER_PALETTE, transcript_presentation
+
+    def luminance(color):
+        channels = [int(color[i:i + 2], 16) / 255 for i in (1, 3, 5)]
+        channels = [v / 12.92 if v <= 0.04045 else ((v + 0.055) / 1.055) ** 2.4 for v in channels]
+        return sum(a * b for a, b in zip(channels, (0.2126, 0.7152, 0.0722)))
+
+    def contrast(first, second):
+        low, high = sorted((luminance(first), luminance(second)))
+        return (high + 0.05) / (low + 0.05)
+
+    assert len(SPEAKER_PALETTE) == 8
+    for background, foreground, night in SPEAKER_PALETTE:
+        assert contrast(background, foreground) >= 4.5
+        assert contrast('#FFFFFF', foreground) >= 4.5
+        assert contrast('#1C1C1E', night) >= 4.5
+    segments = [{'timestamp': '', 'speaker': name, 'paragraphs': ['正文']} for name in ('alice', '王小明')]
+    first = transcript_presentation(segments)
+    reversed_result = transcript_presentation(list(reversed(segments)))
+    assert first[0]['colors'] == reversed_result[1]['colors']
+    assert first[1]['colors'] == reversed_result[0]['colors']

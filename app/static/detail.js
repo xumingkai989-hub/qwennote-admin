@@ -28,3 +28,74 @@ copyButton.addEventListener('click', async () => {
     copyButton.disabled = false;
   }
 });
+
+const transcript = document.getElementById('transcript-segments');
+if (transcript) {
+  const segments = Array.from(transcript.querySelectorAll('.transcript-segment'));
+  const toast = document.getElementById('transcript-toast');
+  let toastTimer;
+  function notify(message) {
+    clearTimeout(toastTimer);
+    toast.textContent = message;
+    toast.hidden = false;
+    toastTimer = setTimeout(() => { toast.hidden = true; }, 2800);
+  }
+  function segmentText(segment) {
+    return Array.from(segment.querySelectorAll('.transcript-paragraph'))
+      .map(paragraph => paragraph.textContent).join('\n\n');
+  }
+  function copyText(segment) {
+    return [segment.dataset.timestamp, segment.dataset.speaker].filter(Boolean).join(' ') +
+      '\n' + segmentText(segment);
+  }
+  async function copyTranscript(text, message) {
+    const fallback = document.getElementById('transcript-copy-fallback');
+    try {
+      await navigator.clipboard.writeText(text);
+      fallback.hidden = true;
+      notify(message);
+    } catch (error) {
+      fallback.hidden = false;
+      const source = document.getElementById('transcript-source');
+      source.value = text;
+      source.focus();
+      source.select();
+      source.setSelectionRange(0, text.length);
+      notify('自动复制失败，已全选文字，请按 Ctrl+C 或 ⌘C 复制。');
+    }
+  }
+  for (const segment of segments) {
+    const copy = () => copyTranscript(copyText(segment),
+      segment.dataset.timestamp ? `已复制 ${segment.dataset.timestamp}` : '已复制该段');
+    segment.addEventListener('click', copy);
+    segment.addEventListener('keydown', event => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        if (!event.repeat) copy();
+      }
+    });
+  }
+  document.getElementById('copy-transcript').addEventListener('click', () => {
+    copyTranscript(segments.map(copyText).join('\n\n'), '已复制全文');
+  });
+  const searchStatus = document.getElementById('transcript-search-status');
+  const searchable = segments.map(segment =>
+    `${segment.dataset.speaker}\n${segment.dataset.timestamp}\n${segmentText(segment)}`.toLocaleLowerCase());
+  document.getElementById('transcript-search').addEventListener('input', event => {
+    const query = event.target.value.trim().toLocaleLowerCase();
+    let firstMatch;
+    let count = 0;
+    segments.forEach((segment, index) => {
+      const matches = !query || searchable[index].includes(query);
+      segment.hidden = !matches;
+      segment.classList.toggle('is-match', Boolean(query) && matches);
+      if (matches) {
+        firstMatch ??= segment;
+        count += 1;
+      }
+    });
+    searchStatus.hidden = !query;
+    searchStatus.textContent = count ? `找到 ${count} 段` : '没有找到匹配的段落';
+    if (query && firstMatch) firstMatch.scrollIntoView({ block: 'nearest' });
+  });
+}

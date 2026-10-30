@@ -35,19 +35,42 @@
       {% else %}<p class="empty-state">这条录音还没有 AI 总结</p>{% endif %}
     </section>
   {% else %}
-    <section class="detail-section" aria-labelledby="transcript-heading">
-      <h2 id="transcript-heading">转写原文</h2>
+    <section class="detail-section transcript-section" aria-labelledby="transcript-heading">
+      <h2 id="transcript-heading" class="visually-hidden">转写原文</h2>
       {% if recording.has_transcript %}
-        {% for segment in segments %}
-          <div class="transcript-segment">
-            {% if segment.timestamp or segment.speaker %}
-              <div class="transcript-meta"><span class="timestamp">{{ segment.timestamp }}</span> <strong>{{ segment.speaker }}</strong></div>
-            {% endif %}
-            {% for paragraph in segment.paragraphs %}<p class="transcript-paragraph">{{ paragraph }}</p>{% endfor %}
+        <div id="transcript-toolbar" class="transcript-toolbar">
+          <span class="transcript-count">转录全文 · {{ segments | length }} 段</span>
+          <div class="transcript-tools">
+            <input id="transcript-search" type="search" placeholder="搜索本场" aria-label="搜索本场" aria-controls="transcript-segments" autocomplete="off">
+            <button id="copy-transcript" type="button" class="text-button">复制全文</button>
+            <a class="filter-link" href="{{ url_for('recording_markdown', recording_id=recording.recording_id) }}">下载 .md</a>
           </div>
-        {% endfor %}
+        </div>
+        <div id="transcript-segments" class="transcript-segments">
+          {% for segment in segments %}
+            <div class="transcript-segment" tabindex="0" role="button"
+                 aria-label="复制 {{ segment.speaker }} {{ segment.short_timestamp }} 的段落"
+                 data-speaker="{{ segment.speaker }}" data-timestamp="{{ segment.short_timestamp }}"
+                 style="--speaker-bg: {{ segment.colors[0] }}; --speaker-color: {{ segment.colors[1] }}; --speaker-night: {{ segment.colors[2] }};">
+              {% if not segment.continuation %}
+                <span class="speaker-avatar" aria-hidden="true">{{ segment.initial }}</span>
+                <span class="speaker-name">{{ segment.speaker }}</span>
+              {% endif %}
+              {% if segment.short_timestamp %}<span class="timestamp" title="{{ segment.timestamp }}">{{ segment.short_timestamp }}</span>{% endif %}
+              <div class="transcript-body">
+                {% for paragraph in segment.paragraphs %}<p class="transcript-paragraph">{{ paragraph }}</p>{% endfor %}
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+        <p id="transcript-search-status" class="transcript-search-status" role="status" aria-live="polite" hidden></p>
+        <div id="transcript-copy-fallback" hidden>
+          <label for="transcript-source">转写原文（可全选复制）</label>
+          <textarea id="transcript-source" readonly></textarea>
+        </div>
       {% else %}<p class="empty-state">这条录音还没有转写内容</p>{% endif %}
     </section>
   {% endif %}
-  <script src="{{ url_for('static', path='detail.js') }}?v=20261030-04b" defer></script>
+  <div id="transcript-toast" class="transcript-toast" role="status" aria-live="polite" hidden></div>
+  <script src="{{ url_for('static', path='detail.js') }}?v=20261030-04c" defer></script>
 {% endblock %}

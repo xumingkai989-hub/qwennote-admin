@@ -1,4 +1,5 @@
 """Safe presentation and a single Markdown document shared by copy and download."""
+import hashlib
 import json
 import re
 from urllib.parse import quote
@@ -14,6 +15,50 @@ SEGMENT = re.compile(
     r'^\[(\d{2,}:\d{2}(?::\d{2})?\.\d+[–—-]\d{2,}:\d{2}(?::\d{2})?\.\d+)\][ \t]*(.*)$',
     re.MULTILINE,
 )
+
+# Soft avatar backgrounds, dark avatar/light-mode text, dark-mode name text.
+# Avatar foreground/background pairs all exceed WCAG's 4.5:1 contrast ratio.
+SPEAKER_PALETTE = (
+    ('#E8EFFF', '#3553A3', '#AFC4FF'),
+    ('#E5F4EF', '#24664F', '#91D5BB'),
+    ('#F3EAFE', '#71469B', '#D3B2F2'),
+    ('#FCE9EF', '#9B3D60', '#F3ADC6'),
+    ('#FFF0DF', '#85551E', '#E9C393'),
+    ('#E3F3F8', '#226477', '#93CCDD'),
+    ('#F0EDE6', '#665B43', '#D0C5AC'),
+    ('#EEEAFE', '#57469B', '#BEB3EF'),
+)
+
+
+def format_offset(milliseconds: int) -> str:
+    minutes, seconds = divmod(milliseconds // 1000, 60)
+    return f'{minutes:02d}:{seconds:02d}'
+
+
+def transcript_presentation(segments: list[dict]) -> list[dict]:
+    """Decorate parsed text for the view without changing source/export content."""
+    result = []
+    previous_speaker = None
+    for segment in segments:
+        speaker = segment['speaker'].strip() or '未知发言人'
+        color_index = hashlib.sha256(speaker.encode('utf-8')).digest()[0] % len(SPEAKER_PALETTE)
+        timestamp = segment['timestamp']
+        offset_ms = None
+        if timestamp:
+            start = re.split('[–—-]', timestamp[1:-1])[0]
+            clock, fraction = start.split('.')
+            seconds = 0
+            for part in clock.split(':'):
+                seconds = seconds * 60 + int(part)
+            offset_ms = seconds * 1000 + int((fraction + '000')[:3])
+        result.append({
+            **segment, 'speaker': speaker, 'initial': speaker[0].upper(),
+            'colors': SPEAKER_PALETTE[color_index],
+            'short_timestamp': format_offset(offset_ms) if offset_ms is not None else '',
+            'continuation': speaker == previous_speaker,
+        })
+        previous_speaker = speaker
+    return result
 
 
 def render_summary(value: str) -> Markup:
