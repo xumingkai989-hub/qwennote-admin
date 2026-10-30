@@ -11,7 +11,7 @@
 服务器流程面向提供 `dnf` 的 Linux，需 root、systemd、nginx、curl、openssl、gcc、tar、ACL 工具和 `/usr/bin/python3.11`。
 `install_release.sh` 不安装 Python，也不替换系统解释器；`build_sqlite.sh` 编译 release 内私有 SQLite，需能下载官方源包。
 DNS 的 `<domain>` 须指向 `<server-ip>`，防火墙开放 80/443；8090 仅本机使用。飞书应用回调配置为 `https://<domain>/auth/callback`。
-云控制台若用于排障，人工选择 `<instance-id>`；下列流程走 SSH，不调用固化实例的 `scripts/deploy.py`。
+云控制台若用于排障，人工选择 `<instance-id>`；下列流程走 SSH。若使用 `scripts/deploy.py`，须先设置 `QWENNOTE_SWAS_INSTANCE_ID='<instance-id>'`，未设置时脚本拒绝执行；站点域名仍由 `install_release.sh` 的模板决定，跨环境须按本手册替换。
 
 ### 1.2 本地打包与传输
 

@@ -11,7 +11,7 @@ import shlex
 import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
-INSTANCE = '74ee3f09792c48649cf8aad318702dd5'
+INSTANCE = os.environ.get('QWENNOTE_SWAS_INSTANCE_ID', '')
 
 
 def main():
@@ -21,6 +21,8 @@ def main():
     parser.add_argument('--app-only', action='store_true',
                         help='Update an existing application without changing nginx, certificates or units')
     args = parser.parse_args()
+    if not INSTANCE:
+        parser.exit(1, '缺少 QWENNOTE_SWAS_INSTANCE_ID；请设置目标实例 ID 后再执行部署。\n')
     os.environ['SWAS_INSTANCE_ID'] = INSTANCE
     spec = importlib.util.spec_from_file_location('swas_run', args.helper)
     swas = importlib.util.module_from_spec(spec)

@@ -133,7 +133,7 @@ Uvicorn 的 `--env-file` 加载本地文件；生产由 systemd 注入，应用�
 发布目录在 `/opt/qwennote/releases/`，`current` 指向当前版本，`previous` 用于回滚。
 首次部署、域名替换、密钥权限、备份恢复及定时任务命令见 [运维手册](docs/OPERATIONS.md)。
 
-`scripts/deploy.py` 仍含特定环境的实例与站点配置，不能靠设置实例环境变量改目标；跨环境使用运维手册的 SSH 流程。
+`scripts/deploy.py` 的目标实例由 `QWENNOTE_SWAS_INSTANCE_ID` 指定，未设置时拒绝执行；站点域名仍由 `install_release.sh` 的模板决定，跨环境按运维手册替换。
 
 ## 测试
 

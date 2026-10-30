@@ -11,12 +11,15 @@ from scripts import deploy
 
 
 def test_app_only_deploy_uses_existing_release_flow_without_certificate_phase(tmp_path, monkeypatch):
+    monkeypatch.setattr(deploy, 'INSTANCE', 'test-instance')
+    monkeypatch.setenv('SWAS_INSTANCE_ID', 'previous-instance')
     commands_path = tmp_path / 'commands.jsonl'
     helper = tmp_path / 'swas.py'
     helper.write_text(
         'import json, re\n'
         'from pathlib import Path\n'
         'def run(command, **kwargs):\n'
+        '    assert kwargs["instance"] == "test-instance"\n'
         f'    with Path({str(commands_path)!r}).open("a") as output:\n'
         '        output.write(json.dumps(command) + "\\n")\n'
         '    return re.findall(r"QWENNOTE_STEP_OK_[\\w-]+", command)[-1]\n'
@@ -32,6 +35,7 @@ def test_app_only_deploy_uses_existing_release_flow_without_certificate_phase(tm
     monkeypatch.setattr(sys, 'argv', ['deploy.py', '--app-only', '--helper', str(helper),
                                      '--log-dir', str(tmp_path / 'logs')])
     deploy.main()
+    assert os.environ['SWAS_INSTANCE_ID'] == 'test-instance'
     commands = [json.loads(line) for line in commands_path.read_text().splitlines()]
     phases = [command for command in commands if 'scripts/install_release.sh' in command]
     assert len(phases) == 2

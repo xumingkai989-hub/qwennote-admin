@@ -2,6 +2,7 @@
 from collections import Counter
 from pathlib import Path
 import re
+import subprocess
 import unittest
 
 
@@ -25,6 +26,17 @@ def first_column_names(text, pattern):
 
 
 class DocumentationTests(unittest.TestCase):
+    def test_repository_does_not_contain_fixed_instance_id(self):
+        # 拆分构造，避免检测器自身保留完整实例标识。
+        instance_id = ''.join(('74ee', '3f09', '792c', '4864',
+                               '9cf8', 'aad3', '1870', '2dd5')).encode('ascii')
+        paths = subprocess.check_output(['git', 'ls-files', '-z'], cwd=ROOT).split(b'\0')
+        for name in filter(None, paths):
+            path = ROOT / name.decode('utf-8')
+            with self.subTest(file=str(path.relative_to(ROOT))):
+                self.assertFalse(instance_id in path.read_bytes(),
+                                 '仓库含固定实例标识，须改用环境变量或占位符')
+
     def test_readme_environment_table_matches_example(self):
         expected = set(re.findall(r'^([A-Z][A-Z0-9_]*)=',
                                   (ROOT / '.env.example').read_text(), re.MULTILINE))
