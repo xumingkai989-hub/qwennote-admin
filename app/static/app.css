@@ -222,3 +222,60 @@ mark { background: var(--mark); color: var(--text); border-radius: 2px; }
   .segmented-control { width: 100%; }
   .detail-section { padding: 18px; }
 }
+
+/* Summary document only: transcript typography and interactions stay isolated. */
+.detail-section.summary-document {
+  --document-text: #1C1C1E;
+  --document-secondary: #5C5C61;
+  --document-meta: #F7F7FA;
+  --document-code: #F2F2F7;
+  --document-rule: #E5E5EA;
+  --document-quote: #D1D1D6;
+  max-width: 760px; margin: 24px auto; padding: 24px 20px 36px;
+  background: #FFFFFF; color: var(--document-text); font-size: 16px; line-height: 1.8;
+}
+.summary-metadata { padding: 12px 16px; border-radius: 8px; background: var(--document-meta); color: var(--document-secondary); font-size: 14px; }
+.summary-metadata p { margin: 0; }
+.summary-disclaimer { margin: 8px 0 0; font-size: 12px; color: #8E8E93; }
+.summary-document .markdown-body { margin-top: 12px; }
+.summary-document .markdown-body h1,
+.summary-document .markdown-body h2,
+.summary-document .markdown-body h3 { line-height: 1.4; letter-spacing: normal; }
+.summary-document .summary-h1 { font-size: 24px; font-weight: 700; margin: 36px 0 12px; }
+.summary-document .summary-h1-separated { border-top: 1px solid var(--document-rule); padding-top: 24px; }
+.summary-document .summary-h2 { font-size: 19px; font-weight: 600; margin: 24px 0 8px; }
+.summary-document .summary-h3 { font-size: 17px; font-weight: 600; margin: 20px 0 6px; }
+.summary-document .markdown-body p { margin: 0 0 12px; font-size: 16px; line-height: 1.8; }
+.summary-document .markdown-body ul,
+.summary-document .markdown-body ol { margin: 12px 0; padding-left: 24px; }
+.summary-document .markdown-body ul { list-style-type: disc; }
+.summary-document .markdown-body ul ul { list-style-type: circle; }
+.summary-document .markdown-body ul ul ul { list-style-type: square; }
+.summary-document .markdown-body ol { list-style-type: decimal; }
+.summary-document .markdown-body li { margin: 6px 0; }
+.summary-document .markdown-body li > ul,
+.summary-document .markdown-body li > ol { margin: 6px 0; }
+.summary-document .markdown-body li > p { margin-bottom: 6px; }
+.summary-document .markdown-body blockquote { margin: 12px 0; padding-left: 12px; border-left: 3px solid var(--document-quote); color: var(--document-secondary); }
+.summary-document .markdown-body pre { margin: 12px 0; padding: 16px; overflow-x: auto; border-radius: 8px; background: var(--document-code); white-space: pre; overflow-wrap: normal; }
+.summary-document .markdown-body code,
+.summary-document .chapter-time { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
+.summary-document .markdown-body hr { margin: 24px 0; border: 0; border-top: 1px solid var(--document-rule); }
+.summary-document .markdown-body strong { font-weight: 600; }
+.summary-document .markdown-body a { color: #007AFF; text-decoration: underline; }
+.summary-table { max-width: 100%; overflow-x: auto; margin: 12px 0; }
+.summary-table table { border-collapse: collapse; min-width: 100%; }
+.summary-table th, .summary-table td { border: 1px solid var(--document-rule); padding: 8px; min-width: 100px; }
+.summary-table th { background: var(--document-meta); font-weight: 600; }
+.summary-document .markdown-body .summary-task { list-style: none; position: relative; }
+.summary-document .summary-checkbox { position: absolute; left: -24px; top: 7px; width: 16px; height: 16px; min-height: 0; padding: 0; margin: 0; border-radius: 3px; accent-color: #007AFF; }
+.summary-chapter { display: block; }
+.chapter-time { font-variant-numeric: tabular-nums; color: var(--document-secondary); }
+@media (prefers-color-scheme: dark) {
+  .detail-section.summary-document {
+    --document-text: #E5E5EA; --document-secondary: #AEAEB2;
+    --document-meta: #2C2C2E; --document-code: #2C2C2E;
+    --document-rule: #38383A; --document-quote: #636366;
+    background: #1C1C1E;
+  }
+}

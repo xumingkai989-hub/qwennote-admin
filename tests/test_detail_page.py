@@ -35,7 +35,7 @@ def test_detail_markdown_and_metadata(detail_client):
     assert response.status_code == 200
     html = response.text
     for text in ['项目例会', '2026-10-29 09:30', '12 分钟', '已转录', '时间为笔记创建时间',
-                 '<h1>会议总结</h1>', '<ul>', '<strong>行动事项</strong>', '<blockquote>', '<pre><code',
+                 '<h1 class="summary-h1">会议总结</h1>', '<ul>', '<strong>行动事项</strong>', '<blockquote>', '<pre><code',
                  '复制 Markdown', '下载 .md']:
         assert text in html
     assert response.headers['cache-control'] == 'no-store'
@@ -312,3 +312,102 @@ def test_speaker_palette_is_stable_and_accessible():
     reversed_result = transcript_presentation(list(reversed(segments)))
     assert first[0]['colors'] == reversed_result[1]['colors']
     assert first[1]['colors'] == reversed_result[0]['colors']
+
+
+def test_summary_document_metadata_and_disclaimer(detail_client):
+    html = detail_client.get('/recordings/detail?view=summary').text
+    metadata = re.search(r'<div class="summary-metadata">(.*?)</div>', html, re.S)[1]
+    assert re.findall(r'<p>(.*?)</p>', metadata) == [
+        '录音主题：项目例会', '录音时间：2026-10-29 09:30 · 12 分钟（GMT+08）']
+    assert '智能纪要由 AI 生成，可能不准确，请谨慎甄别后使用' in html
+    assert 'class="detail-section summary-document"' in html
+
+
+@pytest.mark.parametrize('duration,expected', [(None, '时长未知'), (0, '0 分钟')])
+def test_summary_metadata_missing_or_zero_duration(detail_client, duration, expected):
+    detail_client.add(duration=duration)
+    html = detail_client.get('/recordings/detail').text
+    assert '· ' + expected + '（GMT+08）' in html
+
+
+def test_summary_headings_and_first_h1_separator(detail_client):
+    detail_client.add(summary='前言\n\n# 总结\n\n## 讨论\n\n### 细节\n\n# 智能章节')
+    html = detail_client.get('/recordings/detail').text
+    assert '<h1 class="summary-h1">总结</h1>' in html
+    assert '<h2 class="summary-h2">讨论</h2>' in html
+    assert '<h3 class="summary-h3">细节</h3>' in html
+    assert '<h1 class="summary-h1 summary-h1-separated">智能章节</h1>' in html
+    assert html.count('summary-h1-separated') == 1
+
+
+def test_summary_nested_lists_and_quote(detail_client):
+    detail_client.add(summary='- 一级\n  - 二级\n    - 三级\n\n1. 有序\n   1. 子项\n\n> 引用')
+    html = detail_client.get('/recordings/detail').text
+    assert re.search(r'<ul>\s*<li>一级\s*<ul>\s*<li>二级\s*<ul>\s*<li>三级</li>', html)
+    assert re.search(r'<ol>\s*<li>有序\s*<ol>\s*<li>子项</li>', html)
+    assert '<blockquote>\n<p>引用</p>\n</blockquote>' in html
+
+
+def test_summary_tasks_are_read_only_and_export_unchanged(detail_client):
+    source = '- [ ] 未完成 **任务**\n- [x] 已完成\n- [X] 也完成'
+    detail_client.add(summary=source)
+    html = detail_client.get('/recordings/detail').text
+    boxes = re.findall(r'<input class="summary-checkbox"[^>]*>', html)
+    assert len(boxes) == 3
+    assert all('type="checkbox" disabled' in box for box in boxes)
+    assert ' checked' not in boxes[0]
+    assert all(' checked' in box for box in boxes[1:])
+    assert '<strong>任务</strong>' in html
+    assert source in detail_client.get('/recordings/detail.md').text
+
+
+def test_summary_todo_section_stops_at_next_peer_heading(detail_client):
+    detail_client.add(summary='## 待办\n\n- 跟进\n  - 确认\n\n### 明天\n\n1. 回访\n\n## 讨论\n\n- 普通列表')
+    html = detail_client.get('/recordings/detail').text
+    assert html.count('class="summary-checkbox"') == 3
+    assert '<li>普通列表</li>' in html
+
+
+def test_summary_task_continuations_and_code_are_not_rewritten(detail_client):
+    detail_client.add(summary='- [ ] 第一段\n\n  [ ] 后续段落\n\n`[ ] 行内代码`\n\n```\n- [ ] 代码块\n00:00 代码时间\n```')
+    html = detail_client.get('/recordings/detail').text
+    assert html.count('class="summary-checkbox"') == 1
+    assert '<p>[ ] 后续段落</p>' in html
+    assert '<code>[ ] 行内代码</code>' in html
+    assert '- [ ] 代码块\n00:00 代码时间' in html
+    assert 'class="chapter-time"' not in html
+
+
+def test_summary_chapter_lines_preserve_inline_format_and_quote(detail_client):
+    detail_client.add(summary='00:00 **开场**\n01:20 讨论\n\n> 章节摘要\n\n01:02:03 收尾')
+    html = detail_client.get('/recordings/detail').text
+    assert '<span class="chapter-time">00:00</span> <strong>开场</strong></span>' in html
+    assert '<span class="chapter-time">01:20</span> 讨论</span>' in html
+    assert '<span class="chapter-time">01:02:03</span> 收尾</span>' in html
+    assert '<blockquote>\n<p>章节摘要</p>\n</blockquote>' in html
+
+
+def test_summary_chapter_task_and_table_xss_remains_escaped(detail_client):
+    detail_client.add(summary='00:00 <script>alert(1)</script>\n\n- [ ] <img src=x onerror=alert(1)>\n\n| 名称 |\n| --- |\n| <script>bad()</script> |')
+    html = detail_client.get('/recordings/detail').text
+    assert '<script>alert' not in html and '<script>bad' not in html
+    assert '<img src=x' not in html
+    assert '&lt;script&gt;alert(1)&lt;/script&gt;' in html
+    assert '&lt;script&gt;bad()&lt;/script&gt;' in html
+    assert '&lt;img src=x onerror=alert(1)&gt;' in html
+
+
+def test_summary_tables_and_links(detail_client):
+    detail_client.add(summary='| 项目 | 进度 |\n| --- | --- |\n| A | 完成 |\n\n[链接](https://example.com)\n\n---')
+    html = detail_client.get('/recordings/detail').text
+    assert 'class="summary-table" role="region" aria-label="表格" tabindex="0"' in html
+    assert '<table>' in html and '<thead>' in html and '<th>项目</th>' in html and '<td>完成</td>' in html
+    assert '<a href="https://example.com" rel="noopener noreferrer">链接</a>' in html
+    assert '<hr />' in html
+
+
+def test_summary_document_is_absent_from_transcript(detail_client):
+    html = detail_client.get('/recordings/detail?view=transcript').text
+    assert 'summary-document' not in html and 'summary-metadata' not in html
+    assert '智能纪要由 AI 生成' not in html
+    assert html.count('class="transcript-segment"') == 2

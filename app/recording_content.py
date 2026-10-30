@@ -4,13 +4,9 @@ import json
 import re
 from urllib.parse import quote
 
-from markdown_it import MarkdownIt
-from markupsafe import Markup
-
 from app.store import StoredRecording
+from app.summary import render_summary  # Re-export the existing presentation API.
 
-# Explicitly disable raw HTML. CommonMark also rejects javascript/data HTML links.
-MARKDOWN = MarkdownIt('commonmark', {'html': False})
 SEGMENT = re.compile(
     r'^\[(\d{2,}:\d{2}(?::\d{2})?\.\d+[–—-]\d{2,}:\d{2}(?::\d{2})?\.\d+)\][ \t]*(.*)$',
     re.MULTILINE,
@@ -59,12 +55,6 @@ def transcript_presentation(segments: list[dict]) -> list[dict]:
         })
         previous_speaker = speaker
     return result
-
-
-def render_summary(value: str) -> Markup:
-    # This is the only trust boundary: only the HTML-disabled renderer output
-    # becomes markup; user titles, transcript and export text stay autoescaped.
-    return Markup(MARKDOWN.render(value))
 
 
 def paragraphs(value: str) -> list[str]:

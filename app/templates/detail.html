@@ -28,8 +28,13 @@
     <textarea id="markdown-source" readonly></textarea>
   </div>
   {% if view == 'summary' %}
-    <section class="detail-section" aria-labelledby="summary-heading">
-      <h2 id="summary-heading">总结</h2>
+    <section class="detail-section summary-document" aria-labelledby="summary-heading">
+      <h2 id="summary-heading" class="visually-hidden">总结</h2>
+      <div class="summary-metadata">
+        <p>录音主题：{{ title }}</p>
+        <p>录音时间：{{ recording.created_at.strftime('%Y-%m-%d %H:%M') }} · {{ (recording.duration_min ~ ' 分钟') if recording.duration_min is not none else '时长未知' }}（GMT+08）</p>
+      </div>
+      <p class="summary-disclaimer">智能纪要由 AI 生成，可能不准确，请谨慎甄别后使用</p>
       {% if recording.has_summary %}
         <div id="summary-content" class="markdown-body">{{ summary_html }}</div>
       {% else %}<p class="empty-state">这条录音还没有 AI 总结</p>{% endif %}
