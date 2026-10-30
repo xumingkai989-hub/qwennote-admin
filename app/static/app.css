@@ -266,11 +266,11 @@ mark { background: var(--mark); color: var(--text); border-radius: 2px; }
 
 /* Home: date headings share a continuous dot-to-dot timeline. */
 .home-layout .topbar { grid-template-columns: minmax(0, 1fr) auto; }
-.home-heading { align-items: center; padding-block: 20px 12px; }
+.home-heading { flex-wrap: wrap; align-items: center; padding-block: 20px 12px; }
 .home-heading h1 { font-size: 24px; font-weight: 600; letter-spacing: normal; }
-#sync-button { display: grid; place-items: center; flex: 0 0 44px; width: 44px; height: 44px; padding: 0; background: transparent; color: var(--accent); }
+#sync-button { display: flex; align-items: center; justify-content: center; gap: 6px; white-space: nowrap; min-height: 44px; padding: 8px 12px; background: transparent; color: var(--accent); }
 #sync-button:hover { background: var(--control); }
-.sync-actions { display: flex; align-items: center; gap: 8px; }
+.sync-actions { display: flex; align-items: center; flex-shrink: 0; gap: 8px; }
 #full-sync-button { white-space: nowrap; }
 .sync-result { color: var(--secondary); font-size: 14px; }
 .sync-result:empty { display: none; }
@@ -448,6 +448,7 @@ p.assistant-note { margin: 12px 0 0; }
 .settings-row + .settings-row { border-top: 1px solid var(--separator); }
 .settings-row label { display: flex; align-items: center; min-height: 44px; font-size: 15px; cursor: pointer; }
 .settings-row > input { width: 100%; }
+.settings-row > select { width: 100%; min-height: 44px; padding: 8px 12px; border: 1px solid var(--separator); border-radius: 8px; background: var(--surface); color: var(--text); font: inherit; }
 .settings-row > p { grid-column: 1 / -1; margin: 0; font-size: 12px; line-height: 1.6; color: var(--secondary); overflow-wrap: anywhere; }
 .settings-row input[role="switch"] { appearance: none; justify-self: end; position: relative; width: 48px; height: 30px; min-height: 30px; padding: 0; border: 0; border-radius: 20px; background: var(--control); cursor: pointer; }
 .settings-row input[role="switch"]::after { content: ''; position: absolute; left: 3px; top: 3px; width: 24px; height: 24px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px #0002; transition: transform .15s; }

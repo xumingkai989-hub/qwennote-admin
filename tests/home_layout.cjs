@@ -73,7 +73,7 @@ test('home timeline, cards and controls fit desktop/mobile and both color scheme
           assert.ok(status.right < status.timeX); assert.equal(status.centerY, status.timeCenterY);
         }
 
-        assert.equal(measurements.button.width, 44); assert.equal(measurements.button.height, 44);
+        assert.ok(measurements.button.width >= 100); assert.equal(measurements.button.height, 44);
         assert.ok(measurements.fullButton.x >= measurements.button.x + measurements.button.width);
         assert.ok(measurements.fullButton.x + measurements.fullButton.width <= width);
         assert.equal(measurements.frame.width, Math.min(width, 1120));

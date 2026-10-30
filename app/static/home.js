@@ -10,7 +10,7 @@
     activeButton.setAttribute('aria-busy', 'true');
     activeButton.classList.add('is-syncing');
     errorMessage.textContent = '';
-    feedback.textContent = '正在同步';
+    feedback.textContent = full ? '正在全量扫描，可能需要几分钟' : '正在快速同步';
     try {
       const response = await fetch(full ? '/sync?full=1' : '/sync', {method: 'POST', credentials: 'same-origin'});
       const result = await response.json();
@@ -19,7 +19,7 @@
       }
       activeButton.classList.remove('is-syncing');
       activeButton.classList.add('is-complete');
-      feedback.textContent = `检查 ${result.fetched} 条 · 新增 ${result.inserted} · 更新 ${result.updated} · 跳过 ${result.skipped}`;
+      feedback.textContent = `${result.mode === 'full' ? '全盘同步' : '快速同步'} · 检查 ${result.fetched} 条 · 新增 ${result.inserted} · 更新 ${result.updated} · 跳过 ${result.skipped}`;
       await new Promise(resolve => setTimeout(resolve, 1000));
       window.location.reload();
     } catch (error) {

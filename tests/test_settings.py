@@ -26,7 +26,8 @@ def settings_form(client):
     token = unescape(re.search(r'name="csrf_token" value="([^"]+)"', response.text)[1])
     return dict(csrf_token=token, sync_enabled='true', sync_time='03:00',
                 sync_interval_hours='0', backfill_days='90', tag_enabled='true',
-                tag_time='05:00', retention_days='0')
+                tag_time='05:00', retention_days='0', sync_mode_default='quick',
+                full_sync_enabled='true', full_sync_weekday='6', full_sync_time='03:30')
 
 
 def test_defaults_and_roundtrip_survive_restart(client, store):
@@ -37,7 +38,7 @@ def test_defaults_and_roundtrip_survive_restart(client, store):
     restarted.migrate()
     assert restarted.get_settings() == values
     with restarted._connect() as conn:
-        assert conn.execute('SELECT count(*) FROM settings').fetchone()[0] == 7
+        assert conn.execute('SELECT count(*) FROM settings').fetchone()[0] == 11
 
 
 @pytest.mark.parametrize('field,value', [
@@ -125,14 +126,14 @@ def test_settings_nav_and_descriptions(client):
     assert 'href="/settings" aria-label="设置中心"' in page
     for name in AutomationSettings().values():
         assert f'id="{name}"' in page
-    assert page.count('aria-describedby=') == 7
-    assert all(f'<legend>{group}</legend>' in page for group in ('同步', '标签', '数据保留'))
+    assert page.count('aria-describedby=') == 11
+    assert all(f'<legend>{group}</legend>' in page for group in ('同步', '同步策略', '标签', '数据保留'))
 
 
 def actions():
     calls = []
     return calls, {name + '_job': lambda store, prefs, name=name: calls.append((name, prefs))
-                   for name in ('sync', 'tag', 'retention')}
+                   for name in ('sync', 'full_sync', 'tag', 'retention')}
 
 
 @pytest.mark.parametrize('time,expected', [
@@ -203,7 +204,7 @@ def test_next_runs_tick_rounding_and_timezone(client, store):
         tick(store, now=datetime(2026, 10, 30))
 
 
-def test_overlap_skips_without_claim_and_busy_sync_retries(client, store):
+def test_tick_overlap_has_no_claim_and_busy_sync_consumes_slot(client, store):
     calls, jobs = actions()
     with tick_lock(store):
         assert tick(SQLiteStore(store.db_path), now=at('2026-10-30T06:00'), **jobs)['skipped'] == ['tick_locked']
@@ -211,8 +212,8 @@ def test_overlap_skips_without_claim_and_busy_sync_retries(client, store):
     def busy(*args):
         raise SyncInProgress
     result = tick(store, now=at('2026-10-30T06:00'), **{**jobs, 'sync_job': busy})
-    assert result['skipped'] == ['sync'] and 'sync' not in read_state(store)
-    assert tick(store, now=at('2026-10-30T06:10'), **jobs)['executed'] == ['sync']
+    assert result['skipped'] == ['sync'] and 'sync' in read_state(store)
+    assert tick(store, now=at('2026-10-30T06:10'), **jobs)['executed'] == []
 
 
 def test_failure_consumes_slot_and_other_jobs_continue(client, store):
@@ -329,7 +330,7 @@ def test_crash_after_claim_does_not_replay_after_restart(client, store):
     assert tick(SQLiteStore(store.db_path), now=at('2026-10-30T03:10'), **jobs)['executed'] == []
 
 
-def test_busy_existing_interval_claim_is_restored(client, store):
+def test_busy_existing_interval_claim_is_consumed(client, store):
     calls, jobs = actions()
     store.save_settings(replace(AutomationSettings(), sync_interval_hours=2, tag_enabled=False))
     tick(store, now=at('2026-10-30T01:00'), **jobs)
@@ -337,8 +338,8 @@ def test_busy_existing_interval_claim_is_restored(client, store):
     def busy(*args):
         raise SyncInProgress
     assert tick(store, now=at('2026-10-30T03:00'), **{**jobs,'sync_job':busy})['skipped'] == ['sync']
-    assert read_state(store) == previous
-    assert tick(store, now=at('2026-10-30T03:10'), **jobs)['executed'] == ['sync']
+    assert read_state(store)['sync'] > previous['sync']
+    assert tick(store, now=at('2026-10-30T03:10'), **jobs)['executed'] == []
 
 
 def test_defaults_tag_runner_calls_maintenance_and_flags_failure(client, store, monkeypatch):

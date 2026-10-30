@@ -202,10 +202,10 @@ def test_sync_only_new_or_model_input_changed(tagged_store, monkeypatch):
     for field, value in [(None, None), (None, None), ('duration_min', 40), ('title', '更正')]:
         if field:
             source.recordings[0] = replace(source.recordings[0], **{field: value})
-        assert run_sync(source, tagged_store, backfill_days=1).status == 'success'
+        assert run_sync(source, tagged_store, backfill_days=1, full=True).status == 'success'
     for field in ['summary_md', 'transcript_md']:
         source.details['new'] = replace(source.details['new'], **{field: '更正内容'})
-        run_sync(source, tagged_store, backfill_days=1)
+        run_sync(source, tagged_store, backfill_days=1, full=True)
     assert [result['attempted'] for result in results] == [1, 0, 0, 1, 1, 1]
 
 

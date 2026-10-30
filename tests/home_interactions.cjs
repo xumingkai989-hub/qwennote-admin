@@ -34,7 +34,7 @@ test('sync success shows a check for one second, locks button, then reloads curr
   assert.equal(calls[0][1].method, 'POST');
   assert.equal(calls[0][1].credentials, 'same-origin');
   assert.ok(h.classes.has('is-complete'));
-  assert.equal(h.feedback.textContent, '检查 8 条 · 新增 2 · 更新 1 · 跳过 5');
+  assert.equal(h.feedback.textContent, '快速同步 · 检查 8 条 · 新增 2 · 更新 1 · 跳过 5');
   assert.equal(h.delay, 1000);
   assert.equal(h.reloads, 0);
   h.finish(); await pending;
@@ -43,17 +43,18 @@ test('sync success shows a check for one second, locks button, then reloads curr
 });
 test('full sync posts the explicit URL and locks both buttons until completion', async () => {
   const calls = [];
-  const h = harness(async (...args) => {calls.push(args); return {ok: true, json: async () => ({status: 'success', fetched: 4, inserted: 1, updated: 3, skipped: 0})};}, true);
+  const h = harness(async (...args) => {calls.push(args); return {ok: true, json: async () => ({status: 'success', mode: 'full', fetched: 4, inserted: 1, updated: 3, skipped: 0})};}, true);
   const pending = h.fullClick();
   assert.equal(h.button.disabled, true);
   assert.equal(h.fullButton.disabled, true);
+  assert.equal(h.feedback.textContent, '正在全量扫描，可能需要几分钟');
   await h.click(); await h.fullClick();
   await new Promise(setImmediate);
   assert.equal(calls.length, 1);
   assert.equal(calls[0][0], '/sync?full=1');
   assert.equal(calls[0][1].method, 'POST');
   assert.equal(calls[0][1].credentials, 'same-origin');
-  assert.equal(h.feedback.textContent, '检查 4 条 · 新增 1 · 更新 3 · 跳过 0');
+  assert.equal(h.feedback.textContent, '全盘同步 · 检查 4 条 · 新增 1 · 更新 3 · 跳过 0');
   h.finish(); await pending;
   assert.equal(h.button.disabled, false);
   assert.equal(h.fullButton.disabled, false);

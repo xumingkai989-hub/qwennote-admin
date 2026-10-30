@@ -222,9 +222,9 @@ def test_sync_judges_only_new_or_changed_content(populated, store, monkeypatch):
     calls = []
     monkeypatch.setattr('app.hotword_judge.run_judgments', lambda store, **kw: calls.append(kw))
     source = Source()
-    assert run_sync(source, store, backfill_days=1).status == 'success' and calls == []
+    assert run_sync(source, store, backfill_days=90, full=True).status == 'success' and calls == []
     source.body = '内容变化'
-    assert run_sync(source, store, backfill_days=1).status == 'success'
+    assert run_sync(source, store, backfill_days=90, full=True).status == 'success'
     assert calls == [{'recording_ids': ['hotword']}] and store.hotword_decisions('hotword') == []
 
 

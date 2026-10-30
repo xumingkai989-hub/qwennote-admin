@@ -41,15 +41,15 @@ def install_settings(app, *, settings, templates, authorize, valid_csrf, csrf,
         denied = authorize(request, message='仅管理员可以管理设置。')
         if denied is not None:
             return denied
-        fields = await parse_form(request, cookie_name=cookie)
+        fields = await parse_form(request, cookie_name=cookie, max_fields=12)
         if not isinstance(fields, dict):
             return fields
         try:
             preferences = parse_settings_form(fields)
         except ValueError as error:
             draft = {key: values[0] for key, values in fields.items()
-                     if key not in ('csrf', 'csrf_token', 'sync_enabled', 'tag_enabled')}
-            draft.update({name: fields.get(name) == ['true'] for name in ('sync_enabled', 'tag_enabled')})
+                     if key not in ('csrf', 'csrf_token', 'sync_enabled', 'tag_enabled', 'full_sync_enabled')}
+            draft.update({name: fields.get(name) == ['true'] for name in ('sync_enabled', 'tag_enabled', 'full_sync_enabled')})
             return render(request, error=str(error), status=400, draft=draft)
         app.state.store.save_settings(preferences)
         return RedirectResponse('/settings?saved=1', status_code=303, headers={'Cache-Control': 'no-store'})

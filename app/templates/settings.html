@@ -2,7 +2,7 @@
 {% block main_attributes %} class="settings-page"{% endblock %}
 {% block content %}
 <div class="list-heading"><h1>设置中心</h1></div>
-<p class="settings-status" role="status">{% if saved %}<strong>已保存</strong> · {% endif %}{% if next_runs.sync %}下次同步 {{ next_runs.sync.strftime('%m-%d %H:%M') }}{% else %}自动同步已关闭{% endif %}</p>
+<p class="settings-status" role="status">{% if saved %}<strong>已保存</strong> · {% endif %}{% if next_runs.sync %}下次同步 {{ next_runs.sync.strftime('%m-%d %H:%M') }}{% else %}自动同步已关闭{% endif %} · {% if next_runs.full_sync %}下次全盘同步 {{ next_runs.full_sync.strftime('%m-%d %H:%M') }}{% else %}每周全盘已关闭{% endif %}</p>
 {% include "sync_result.html" %}
 {% if error %}<p class="settings-error" role="alert">{{ error }}</p>{% endif %}
 <form method="post" action="/settings" class="settings-form">
@@ -28,7 +28,37 @@
       <div class="settings-row">
         <label for="backfill_days">首次 / 补拉天数</label>
         <input id="backfill_days" name="backfill_days" type="number" min="1" max="999999" step="1" required value="{{ preferences.backfill_days }}" aria-describedby="backfill-help">
-        <p id="backfill-help">包含今天，至少 1 天；首次和全量同步扫描此范围，增量同步按上次成功时间缩小窗口并保留 2 天重叠。</p>
+        <p id="backfill-help">至少 1 天；首次和全盘同步扫描此范围，快速同步从上次成功开始时间前 10 分钟扫描，且不超过补拉范围。</p>
+      </div>
+    </div>
+  </fieldset>
+  <fieldset>
+    <legend>同步策略</legend>
+    <div class="settings-group">
+      <div class="settings-row">
+        <label for="sync_mode_default">每日同步模式</label>
+        <select id="sync_mode_default" name="sync_mode_default" aria-describedby="sync-mode-help">
+          <option value="quick"{% if preferences.sync_mode_default == 'quick' %} selected{% endif %}>快速同步</option>
+          <option value="full"{% if preferences.sync_mode_default == 'full' %} selected{% endif %}>全盘同步</option>
+        </select>
+        <p id="sync-mode-help">每日定时与未指定模式的 CLI 使用此设置；会议页按钮各自指定模式。</p>
+      </div>
+      <div class="settings-row">
+        <label for="full_sync_enabled">每周全盘同步</label>
+        <input id="full_sync_enabled" name="full_sync_enabled" type="checkbox" role="switch" value="true"{% if preferences.full_sync_enabled %} checked{% endif %} aria-describedby="full-sync-enabled-help">
+        <p id="full-sync-enabled-help">补历史、获取迟到总结和转写、修复漏数据；每周最多一次。</p>
+      </div>
+      <div class="settings-row">
+        <label for="full_sync_weekday">全盘同步星期</label>
+        <select id="full_sync_weekday" name="full_sync_weekday" aria-describedby="full-sync-weekday-help">
+          {% for day in ['周一', '周二', '周三', '周四', '周五', '周六', '周日'] %}<option value="{{ loop.index0 }}"{% if preferences.full_sync_weekday | string == loop.index0 | string %} selected{% endif %}>{{ day }}</option>{% endfor %}
+        </select>
+        <p id="full-sync-weekday-help">仅在所选星期执行；失败或同步撞车后不在本周重复。</p>
+      </div>
+      <div class="settings-row">
+        <label for="full_sync_time">全盘同步时间</label>
+        <input id="full_sync_time" name="full_sync_time" type="time" required value="{{ preferences.full_sync_time }}" aria-describedby="full-sync-time-help">
+        <p id="full-sync-time-help">Asia/Shanghai；最多延后 10 分钟执行。</p>
       </div>
     </div>
   </fieldset>

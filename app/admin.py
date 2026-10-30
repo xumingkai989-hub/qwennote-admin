@@ -38,7 +38,7 @@ def install_admin(app: FastAPI, *, settings: Settings, templates: Jinja2Template
                     and secrets.compare_digest(token.encode(), cookie.encode())
                     and value.startswith(session_binding(request) + ':'))
 
-    async def parse_form(request: Request, *, max_bytes=16384, cookie_name='admin_csrf'):
+    async def parse_form(request: Request, *, max_bytes=16384, max_fields=8, cookie_name='admin_csrf'):
         # Native HTML forms use URL encoding; no multipart dependency or JSON
         # fallback. Reject duplicate fields, including ambiguous CSRF values.
         try:
@@ -47,7 +47,7 @@ def install_admin(app: FastAPI, *, settings: Settings, templates: Jinja2Template
             body = await request.body()
             if len(body) > max_bytes:
                 raise ValueError
-            fields = parse_qs(body.decode('utf-8'), keep_blank_values=True, max_num_fields=8)
+            fields = parse_qs(body.decode('utf-8'), keep_blank_values=True, max_num_fields=max_fields)
             if any(len(values) != 1 for values in fields.values()):
                 raise ValueError
         except (ValueError, UnicodeError):

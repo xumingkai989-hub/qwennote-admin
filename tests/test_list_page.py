@@ -308,7 +308,7 @@ def test_header_search_is_enabled_and_css_is_served(list_client):
     assert 'disabled' not in search
     assert search.get('name') == 'q'
     assert 'action="/search"' in html
-    assert 'aria-label="同步"' in html
+    assert 'aria-label="快速同步"' in html
     assert '/static/app.css' in html
     css = list_client.get('/static/app.css')
     assert css.status_code == 200 and 'text/css' in css.headers['content-type']

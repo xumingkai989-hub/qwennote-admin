@@ -312,6 +312,8 @@ class SQLiteStore:
                 conn.execute('ALTER TABLE recordings ADD COLUMN media_type TEXT')
             if 'refreshed_token' not in {row['name'] for row in conn.execute('PRAGMA table_info(sync_runs)')}:
                 conn.execute('ALTER TABLE sync_runs ADD COLUMN refreshed_token INTEGER NOT NULL DEFAULT 0 CHECK (refreshed_token IN (0, 1))')
+            if 'mode' not in {row['name'] for row in conn.execute('PRAGMA table_info(sync_runs)')}:
+                conn.execute("ALTER TABLE sync_runs ADD COLUMN mode TEXT NOT NULL DEFAULT 'quick' CHECK (mode IN ('quick', 'full'))")
             if 'skipped' not in {row['name'] for row in conn.execute('PRAGMA table_info(sync_runs)')}:
                 conn.execute('ALTER TABLE sync_runs ADD COLUMN skipped INTEGER NOT NULL DEFAULT 0')
             conn.execute('CREATE INDEX IF NOT EXISTS recordings_created_at_idx '
@@ -716,7 +718,7 @@ class SQLiteStore:
             finally:
                 fcntl.flock(lock, fcntl.LOCK_UN)
 
-    def start_sync(self, started_at: str) -> int:
+    def start_sync(self, started_at: str, mode: str = 'quick') -> int:
         with self._connect() as conn:
             # With the OS lock held, any running row belongs to an interrupted
             # process. Retain it as a failed batch so a restart can safely retry.
@@ -725,15 +727,15 @@ class SQLiteStore:
                 (started_at, '上次同步进程中断，请重试'),
             )
             cursor = conn.execute(
-                "INSERT INTO sync_runs (started_at, status) VALUES (?, 'running')", (started_at,),
+                "INSERT INTO sync_runs (started_at, status, mode) VALUES (?, 'running', ?)", (started_at, mode),
             )
             return cursor.lastrowid
 
     def finish_sync(self, run: SyncRun) -> None:
         with self._connect() as conn:
             conn.execute(
-                "UPDATE sync_runs SET finished_at = ?, status = ?, fetched = ?, inserted = ?, updated = ?, skipped = ?, error = ?, refreshed_token = ? WHERE id = ?",
-                (run.finished_at, run.status, run.fetched, run.inserted, run.updated, run.skipped, run.error, run.refreshed_token, run.id),
+                "UPDATE sync_runs SET finished_at = ?, status = ?, fetched = ?, inserted = ?, updated = ?, skipped = ?, error = ?, refreshed_token = ?, mode = ? WHERE id = ?",
+                (run.finished_at, run.status, run.fetched, run.inserted, run.updated, run.skipped, run.error, run.refreshed_token, run.mode, run.id),
             )
 
     def latest_sync(self) -> SyncRun | None:

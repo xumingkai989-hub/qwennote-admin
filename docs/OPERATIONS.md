@@ -189,13 +189,13 @@ systemctl list-timers --all 'qwennote-*'
 
 | 任务 | 时刻与作用 | 查看方式 |
 | --- | --- | --- |
-| qwennote-tick.timer → service | 上海每 10 分钟；读设置执行到期同步、词表维护和可选保留期清理 | `systemctl status qwennote-tick.timer`；`journalctl -u qwennote-tick.service` |
+| qwennote-tick.timer → service | 上海每 10 分钟；读设置执行到期快速/全盘同步、每周全盘、词表维护和可选保留期清理 | `systemctl status qwennote-tick.timer`；`journalctl -u qwennote-tick.service` |
 | qwennote-backup.timer → service | 上海每日 04:00；数据库在线备份并保留 7 个日期 | `systemctl status qwennote-backup.timer`；`journalctl -u qwennote-backup.service` |
 | certbot-renew.timer 或 qwennote-acme.timer | 由 certificate 阶段实际选择；证书续期及 nginx 重载 | `systemctl list-timers --all`，检查实际续期服务日志 |
 | qwennote-sync.timer、qwennote-tag-maintenance.timer | 已退役，统一 tick 安装时禁用，避免重复运行 | `systemctl is-enabled qwennote-sync.timer qwennote-tag-maintenance.timer` |
 
-设置中心默认同步 03:00、词表维护 05:00；tag 定时任务维护词表，新增录音的打标由同步触发。
-tick 先领取后执行；普通失败等下个周期，同步锁冲突才留给下一 tick 重试。不要用删除锁文件的方式强行重跑。
+设置中心默认每日 03:00 快速同步、每周日 03:30 全盘同步、词表维护 05:00；tag 定时任务维护词表，新增录音的打标由同步触发。
+tick 先领取后执行；普通失败和同步锁冲突均消耗本次槽位，每日任务等下个周期，每周全盘等下一周配置的星期。不要用删除锁文件的方式强行重跑。
 要手动验证调度，可执行 `systemctl start qwennote-tick.service`；它仍遵循数据库中的到期判断，不是强制同步命令。
 
 ## 5. 日志与故障排查

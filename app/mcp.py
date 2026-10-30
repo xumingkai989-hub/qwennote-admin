@@ -195,15 +195,24 @@ class McpMinutesSource(HttpMinutesSource):
             seen.add(cursor)
             arguments = {**arguments, 'cursor' if name == 'list_my_minutes' else 'nextToken': cursor}
 
-    def _range(self, start, end):
+    def _range(self, start, end, *, early_stop=False):
         try:
             self._initialize()
             records = []
             seen = set()
+            previous_created = None
+            descending = early_stop
             for page in self._pages('list_my_minutes', {
                     'startTime': int(start.timestamp()*1000), 'endTime': int(end.timestamp()*1000),
                     'pageSize': 100}):
-                for item in _items(page, 'items'):
+                items = _items(page, 'items')
+                times = [datetime.fromtimestamp(item['gmtCreate']/1000, SHANGHAI) for item in items]
+                # Production probe 2026-10-30: first/last 3 of 13 items confirmed
+                # descending creation order. Do not early-stop unsorted responses.
+                sequence = ([previous_created] if previous_created else []) + times
+                descending = descending and all(a >= b for a, b in zip(sequence, sequence[1:]))
+                previous_created = times[-1] if times else previous_created
+                for item in items:
                     created = datetime.fromtimestamp(item['gmtCreate']/1000, SHANGHAI)
                     if not start <= created <= end:
                         continue
@@ -216,11 +225,16 @@ class McpMinutesSource(HttpMinutesSource):
                             None if duration is None else int((duration+30000)//60000),
                             _optional_text(item.get('mediaType'))))
                         seen.add(uuid)
+                if descending and any(created < start for created in times):
+                    break
             return records
         except TokenRefreshError:
             raise
         except (MinutesSourceError, KeyError, ValueError, TypeError, OverflowError, OSError):
             raise MinutesSourceError('千问录音列表拉取失败，请检查授权、网络或数据格式') from None
+
+    def sync_range(self, start, end, *, early_stop=False):
+        return self._range(start, end, early_stop=early_stop)
 
     def sync_window(self, days: int):
         if type(days) is not int or days < 1:

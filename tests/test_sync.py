@@ -63,7 +63,7 @@ def test_identical_sync_only_changes_synced_at(sync_client, settings):
     sync_client.post('/sync')
     before = rows(settings, 'recordings')
     result = sync_client.post('/sync').json()
-    assert (result['fetched'], result['inserted'], result['updated']) == (2, 0, 0)
+    assert (result['fetched'], result['inserted'], result['updated']) == (0, 0, 0)
     after = rows(settings, 'recordings')
     for old, new in zip(before, after):
         assert new['synced_at'] >= old['synced_at']
@@ -74,7 +74,7 @@ def test_identical_sync_only_changes_synced_at(sync_client, settings):
 def test_title_change_updates_exactly_one_record(sync_client, settings, source):
     sync_client.post('/sync')
     source.recordings[0] = replace(source.recordings[0], title='更正标题')
-    result = sync_client.post('/sync').json()
+    result = sync_client.post('/sync?full=1').json()
     assert (result['inserted'], result['updated']) == (0, 1)
     assert rows(settings, 'recordings')[0]['title'] == '更正标题'
     assert len(rows(settings, 'sync_runs')) == 2
@@ -89,7 +89,7 @@ def test_detail_failure_keeps_other_records_and_records_safe_error(sync_client, 
     assert run['status'] == 'failed' and 'demo-1' in run['error']
     assert 'do-not-persist' not in str(run)
     html = sync_client.get('/').text
-    assert 'demo-1' in html and 'role="alert"' in html and 'aria-label="同步"' in html
+    assert 'demo-1' in html and 'role="alert"' in html and 'aria-label="快速同步"' in html
 
 
 def test_whole_batch_failure_preserves_old_records_and_allows_retry(sync_client, settings, source):
@@ -155,7 +155,7 @@ def test_sync_requires_active_whitelist_session(client, settings):
 
 
 def test_home_has_button_status_counts_and_immediate_result_script(sync_client):
-    assert 'aria-label="同步"' in sync_client.get('/').text
+    assert 'aria-label="快速同步"' in sync_client.get('/').text
     sync_client.post('/sync')
     html = sync_client.get('/').text
     assert all(text not in html for text in ('上次同步时间', '拉取 2', 'sync-panel'))
@@ -178,7 +178,7 @@ def test_detail_id_mismatch_is_skipped(sync_client, settings, source):
 def test_detail_changes_update_one_record(sync_client, settings, source, field, value):
     sync_client.post('/sync')
     source.details['demo-1'] = replace(source.details['demo-1'], **{field: value})
-    result = sync_client.post('/sync').json()
+    result = sync_client.post('/sync?full=1').json()
     assert (result['inserted'], result['updated']) == (0, 1)
     assert rows(settings, 'recordings')[0][field] == value
 
@@ -187,7 +187,7 @@ def test_failed_refresh_keeps_previous_detail(sync_client, settings, source):
     sync_client.post('/sync')
     before = rows(settings, 'recordings')[0]
     source.detail_errors['demo-1'] = RuntimeError('unavailable')
-    assert sync_client.post('/sync').json()['status'] == 'failed'
+    assert sync_client.post('/sync?full=1').json()['status'] == 'failed'
     assert rows(settings, 'recordings')[0] == before
 
 

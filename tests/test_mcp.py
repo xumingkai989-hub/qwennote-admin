@@ -3,7 +3,7 @@ import json
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
-from datetime import datetime
+from datetime import datetime, timedelta
 from urllib.parse import parse_qs
 
 import httpx
@@ -122,9 +122,9 @@ def test_window_two_pages_idempotent_and_local_dates(setup_source, store, sse):
     assert store.list_recordings(NOW.date().replace(day=29), NOW.date().replace(day=29)).total == 1
     assert store.list_recordings(NOW.date(), NOW.date()).items[0].recording_id == 'real-2'
     calls = [a for n,a in server.calls if n == 'list_my_minutes']
-    assert len(calls) == 4 and calls[1]['cursor'] == 'page-two'
-    assert calls[0]['startTime'] == int(datetime(2026,8,1,tzinfo=SHANGHAI).timestamp()*1000)
-    assert calls[0]['endTime'] == int(NOW.timestamp()*1000)
+    assert len(calls) == 3 and calls[1]['cursor'] == 'page-two'
+    assert calls[0]['startTime'] == int((datetime.fromisoformat(first.started_at) - timedelta(days=90)).timestamp()*1000)
+    assert calls[0]['endTime'] == int(datetime.fromisoformat(first.started_at).timestamp()*1000)
     assert next(r for r in db_rows(store, 'recordings') if r['recording_id'] == 'real-1')['media_type'] == 'VIDEO'
 
 

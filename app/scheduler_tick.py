@@ -3,6 +3,7 @@ import fcntl
 import json
 import logging
 from contextlib import contextmanager
+from dataclasses import replace
 from datetime import datetime, timedelta
 
 from app.minutes import SHANGHAI
@@ -38,6 +39,19 @@ def scheduled_time(job, settings, now, last):
         return None
     if job == 'retention' and not settings.retention_days:
         return None
+    if job == 'full_sync':
+        if not settings.full_sync_enabled:
+            return None
+        hour, minute = map(int, settings.full_sync_time.split(':'))
+        due = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        due += timedelta(days=(settings.full_sync_weekday - now.weekday()) % 7)
+        # Claim consumes this week's slot, including failure or lock collision.
+        if last:
+            week = now.date() - timedelta(days=now.weekday())
+            last_week = last.date() - timedelta(days=last.weekday())
+            if last_week >= week:
+                due += timedelta(days=7 * ((last_week - week).days // 7 + 1))
+        return due
     if job == 'sync' and settings.sync_interval_hours:
         return (last.replace(minute=0, second=0, microsecond=0)
                 + timedelta(hours=settings.sync_interval_hours) if last else
@@ -54,7 +68,7 @@ def next_runs(store, settings, now):
     now = local_time(now)
     state = read_state(store)
     result = {}
-    for job in ('sync', 'tag', 'retention'):
+    for job in ('sync', 'full_sync', 'tag', 'retention'):
         due = scheduled_time(job, settings, now, state.get(job))
         if due is not None:
             due = max(due, now)
@@ -107,7 +121,8 @@ def _sync(store, preferences):
     config = deployment_settings()
     source = (FixtureMinutesSource(config.minutes_fixture_dir) if config.minutes_source == 'fixture'
               else McpMinutesSource() if config.minutes_source == 'mcp' else HttpMinutesSource())
-    result = run_sync(source, store, backfill_days=preferences.backfill_days)
+    result = run_sync(source, store, backfill_days=preferences.backfill_days,
+                      full=preferences.sync_mode_default == 'full')
     if result.status != 'success':
         raise RuntimeError('sync_failed')
 
@@ -119,7 +134,7 @@ def _tag(store, preferences):
         raise RuntimeError('tag_maintenance_failed')
 
 
-def tick(store, *, now=None, sync_job=None, tag_job=None, retention_job=None):
+def tick(store, *, now=None, sync_job=None, full_sync_job=None, tag_job=None, retention_job=None):
     now = local_time(now if now is not None else datetime.now(SHANGHAI))
     result = {'executed': [], 'failed': [], 'skipped': []}
     try:
@@ -127,7 +142,8 @@ def tick(store, *, now=None, sync_job=None, tag_job=None, retention_job=None):
             preferences = store.get_settings()
             state = read_state(store)
             for job, callback in (
-                ('sync', sync_job or _sync), ('tag', tag_job or _tag),
+                ('sync', sync_job or _sync),
+                ('full_sync', full_sync_job or sync_job or _sync), ('tag', tag_job or _tag),
                 ('retention', retention_job or
                  (lambda store, settings: retain_recordings(store, settings.retention_days, now))),
             ):
@@ -141,15 +157,11 @@ def tick(store, *, now=None, sync_job=None, tag_job=None, retention_job=None):
                                  'ON CONFLICT(job) DO UPDATE SET last_run_at=excluded.last_run_at',
                                  (job, now.isoformat()))
                 try:
-                    callback(store, preferences)
+                    callback(store, replace(preferences, sync_mode_default='full')
+                             if job == 'full_sync' else preferences)
                 except SyncInProgress:
-                    # No work started; the manual sync owns the lock. Retry next tick.
-                    with store._connect() as conn:
-                        if job in state:
-                            conn.execute('UPDATE scheduler_state SET last_run_at=? WHERE job=?',
-                                         (state[job].isoformat(), job))
-                        else:
-                            conn.execute('DELETE FROM scheduler_state WHERE job=?', (job,))
+                    # Sync collisions consume this slot: the later task skips
+                    # this occurrence instead of replaying it on the next tick.
                     result['skipped'].append(job)
                 except Exception:
                     logger.error('定时任务 %s 失败；请检查运行环境，下个周期再执行', job)
