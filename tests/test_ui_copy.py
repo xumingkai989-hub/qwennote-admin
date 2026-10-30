@@ -13,6 +13,8 @@ def test_home_removes_redundant_help_and_moves_time_note(client, url):
     login(client)
     html = client.get(url).text
     assert '只填起始日期可查看单日' not in html
+    assert 'type="date"' not in html
+    assert '筛选' not in html and '清除' not in html
     assert 'date-help' not in html
     assert 'selected-period' not in html
     assert '时间均为笔记创建时间' not in html

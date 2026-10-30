@@ -1,8 +1,6 @@
 {% extends "base.html" %}
 {% block main_attributes %} class="home-layout"{% endblock %}
 {% block content %}
-  {% set list_path = '/search' if search_query else '/' %}
-  {% set clear_url = '/search?q=' ~ (search_query | urlencode) if search_query else '/' %}
   <header class="topbar">
     <a class="brand" href="/">QwenNote</a>
     <div class="account"><span>{{ user.name }}</span><form action="/auth/logout" method="post"><button class="text-button" type="submit">退出</button></form></div>
@@ -16,19 +14,8 @@
     </button>
   </div>
   <p id="sync-error" role="alert">{{ sync_run.error if sync_run and sync_run.status == 'failed' and sync_run.error else '' }}</p>
-  <section class="filters" aria-label="日期筛选">
-    <form action="{{ list_path }}" method="get" class="date-filter" {% if filters.mode != 'all' %}aria-current="true"{% endif %}>
-      {% if search_query %}<input type="hidden" name="q" value="{{ search_query }}">{% endif %}
-      <label for="from">从</label>
-      <input id="from" type="date" name="from" aria-label="起始日期" value="{{ filters.start or '' }}">
-      <label for="to">到</label>
-      <input id="to" type="date" name="to" aria-label="结束日期" value="{{ filters.end if filters.mode == 'range' else '' }}">
-      <div class="date-actions"><button class="secondary" type="submit">筛选</button><a href="{{ clear_url }}" class="filter-link" aria-label="清除筛选">清除</a></div>
-    </form>
-  </section>
   <form class="search-form" action="/search" method="get" role="search">
       <input type="search" name="q" aria-label="搜索录音" placeholder="搜索标题、总结、转写" value="{{ search_query | default('') }}">
-      {% if search_query %}{% for name, value in filters.params.items() %}<input type="hidden" name="{{ name }}" value="{{ value }}">{% endfor %}{% endif %}
       <button type="submit">搜索</button>
   </form>
   {% if search_query %}
@@ -75,7 +62,7 @@
       </div>
     </section>
     {% else %}
-    <div class="empty-state"><h2>{{ '还没有同步任何录音' if filters.mode == 'all' else '这个时间范围内没有录音' }}</h2><p>{% if filters.mode == 'all' %}点击右上角同步按钮同步录音。{% else %}可以调整日期，或清除筛选查看全部。{% endif %}</p></div>
+    <div class="empty-state"><h2>还没有同步任何录音</h2><p>点击右上角同步按钮同步录音。</p></div>
     {% endfor %}
   </section>
   {% endif %}

@@ -163,12 +163,12 @@ def test_copy_has_clipboard_and_selection_fallback(detail_client):
     assert 'navigator.clipboard.writeText' in js and '.select()' in js
 
 
-def test_list_detail_return_preserves_filter(detail_client):
+def test_list_detail_return_drops_ignored_dates(detail_client):
     response = detail_client.get('/?date=2026-10-29&page=1')
     href = unescape(re.search(r'href="(/recordings/detail[^" ]*)"', response.text)[1])
     detail = detail_client.get(href)
     back = unescape(re.search(r'<a[^>]*id="back-to-list"[^>]*href="([^"]+)"', detail.text)[1])
-    assert parse_qs(urlsplit(back).query) == {'date': ['2026-10-29'], 'page': ['1']}
+    assert parse_qs(urlsplit(back).query) == {'page': ['1']}
 
 
 def test_invalid_return_filter_falls_back(detail_client):

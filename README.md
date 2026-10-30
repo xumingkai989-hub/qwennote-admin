@@ -1,6 +1,6 @@
 # QwenNote Admin
 
-工单 01–08：飞书登录白名单、手动同步、幂等入库、同步状态、录音列表与日期筛选、详情与 Markdown 导出、全文搜索、对外只读 API、API Key 命令行管理与审计，以及 SWAS HTTPS 部署。Python 3.11 + FastAPI + Jinja2 + 标准库 sqlite3，无 ORM、前端构建。包含管理员白名单管理与飞书联系人搜索；生产定时任务使用 systemd。
+工单 01–08：飞书登录白名单、手动同步、幂等入库、同步状态、录音列表、详情与 Markdown 导出、全文搜索、对外只读 API、API Key 命令行管理与审计，以及 SWAS HTTPS 部署。Python 3.11 + FastAPI + Jinja2 + 标准库 sqlite3，无 ORM、前端构建。包含管理员白名单管理与飞书联系人搜索；生产定时任务使用 systemd。
 
 后续所有 UI 工单须遵循 [UI 文案原则：让布局自己说话](docs/ui-principles.md)。全站逐条审计见 [工单 04g 文案表](docs/ui-copy-audit-04g.md)。
 
@@ -34,7 +34,7 @@ cp .env.example .env
 ## 登录与同步
 
 - `GET /`：未登录跳飞书授权；有效会话且仍在活动白名单内显示日期分组卡片流和“同步”图标按钮。成功显示 1 秒对勾后刷新当前 URL；失败显示一行安全错误说明，可再次点击同步重试。页面不再显示最近批次时间、状态或计数。时间均按 Asia/Shanghai，录音时间是笔记创建时间。
-- `POST /sync`：活动白名单会话可触发，未登录返回 401，有效 session 的用户被停用返回 403，跨域 Origin 返回 403。同步完成返回 HTTP 200 和 `status/fetched/inserted/updated/started_at/finished_at/error` JSON；`error` 成功为 null。按钮通过 fetch 调用，禁用当前按钮直到请求结束，在按钮内反馈结果并刷新当前筛选下的列表；请求失败时显示错误并允许重试。
+- `POST /sync`：活动白名单会话可触发，未登录返回 401，有效 session 的用户被停用返回 403，跨域 Origin 返回 403。同步完成返回 HTTP 200 和 `status/fetched/inserted/updated/started_at/finished_at/error` JSON；`error` 成功为 null。按钮通过 fetch 调用，禁用当前按钮直到请求结束，在按钮内反馈结果并刷新当前列表；请求失败时显示错误并允许重试。
 - `POST /auth/logout`：清除当前浏览器的 session cookie 并返回首页，之后重新走飞书登录。拒绝带外站 Origin 的请求。
 - 每个获准执行的同步恰好新增一行 `sync_runs`，开始为 running，结束写 success 或 failed。同一数据库旁的 `*.sync.lock` 使用非阻塞 `flock`，跨线程、应用实例及进程互斥；并发请求返回 409，不新增批次。锁文件不能在运行中删除。进程退出会释放锁，下次同步将中断的 running 批次标为 failed，再创建新批次。
 - 每天的列表与每条详情通过 `MinutesSource` 注入；同一批按 `recording_id` 去重。`fetched` 是唯一录音数（含详情失败的条目），`inserted` 是实际新增数，`updated` 是已有录音业务字段发生变化的数量。完全相同的数据只写 `synced_at`，updated=0，保留已有 `owner_open_id`。
@@ -49,24 +49,19 @@ cp .env.example .env
 
 `create_app(settings=..., feishu_auth=..., store=..., minutes_source=...)` 支持替换依赖。路由也可通过 `get_feishu_auth`、`get_store`、`get_minutes_source` 与 `dependency_overrides` 注入；迁移始终使用工厂传入的 Store。
 
-## 录音列表与筛选
+## 录音列表
 
-登录后首页默认显示全部笔记，不预设日期，按 `created_at DESC, recording_id DESC` 稳定排序。所有日期均包含当天 00:00 至 23:59:59.999999，存储已是 UTC+8 语义，查询和展示不再平移时间。列表底部以 12px 灰字标注“时间为笔记创建时间”。
+登录后首页显示全部笔记，按 `created_at DESC, recording_id DESC` 稳定排序。`GET /` 与 `GET /search?q=...` 忽略 `from`、`to`、`date` 和旧 `yesterday` 参数（包括空值、非法值及冲突组合），直接返回全量列表或全日期关键词匹配，不重定向、不报日期错误。页码仍须为正整数，超出末页时显示最后一页。
 
-| URL | 筛选 |
-| --- | --- |
-| `/` 或 `/?page=1` | 全部录音 |
-| `/?date=2026-10-29` | 指定日期 |
-| `/?from=2026-10-01&to=2026-10-29` | 含首尾日期的区间 |
-| `/?date=2026-10-29&page=2` | 同一筛选的第 2 页 |
+工单 05c 删除日期输入框、“筛选 / 清除”按钮、当前筛选提示和日期专用样式；搜索、同步、日期分组、卡片、四态标签与分页保留。分页和新生成的详情链接仅保留关键词与页码。服务端 `list_filters(..., include_dates=True)` 的日期解析路径及数据层日期查询接口保留，以便将来恢复；首页和搜索页显式关闭日期解析。
 
-页面仅保留一行日期控件“从 / 到 / 筛选 / 清除”，手机端换行。只填起始日期会转到 `?date=YYYY-MM-DD`，填写两端按区间筛选；清空两端提交或点击“清除”回到全部。当前生效日期直接显示在日期输入框中，列表总数显示“全部录音 · N 场”。旧 `?yesterday=1` 链接仍兼容，但不再展示快捷筛选。选择新日期时回到第 1 页；前后翻页保留当前筛选，刷新和分享 URL 可恢复。日期必须为 `YYYY-MM-DD`，区间两端必填且起始不晚于结束；筛选方式互斥，页码必须为正整数，错误返回可读的 400 页面。超出末页的页码显示最后一页，全部无数据时显示“还没有同步任何录音”，筛选后无数据时显示“这个时间范围内没有录音”，两者均显示“第 1 / 1 页”。
+全部无数据时显示“还没有同步任何录音”和“第 1 / 1 页”。列表底部保留 12px 灰字“时间为笔记创建时间”。时间按 Asia/Shanghai 展示。
 
 每页 20 条，由现有 SQL `COUNT(*)` 与 `LIMIT 20 OFFSET ?` 在同一读事务完成。主页展示层按 Asia/Shanghai 本地日期分组，日期与组内记录均倒序，同一时刻保持 ID 倒序。为了保留数据层接口，展示层仅为当前页有总结的记录调用现有 `get_recording`（最多 20 次），将 Markdown 转为前 120 字纯文本摘录；完整正文与转写不传入模板。
 
 每张卡片显示标题、可选摘要、可选时长胶囊和创建时间；底部行左侧按现有四态显示“已转录 / 仅转写 / 仅总结 / 未转录”，右侧保留创建时间。现有数据只保存整数分钟，胶囊据实显示“录音 · 1小时30分”，不补造秒数；null 不显示胶囊，0 显示“录音 · 0分”。不实现播放或其他分类标签。搜索结果保留原有命中高亮和四态徽标。
 
-页面由 Jinja2 渲染，样式集中于 `app/static/app.css`。主页为单列日期时间轴卡片，手机端保留左侧 20px 时间轴留白；明暗模式共用 1120px 版心与 16px 页边距。整卡链接到 `/recordings/{id}` 并保留日期和页码；搜索框提交 `/search?q=...`。测试与验收说明见 [工单 05](docs/home-cards-05.md)。
+页面由 Jinja2 渲染，样式集中于 `app/static/app.css`。主页为单列日期时间轴卡片，手机端保留左侧 20px 时间轴留白；明暗模式共用 1120px 版心与 16px 页边距。整卡链接到 `/recordings/{id}` 并保留页码；搜索框提交 `/search?q=...`。测试与验收说明见 [工单 05](docs/home-cards-05.md)。
 
 ## 数据源
 
@@ -344,3 +339,9 @@ LD_LIBRARY_PATH=/opt/qwennote/current/.sqlite/lib \
 工单 04h 将详情版心恢复为与主页一致的 **1120px 外框 / 固定 16px 页边距**，1440px 视口的 section 宽 1088px；总结和转写正文行高 1.75，转写段间距 24px。该规格替代上文 04d / 04f 的窄版参数。六视口实测表与浏览器回归运行方式见 [04h 版心验收](docs/detail-layout-04h.md)。
 
 工单 04i 保持上述版心不变，在详情卡片内侧增加桌面左右 32px、手机左右 16px 留白；表格和代码块长内容换行。四视口实测表与回归证据见 [04i 内边距验收](docs/detail-padding-04i.md)。
+
+## 工单 05c：主页去掉日期筛选
+
+Python 回归 **458 passed**（保留原有 455 项，日期筛选用例改为忽略参数，新增 3 项搜索日期参数用例）；JavaScript **19 passed**；Chrome 首页布局回归 **1 passed**，涵盖 1440 / 390 / 320px、浅色 / 深色。无日期控件、无筛选/清除文案、带日期的 total 与全量相同、分页不携带日期、搜索往返、分组、标签和空状态均通过。
+
+部署命令为 `python3 scripts/deploy.py --app-only`。真实数据主页截图（1440 / 390）、测试日志、发布目录与文件哈希验收保存在仓库外 `../qwennote-admin-artifacts/05c-20261030/`；不公开业务截图。

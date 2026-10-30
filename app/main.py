@@ -29,8 +29,15 @@ AUTHORIZE_URL = "https://accounts.feishu.cn/open-apis/authen/v1/authorize"
 logger = logging.getLogger(__name__)
 
 
-def list_filters(request: Request) -> dict:
+def list_filters(request: Request, *, include_dates: bool = True) -> dict:
     query = request.query_params
+    page = int(query.get('page', '1'))
+    if page < 1:
+        raise ValueError('页码须为正整数。')
+    # Home and search intentionally ignore even malformed legacy date parameters.
+    # Retain the date-aware path for detail links and future restoration.
+    if not include_dates:
+        return {'start': None, 'end': None, 'mode': 'all', 'params': {}, 'page': page}
     today = datetime.now(SHANGHAI).date()
     groups = sum(('date' in query, 'yesterday' in query, 'from' in query or 'to' in query))
     if groups > 1:
@@ -74,9 +81,6 @@ def list_filters(request: Request) -> dict:
     else:
         start = end = None
         mode = 'all'
-    page = int(query.get('page', '1'))
-    if page < 1:
-        raise ValueError('页码须为正整数。')
     return {'start': start, 'end': end, 'mode': mode, 'params': params, 'page': page}
 
 
@@ -176,12 +180,10 @@ def create_app(
         if not query:
             return RedirectResponse('/', status_code=302, headers={'Cache-Control': 'no-store'})
         try:
-            filters = list_filters(request)
+            filters = list_filters(request, include_dates=False)
         except ValueError:
-            return error_page(request, 400, '筛选条件无效',
-                              '请选择一种筛选方式，使用 YYYY-MM-DD 日期、完整且顺序正确的区间和正整数页码。')
-        if 'from' in request.query_params and request.query_params.get('to') == '':
-            return RedirectResponse('/search?' + urlencode({'q': query, **filters['params']}), status_code=303)
+            return error_page(request, 400, '页码无效',
+                              '请使用正整数页码。')
         recordings = store.search_recordings(query, filters['start'], filters['end'], filters['page'])
         params = {'q': query, **filters['params']}
 
@@ -203,13 +205,10 @@ def create_app(
         user = store.get_user(open_id) if open_id else None
         if user is not None and user.is_active:
             try:
-                filters = list_filters(request)
+                filters = list_filters(request, include_dates=False)
             except ValueError:
-                return error_page(request, 400, '筛选条件无效',
-                                  '请选择一种筛选方式，使用 YYYY-MM-DD 日期、完整且顺序正确的区间和正整数页码。')
-            if 'from' in request.query_params and request.query_params.get('to') == '':
-                suffix = '?' + urlencode(filters['params']) if filters['params'] else ''
-                return RedirectResponse('/' + suffix, status_code=303)
+                return error_page(request, 400, '页码无效',
+                                  '请使用正整数页码。')
             # Reuse the lightweight, paginated list query without changing the
             # data layer. Full representable bounds include every stored date.
             recordings = store.list_recordings(

@@ -99,7 +99,7 @@ def test_no_results_message_and_query_remains_in_input(search_client):
 
 
 @pytest.mark.parametrize('query', ['看板', '数据看板'])
-def test_pagination_date_range_and_detail_return_preserve_search(search_client, add_search_recording, query):
+def test_pagination_ignores_dates_and_detail_return_preserves_search(search_client, add_search_recording, query):
     for i in range(25):
         add_search_recording(f'match-{i:02}', title='数据看板', created='2026-10-28T23:59:59.999999+08:00')
     add_search_recording('outside', title='数据看板', created='2026-10-29T00:00:00+08:00')
@@ -107,13 +107,13 @@ def test_pagination_date_range_and_detail_return_preserve_search(search_client, 
     params = {'q': query, 'from': '2026-10-27', 'to': '2026-10-28'}
     first = search_client.get('/search', params=params)
     page1 = Page(first.text)
-    assert page1.cards == [f'match-{i:02}' for i in range(24, 4, -1)]
+    assert page1.cards == ['outside'] + [f'match-{i:02}' for i in range(24, 5, -1)]
     next_link, = [a for a in page1.links if a.get('rel') == 'next']
-    assert parse_qs(urlsplit(next_link['href']).query) == {**{k: [v] for k, v in params.items()}, 'page': ['2']}
+    assert parse_qs(urlsplit(next_link['href']).query) == {'q': [query], 'page': ['2']}
     second = search_client.get(next_link['href'])
     page2 = Page(second.text)
-    assert page2.cards == [f'match-{i:02}' for i in range(4, -1, -1)] + ['start']
-    assert '共 26 条' in second.text
+    assert page2.cards == [f'match-{i:02}' for i in range(5, -1, -1)] + ['start']
+    assert '共 27 条' in second.text
     previous, = [a for a in page2.links if a.get('rel') == 'prev']
     assert search_client.get(previous['href']).text == first.text
     detail_link = next(a['href'] for a in page2.links if a.get('href', '').startswith('/recordings/'))
@@ -125,11 +125,19 @@ def test_pagination_date_range_and_detail_return_preserve_search(search_client, 
 
 @pytest.mark.parametrize('params', [
     {'from': '2026-10-29'}, {'to': '2026-10-29'},
+    {'date': 'bad'}, {'date': '2026-10-29'},
+    {'date': 'bad', 'from': 'bad', 'to': ''},
     {'from': '2026-10-29', 'to': '2026-10-28'}, {'page': '0'}, {'page': 'bad'},
 ])
-def test_search_reuses_filter_validation(search_client, params):
+def test_search_ignores_dates_but_validates_pages(search_client, add_search_recording, params):
+    add_search_recording('outside', title='看板', created='2026-09-01T00:00:00+08:00')
     response = search_client.get('/search', params={'q': '看板', **params})
-    assert response.status_code == 400 and '筛选条件无效' in response.text
+    if 'page' in params:
+        assert response.status_code == 400 and '页码无效' in response.text
+    else:
+        assert response.status_code == 200
+        assert Page(response.text).cards == ['outside']
+        assert response.text == search_client.get('/search?q=看板').text
 
 
 def test_search_requires_active_whitelist(search_client, settings):

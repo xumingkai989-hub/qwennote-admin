@@ -105,7 +105,7 @@ def test_default_is_all_dates_sorted_by_created_time(list_client, add_recording)
     assert page.cards == ['tomorrow', 'late', 'early', 'yesterday']
     assert response.context['filters']['start'] is None
     assert response.context['filters']['end'] is None
-    assert all(field.get('value') == '' for field in page.inputs if field.get('type') == 'date')
+    assert 'type="date"' not in response.text
     assert not page.selected
     assert response.headers['cache-control'] == 'no-store'
 
@@ -141,7 +141,8 @@ def test_apple_grouped_list_and_dark_mode_markers(list_client):
     assert 'class="recording-list timeline"' in html
     assert 'segmented-control' not in html
     assert not {'今天', '昨天'} & {''.join(parts).strip() for parts in Page(html).controls}
-    assert 'aria-label="清除筛选"' in html
+    assert 'type="date"' not in html
+    assert not {'筛选', '清除'} & {''.join(parts).strip() for parts in Page(html).controls}
     css = list_client.get('/static/app.css').text
     assert '@media (prefers-color-scheme: dark)' in css
     assert '.date-group' in css
@@ -149,26 +150,22 @@ def test_apple_grouped_list_and_dark_mode_markers(list_client):
     assert 'outline: 2px solid var(--accent)' in css
 
 
-@pytest.mark.parametrize('query,expected', [
-    ({'date': '2026-10-28'}, ['day-28']),
-    ({'from': '2026-10-27', 'to': '2026-10-28'}, ['day-28', 'day-27']),
-    ({'from': '2026-10-28', 'to': '2026-10-28'}, ['day-28']),
-    ({'yesterday': '1'}, ['day-28']),
+@pytest.mark.parametrize('query', [
+    {'date': '2026-10-28'},
+    {'from': '2026-10-01', 'to': '2026-10-31'},
+    {'from': '2026-10-28', 'to': '2026-10-28'},
+    {'yesterday': '1'},
 ])
-def test_date_filters_include_whole_days(list_client, add_recording, query, expected):
+def test_date_parameters_are_ignored(list_client, add_recording, query):
     for day in range(26, 30):
         add_recording(f'day-{day}', f'2026-10-{day}T23:59:59.999999+08:00')
+    add_recording('outside-month', '2026-09-30T12:00:00+08:00')
+    baseline = list_client.get('/')
     response = list_client.get('/', params=query)
     assert response.status_code == 200
-    assert Page(response.text).cards == expected
-    assert Page(response.text).selected
-    for key, value in query.items():
-        if key == 'date':
-            assert any(field.get('name') == 'from' and field.get('value') == value
-                       for field in Page(response.text).inputs)
-        elif key != 'yesterday':
-            assert any(field.get('name') == key and field.get('value') == value
-                       for field in Page(response.text).inputs)
+    assert response.context['recordings'].total == baseline.context['recordings'].total == 5
+    assert response.text == baseline.text
+    assert Page(response.text).cards == ['day-29', 'day-28', 'day-27', 'day-26', 'outside-month']
 
 
 def test_card_badges_follow_transcript_state_and_only_excerpt_is_rendered(list_client, add_recording):
@@ -199,20 +196,15 @@ def test_card_badges_follow_transcript_state_and_only_excerpt_is_rendered(list_c
     {}, {'date': '2026-10-29'}, {'yesterday': '1'},
     {'from': '2026-10-28', 'to': '2026-10-29'},
 ])
-def test_pagination_20_then_5_no_overlap_and_preserves_filter(list_client, add_recording, query):
+def test_pagination_20_then_5_no_overlap_and_drops_dates(list_client, add_recording, query):
     day = '2026-10-28' if 'yesterday' in query else '2026-10-29'
     for i in range(25):
         # Identical timestamps also require a stable tie breaker.
         add_recording(f'item-{i:02}', f'{day}T12:00:00+08:00')
-    if query:
-        # More than a page of newer records outside the selected period would
-        # replace page 2 if pagination accidentally dropped the date filter.
-        for i in range(25):
-            add_recording(f'outside-{i:02}', '2026-10-30T12:00:00+08:00')
     first = list_client.get('/', params=query)
     page1 = Page(first.text)
     next_link, = [link for link in page1.links if link.get('rel') == 'next']
-    assert parse_qs(urlsplit(next_link['href']).query) == {**{k: [v] for k, v in query.items()}, 'page': ['2']}
+    assert parse_qs(urlsplit(next_link['href']).query) == {'page': ['2']}
     second = list_client.get(next_link['href'])
     page2 = Page(second.text)
     assert len(page1.cards) == 20 and len(page2.cards) == 5
@@ -251,10 +243,16 @@ def test_out_of_range_page_clamps_to_last_page(list_client, add_recording):
     {'date': '2026-10-29', 'yesterday': '1'}, {'yesterday': '0'},
     {'page': '0'}, {'page': '-1'}, {'page': 'bad'}, {'page': '1.5'},
 ])
-def test_invalid_filters_have_readable_error(list_client, query):
+def test_invalid_dates_are_ignored_but_invalid_pages_have_readable_error(list_client, add_recording, query):
+    add_recording('visible')
     response = list_client.get('/', params=query)
-    assert response.status_code == 400
-    assert '筛选条件无效' in response.text
+    if 'page' in query:
+        assert response.status_code == 400
+        assert '页码无效' in response.text
+    else:
+        assert response.status_code == 200
+        assert response.text == list_client.get('/').text
+        assert response.context['recordings'].total == 1
     assert 'Traceback' not in response.text
 
 
@@ -342,54 +340,53 @@ def test_all_dates_total_matches_database_and_first_page_has_20(list_client, add
     assert len(Page(response.text).cards) == 20
     assert Page(response.text).cards[0] == newest
     assert f'全部录音 · {total} 场' in response.text
-    assert all(field.get('value') == '' for field in Page(response.text).inputs if field.get('type') == 'date')
+    assert 'type="date"' not in response.text
 
 
-@pytest.mark.parametrize('query,label', [
-    ({'date': '2026-10-29'}, ['2026-10-29', '']),
-    ({'from': '2026-10-29', 'to': '2026-10-30'}, ['2026-10-29', '2026-10-30']),
+@pytest.mark.parametrize('query', [
+    {'date': '2026-10-29'},
+    {'from': '2026-10-29', 'to': '2026-10-30'},
 ])
-def test_filter_visible_and_clear_returns_all(list_client, add_recording, query, label):
+def test_legacy_dates_do_not_show_controls_or_current_filter(list_client, add_recording, query):
     add_recording('outside', '2026-10-28T12:00:00+08:00')
     add_recording('inside')
     response = list_client.get('/', params=query)
-    assert [field['value'] for field in Page(response.text).inputs if field.get('type') == 'date'] == label
-    assert 'aria-current="true"' in response.text
-    assert Page(response.text).cards == ['inside']
-    clear, = [link for link in Page(response.text).links if link.get('aria-label') == '清除筛选']
-    assert clear['href'] == '/'
-    cleared = list_client.get(clear['href'])
-    assert Page(cleared.text).cards == ['inside', 'outside']
-    assert all(field.get('value') == '' for field in Page(cleared.text).inputs if field.get('type') == 'date')
+    assert 'type="date"' not in response.text
+    assert '筛选' not in response.text and '清除' not in response.text
+    assert 'aria-current="true"' not in response.text
+    assert Page(response.text).cards == ['inside', 'outside']
+    assert response.text == list_client.get('/').text
 
 
 @pytest.mark.parametrize('query', [
     {'date': '2026-10-29'}, {'from': '2026-10-29', 'to': '2026-10-30'},
 ])
-def test_filtered_empty_state(list_client, add_recording, query):
-    add_recording('outside', '2026-10-28T12:00:00+08:00')
+def test_empty_state_with_ignored_date_parameters(list_client, query):
     response = list_client.get('/', params=query)
     assert response.status_code == 200
     assert response.context['recordings'].total == 0
-    assert '这个时间范围内没有录音' in response.text
-    assert '还没有同步任何录音' not in response.text
+    assert '这个时间范围内没有录音' not in response.text
+    assert '还没有同步任何录音' in response.text
+    assert '第 1 / 1 页' in response.text
 
 
-@pytest.mark.parametrize('path,query,target', [
-    ('/', {'from': '2026-10-29', 'to': ''}, '/?date=2026-10-29'),
-    ('/', {'from': '', 'to': ''}, '/'),
-    ('/search', {'q': '会议', 'from': '2026-10-29', 'to': ''}, '/search?q=%E4%BC%9A%E8%AE%AE&date=2026-10-29'),
-    ('/search', {'q': '会议', 'from': '', 'to': ''}, '/search?q=%E4%BC%9A%E8%AE%AE'),
+@pytest.mark.parametrize('path,query', [
+    ('/', {'from': '2026-10-29', 'to': ''}),
+    ('/', {'from': '', 'to': ''}),
+    ('/search', {'q': '会议', 'from': '2026-10-29', 'to': ''}),
+    ('/search', {'q': '会议', 'from': '', 'to': ''}),
 ])
-def test_one_row_form_canonicalizes_single_day_and_cleared_dates(list_client, path, query, target):
+def test_legacy_form_parameters_are_ignored_without_redirect(list_client, path, query):
     response = list_client.get(path, params=query)
-    assert response.status_code == 303
-    assert response.headers['location'] == target
-    assert list_client.get(target).status_code == 200
+    assert response.status_code == 200
+    assert 'location' not in response.headers
+    assert response.text == list_client.get(path, params={'q': query['q']} if 'q' in query else {}).text
 
 
-def test_form_end_without_start_is_invalid(list_client):
-    assert list_client.get('/?from=&to=2026-10-29').status_code == 400
+def test_form_end_without_start_is_ignored(list_client):
+    response = list_client.get('/?from=&to=2026-10-29')
+    assert response.status_code == 200
+    assert response.text == list_client.get('/').text
 
 
 def test_three_date_groups_descending_with_cards_sorted_inside(list_client, add_recording):
@@ -441,15 +438,15 @@ def test_group_key_uses_shanghai_date_not_source_offset():
     assert groups[0]['items'][0]['recording'].created_at.strftime('%H:%M') == '01:00'
 
 
-def test_filtered_total_and_card_links_preserve_page_and_dates(list_client, add_recording):
+def test_total_and_card_links_preserve_page_but_drop_dates(list_client, add_recording):
     for index in range(25):
         add_recording(f'card-{index:02}')
     add_recording('outside', '2026-10-28T23:00:00+08:00')
     html = list_client.get('/?date=2026-10-29&page=2').text
-    assert '全部录音 · 25 场' in html
+    assert '全部录音 · 26 场' in html
     links = [link['href'] for link in Page(html).links if link.get('class') == 'timeline-card-link']
-    assert len(links) == 5
-    assert all(parse_qs(urlsplit(link).query) == {'date': ['2026-10-29'], 'page': ['2']} for link in links)
+    assert len(links) == 6
+    assert all(parse_qs(urlsplit(link).query) == {'page': ['2']} for link in links)
 
 
 def test_summary_escape_and_no_player_or_tags(list_client, store):
