@@ -11,7 +11,7 @@ from app.store import StoredRecording
 # Explicitly disable raw HTML. CommonMark also rejects javascript/data HTML links.
 MARKDOWN = MarkdownIt('commonmark', {'html': False})
 SEGMENT = re.compile(
-    r'^\[(\d{2,}:\d{2}:\d{2}\.\d+[–—-]\d{2,}:\d{2}:\d{2}\.\d+)\][ \t]*(.*)$',
+    r'^\[(\d{2,}:\d{2}(?::\d{2})?\.\d+[–—-]\d{2,}:\d{2}(?::\d{2})?\.\d+)\][ \t]*(.*)$',
     re.MULTILINE,
 )
 

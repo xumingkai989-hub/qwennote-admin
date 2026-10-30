@@ -27,6 +27,8 @@ SESSION_SECRET=$(openssl rand -hex 32)
 DB_PATH=/opt/qwennote/data/qwennote.db
 ADMIN_OPEN_ID=
 QWENNOTE_MCP_TOKEN=
+QWENNOTE_MCP_URL=https://minutes.qwennote.cn/mcp
+QWENNOTE_TOKEN_FILE=/opt/qwennote/data/mcp_token.json
 QWENNOTE_SOURCE=fixture
 QWENNOTE_FIXTURE_DIR=/opt/qwennote/current/tests/fixtures/minutes
 EOF

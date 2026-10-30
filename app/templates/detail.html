@@ -22,6 +22,8 @@
   </div>
   {% if not recording.has_summary and not recording.has_transcript %}
     <p class="empty-state">该录音既无转写也无总结</p>
+    <p>该录音暂无总结</p>
+    <p>该录音未转录</p>
   {% else %}
     <section class="detail-section" aria-labelledby="summary-heading">
       <h2 id="summary-heading">总结</h2>

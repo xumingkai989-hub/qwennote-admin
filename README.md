@@ -280,3 +280,23 @@ systemctl list-timers --all 'qwennote-*'
 ```
 
 回滚以 root 执行 `/opt/qwennote/current/scripts/rollback.sh`，原子指回 `previous` 并重启 `qwennote`，打印实际版本目录。无有效前一版则明确失败且不动 current；重启失败恢复原指向。首次部署没有可回滚版本。回滚只切应用代码，持久数据库不回退；涉及不兼容数据库迁移的后续升级须另行安排数据恢复。
+
+## 真实千问 MCP 与 OAuth 续期（工单 09）
+
+生产设置 `QWENNOTE_SOURCE=mcp`、`QWENNOTE_MCP_URL=https://minutes.qwennote.cn/mcp`、`QWENNOTE_TOKEN_FILE=/opt/qwennote/data/mcp_token.json`。Token 文件为 `qwennote:qwennote`、600，包含注册所得 `client_id`、`scope`、`obtained_at`、`access_token`、`refresh_token`、`expires_in`；凭据不进入 Git、日志或页面。`QWENNOTE_MCP_TOKEN` 仅供保留的旧 HTTP 适配器兼容，MCP 源不读取它。缺失或无效的 token 文件使启动明确失败，不回退 fixture。
+
+应用启动读取 token 文件；按 `obtained_at + expires_in - 120` 判断是否需续期。每次请求重新读取磁盘凭据，在稳定的 `.lock` 文件上获取排他文件锁后再次检查，避免多进程同时消费旧 refresh token。续期使用 `/token` 的表单编码；新 access token、轮换的 refresh token 和取得时间以 600 临时文件原子覆盖原文件。401 在锁内刷新后重试一次；超时、408、429、5xx 最多额外重试两次，退避 1、2 秒，每次请求超时 30 秒。提供方响应、异常原文及凭据不写日志或同步摘要。
+
+网页 `POST /sync` 和 `scripts.sync_once` 都复用 `run_sync`，MCP 模式调用 `sync_window(90)`（可通过现有 `BACKFILL_DAYS` 调整）。范围从上海时间 90 天前零点到当前时刻，使用 epoch 毫秒 `startTime/endTime`，列表后续页用 `cursor=nextToken`。本端再次校验时间范围，并按 `gmtCreate` 转成上海时间归档，避免接口返回跨天记录导致误归日期。UUID 去重及 upsert 保证幂等；详情失败仅跳过该条并在 `sync_runs.error` 记录安全摘要，续期失败立即终止本次同步并记 failed，保留已有录音。
+
+每条详情读取 basic info、AI summary 和全部转写页；`mediaType` 保存为 `recordings.media_type`，不实现播放器，日常同步无需请求媒体地址。可选媒体元数据查询对 `available=false` / `INCOGNITO_MODE` 正常返回，不记录错误。任一转写页 `filtered=true` 或没有段落时视为未转录；`hasSummary=false` 显示“暂无总结”。转写以录音内毫秒偏移保存为 `[mm:ss.mmm–mm:ss.mmm] 发言人`、空行、正文、空行，详情同时兼容旧小时格式。数据库启动自动补充 nullable `media_type` 及 `sync_runs.refreshed_token`（0/1），保留历史数据和全文索引。
+
+切换生产源后清理历史示例数据（可重复，只要求 DB_PATH，不要求 OAuth 或飞书配置）：
+
+```sh
+DB_PATH=/opt/qwennote/data/qwennote.db \
+LD_LIBRARY_PATH=/opt/qwennote/current/.sqlite/lib \
+/opt/qwennote/current/.venv/bin/python -m app.purge_fixture
+```
+
+命令只删除 ID 以 `fixture-` 开头的记录，打印实际删除条数；已有全文索引触发器同步删除搜索条目。生产使用现有 `python3 scripts/deploy.py --app-only` release 流程，保留 previous，不修改 nginx 或其他站点。

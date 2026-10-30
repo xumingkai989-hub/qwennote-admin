@@ -211,6 +211,10 @@ class SQLiteStore:
                 conn.execute("INSERT INTO recordings_nullable SELECT * FROM recordings")
                 conn.execute("DROP TABLE recordings")
                 conn.execute("ALTER TABLE recordings_nullable RENAME TO recordings")
+            if 'media_type' not in {row['name'] for row in conn.execute('PRAGMA table_info(recordings)')}:
+                conn.execute('ALTER TABLE recordings ADD COLUMN media_type TEXT')
+            if 'refreshed_token' not in {row['name'] for row in conn.execute('PRAGMA table_info(sync_runs)')}:
+                conn.execute('ALTER TABLE sync_runs ADD COLUMN refreshed_token INTEGER NOT NULL DEFAULT 0 CHECK (refreshed_token IN (0, 1))')
             conn.execute('CREATE INDEX IF NOT EXISTS recordings_created_at_idx '
                          'ON recordings (created_at DESC, recording_id DESC)')
             # Keep the schema change, backfill and index creation in one write
@@ -433,8 +437,8 @@ class SQLiteStore:
     def finish_sync(self, run: SyncRun) -> None:
         with self._connect() as conn:
             conn.execute(
-                "UPDATE sync_runs SET finished_at = ?, status = ?, fetched = ?, inserted = ?, updated = ?, error = ? WHERE id = ?",
-                (run.finished_at, run.status, run.fetched, run.inserted, run.updated, run.error, run.id),
+                "UPDATE sync_runs SET finished_at = ?, status = ?, fetched = ?, inserted = ?, updated = ?, error = ?, refreshed_token = ? WHERE id = ?",
+                (run.finished_at, run.status, run.fetched, run.inserted, run.updated, run.error, run.refreshed_token, run.id),
             )
 
     def latest_sync(self) -> SyncRun | None:
@@ -446,10 +450,11 @@ class SQLiteStore:
         if detail.recording_id != meta.recording_id or not meta.recording_id or meta.created_at.tzinfo is None:
             raise ValueError('Invalid recording identity or timestamp')
         fields = ('title', 'created_at', 'duration_min', 'summary_md', 'transcript_md', 'has_transcript', 'has_summary',
-                  'search_text')
+                  'search_text', 'media_type')
         values = (meta.title, meta.created_at.astimezone(SHANGHAI).isoformat(), meta.duration_min,
                   detail.summary_md, detail.transcript_md, int(detail.has_transcript), int(detail.has_summary),
-                  '\n'.join((meta.title or '', detail.summary_md or '', detail.transcript_md or '')))
+                  '\n'.join((meta.title or '', detail.summary_md or '', detail.transcript_md or '')),
+                  detail.media_type or meta.media_type)
         with self._connect() as conn:
             conn.execute('BEGIN IMMEDIATE')
             old = conn.execute('SELECT * FROM recordings WHERE recording_id = ?', (meta.recording_id,)).fetchone()
@@ -458,12 +463,12 @@ class SQLiteStore:
                 return 'unchanged'
             conn.execute(
                 'INSERT INTO recordings (recording_id, title, created_at, duration_min, summary_md, transcript_md, '
-                'has_transcript, has_summary, search_text, synced_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) '
+                'has_transcript, has_summary, search_text, media_type, synced_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) '
                 'ON CONFLICT(recording_id) DO UPDATE SET '
                 'title = excluded.title, created_at = excluded.created_at, duration_min = excluded.duration_min, '
                 'summary_md = excluded.summary_md, transcript_md = excluded.transcript_md, '
                 'has_transcript = excluded.has_transcript, has_summary = excluded.has_summary, '
-                'search_text = excluded.search_text, synced_at = excluded.synced_at',
+                'search_text = excluded.search_text, media_type = excluded.media_type, synced_at = excluded.synced_at',
                 (meta.recording_id, *values, synced_at),
             )
             return 'updated' if old else 'inserted'

@@ -19,7 +19,7 @@ def test_startup_migrates_only_required_tables_and_seeds_admin(client, settings)
         assert conn.execute("SELECT COUNT(*) FROM recordings").fetchone()[0] == 0
         assert {r[1] for r in conn.execute("PRAGMA table_info(recordings)")} == {
             "recording_id", "title", "created_at", "duration_min", "summary_md",
-            "transcript_md", "has_transcript", "has_summary", "owner_open_id", "synced_at", "search_text",
+            "transcript_md", "has_transcript", "has_summary", "owner_open_id", "synced_at", "search_text", "media_type",
         }
         assert {r[1] for r in conn.execute("PRAGMA table_info(users)")} == {
             "subject", "union_id", "open_id", "name", "avatar_url", "is_active", "added_at",
@@ -117,7 +117,9 @@ def test_migration_preserves_work_order_01_recordings(settings, fake_auth):
     store.migrate()
     store.migrate()
     with sqlite3.connect(settings.db_path) as conn:
-        assert conn.execute('SELECT * FROM recordings').fetchone()[:-1] == before
+        assert conn.execute('SELECT recording_id, title, created_at, duration_min, summary_md, transcript_md, '
+                            'has_transcript, has_summary, owner_open_id, synced_at FROM recordings').fetchone() == before
+        assert conn.execute('SELECT media_type FROM recordings').fetchone()[0] is None
         columns = {row[1]: row for row in conn.execute('PRAGMA table_info(recordings)')}
         assert all(columns[field][3] == 0 for field in ('duration_min', 'summary_md', 'transcript_md'))
     with TestClient(create_app(settings=settings, feishu_auth=fake_auth, store=store), follow_redirects=False) as client:
@@ -125,7 +127,9 @@ def test_migration_preserves_work_order_01_recordings(settings, fake_auth):
         result = client.post('/sync').json()
         assert result['status'] == 'success'
     with sqlite3.connect(settings.db_path) as conn:
-        assert conn.execute("SELECT * FROM recordings WHERE recording_id = 'legacy'").fetchone()[:-1] == before
+        assert conn.execute("SELECT recording_id, title, created_at, duration_min, summary_md, transcript_md, "
+                            "has_transcript, has_summary, owner_open_id, synced_at FROM recordings "
+                            "WHERE recording_id = 'legacy'").fetchone() == before
 
 
 @pytest.mark.parametrize('value', ['0', '-1', 'abc'])

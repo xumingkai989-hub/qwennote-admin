@@ -19,8 +19,8 @@ class Settings:
     def __post_init__(self):
         if self.admin_open_id.strip() and not self.admin_open_ids:
             raise ValueError("ADMIN_OPEN_ID must contain at least one identity")
-        if self.minutes_source not in {"http", "fixture"}:
-            raise ValueError("QWENNOTE_SOURCE must be http or fixture")
+        if self.minutes_source not in {"http", "fixture", "mcp"}:
+            raise ValueError("QWENNOTE_SOURCE must be http, fixture or mcp")
         if self.minutes_source == "fixture" and self.minutes_fixture_dir is None:
             raise ValueError("QWENNOTE_FIXTURE_DIR is required for fixture mode")
         if type(self.backfill_days) is not int or self.backfill_days < 1:

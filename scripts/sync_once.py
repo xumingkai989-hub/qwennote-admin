@@ -1,3 +1,4 @@
+from app.mcp import McpMinutesSource
 """systemd entry point using the application's existing synchronization pipeline."""
 import json
 
@@ -12,7 +13,8 @@ def main():
     store = SQLiteStore(settings.db_path)
     store.migrate()
     source = (FixtureMinutesSource(settings.minutes_fixture_dir)
-              if settings.minutes_source == 'fixture' else HttpMinutesSource())
+              if settings.minutes_source == 'fixture' else
+              McpMinutesSource() if settings.minutes_source == 'mcp' else HttpMinutesSource())
     result = run_sync(source, store, backfill_days=settings.backfill_days)
     print(json.dumps(result.result(), ensure_ascii=False))
     return 0 if result.status == 'success' else 1

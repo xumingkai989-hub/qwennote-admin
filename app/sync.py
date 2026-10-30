@@ -3,6 +3,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta
 from typing import Protocol
 
+from app.mcp import TokenRefreshError
 from app.minutes import MinutesSource, RecordingDetail, RecordingMeta, SHANGHAI
 
 
@@ -20,6 +21,7 @@ class SyncRun:
     inserted: int = 0
     updated: int = 0
     error: str | None = None
+    refreshed_token: int = 0
 
     def result(self) -> dict:
         return {key: value for key, value in asdict(self).items() if key != 'id'}
@@ -46,10 +48,14 @@ def run_sync(source: MinutesSource, store: SyncStore, *, backfill_days: int = 90
         fetched = inserted = updated = 0
         errors = []
         seen = set()
+        refresh_before = getattr(source, 'refresh_count', 0)
         try:
-            for offset in range(backfill_days):
-                day = started.date() - timedelta(days=offset)
-                recordings = source.list_by_date(day)
+            if hasattr(source, 'sync_window'):
+                batches = (source.sync_window(backfill_days),)
+            else:
+                batches = (source.list_by_date(started.date() - timedelta(days=offset))
+                           for offset in range(backfill_days))
+            for recordings in batches:
                 for meta in recordings:
                     if meta.recording_id in seen:
                         continue
@@ -57,8 +63,10 @@ def run_sync(source: MinutesSource, store: SyncStore, *, backfill_days: int = 90
                     fetched += 1
                     try:
                         detail = source.get_detail(meta.recording_id)
+                    except TokenRefreshError:
+                        raise
                     except Exception:
-                        # Never persist str(exception): external clients may include credentials.
+                        # Never persist provider exception text: it may include credentials.
                         errors.append(f'录音 {meta.recording_id}：详情拉取失败，请重试')
                         continue
                     try:
@@ -68,10 +76,13 @@ def run_sync(source: MinutesSource, store: SyncStore, *, backfill_days: int = 90
                         continue
                     inserted += outcome == 'inserted'
                     updated += outcome == 'updated'
+        except TokenRefreshError:
+            errors.append('千问 OAuth 续期失败，请检查 token 文件、授权或网络后重试')
         except Exception:
             errors.append('录音列表拉取失败，请检查数据源、凭据和网络配置后重试')
         run = SyncRun(run_id, started.isoformat(), datetime.now(SHANGHAI).isoformat(),
                       'failed' if errors else 'success', fetched, inserted, updated,
-                      '\n'.join(errors) if errors else None)
+                      '\n'.join(errors) if errors else None,
+                      int(getattr(source, 'refresh_count', 0) > refresh_before))
         store.finish_sync(run)
         return run

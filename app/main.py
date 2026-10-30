@@ -1,3 +1,4 @@
+from app.mcp import McpMinutesSource
 import logging
 import secrets
 from contextlib import asynccontextmanager
@@ -103,7 +104,8 @@ def create_app(
     app.state.feishu_auth = feishu_auth if feishu_auth is not None else HttpFeishuAuth(settings)
     if minutes_source is None:
         minutes_source = (FixtureMinutesSource(settings.minutes_fixture_dir)
-                          if settings.minutes_source == 'fixture' else HttpMinutesSource())
+                          if settings.minutes_source == 'fixture' else
+                          McpMinutesSource() if settings.minutes_source == 'mcp' else HttpMinutesSource())
     app.state.minutes_source = minutes_source
     templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
     sessions = SignedCookie(settings.session_secret, salt="web-session", max_age=SESSION_MAX_AGE)

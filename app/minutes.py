@@ -22,6 +22,7 @@ class RecordingMeta:
     title: str
     created_at: datetime
     duration_min: int | None
+    media_type: str | None = None
 
 
 @dataclass(frozen=True)
@@ -31,6 +32,7 @@ class RecordingDetail:
     transcript_md: str | None
     has_transcript: bool
     has_summary: bool
+    media_type: str | None = None
 
 
 class MinutesSource(Protocol):
