@@ -62,7 +62,6 @@ input::placeholder { color: var(--secondary); opacity: 1; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .topbar { position: sticky; top: 0; z-index: 3; display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 16px; min-height: 76px; border-bottom: 1px solid var(--separator); background: var(--background); }
 .brand { width: fit-content; min-height: 44px; display: flex; flex-direction: column; justify-content: center; font-size: 20px; line-height: 1.2; font-weight: 700; letter-spacing: -.5px; color: var(--text); }
-.brand span { margin-top: 3px; color: var(--secondary); font-size: 12px; font-weight: 400; letter-spacing: .08em; }
 .account { display: flex; align-items: center; gap: 12px; min-width: 0; font-size: 15px; }
 .account > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 180px; color: var(--secondary); }
 .text-button, .secondary { color: var(--accent); background: transparent; }
@@ -72,23 +71,23 @@ input::placeholder { color: var(--secondary); opacity: 1; }
 h1 { margin: 0; font-size: 34px; line-height: 1.2; font-weight: 700; letter-spacing: -.03em; }
 .list-heading h1, .empty-state h2 { overflow-wrap: anywhere; min-width: 0; }
 .list-heading > span { flex-shrink: 0; }
-.list-heading > span, .time-note, .selected-period { color: var(--secondary); font-size: 13px; }
-.time-note { margin: 8px 0 22px; }
+.list-heading > span { color: var(--secondary); font-size: 13px; }
+.time-note { margin: 8px 0 0; color: var(--secondary); font-size: 12px; }
+.list-heading + .search-form { margin-top: 20px; }
 .search-form { display: flex; gap: 10px; }
 .search-form input[type="search"] { flex: 1; width: 100%; background: var(--control); border-color: transparent; }
 .sync-panel { display: flex; flex-wrap: wrap; gap: 4px 20px; margin: 14px 0 24px; padding: 12px 16px; border-radius: 12px; background: var(--surface); color: var(--secondary); font-size: 13px; }
 .sync-panel p { margin: 0; overflow-wrap: anywhere; }
+.sync-panel p:empty { display: none; }
 #sync-error { flex-basis: 100%; white-space: pre-wrap; color: var(--danger); }
 #sync-error:empty { display: none; }
-.filters { display: flex; flex-wrap: wrap; gap: 12px 16px; align-items: center; }
+.filters { display: flex; flex-wrap: wrap; gap: 12px 16px; align-items: center; margin-bottom: 20px; }
 .filter-link { display: inline-flex; min-width: 44px; min-height: 44px; align-items: center; justify-content: center; padding: 8px 16px; border-radius: 8px; }
 .date-filter { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 15px; }
 .date-filter label { color: var(--secondary); }
 .date-filter input { scroll-margin-top: 90px; min-width: 0; }
 .date-actions { display: flex; align-items: center; gap: 8px; }
-.filter-help { margin: 8px 0 20px; }
 .date-filter[aria-current] input { border-color: var(--accent); }
-.selected-period { margin: 12px 0; }
 .inset-grouped { background: var(--surface); border-radius: 12px; }
 .recording-list-header, .recording-row-link { display: grid; grid-template-columns: 112px minmax(0, 1fr) 72px 88px; column-gap: 20px; align-items: center; height: 44px; padding: 0 16px; }
 .recording-list-header { border-bottom: 1px solid var(--separator); color: var(--secondary); font-size: 13px; }
@@ -149,6 +148,8 @@ h1 { margin: 0; font-size: 34px; line-height: 1.2; font-weight: 700; letter-spac
 .view-option.is-empty { color: var(--secondary); }
 .view-option.is-empty[aria-current="page"] { color: #AEAEB2; }
 .detail-meta { grid-column: 1 / -1; margin-top: 4px; color: var(--secondary); font-size: 13px; white-space: nowrap; }
+#copy-status:empty { display: none; }
+.error-page { padding-top: 26px; overflow-wrap: anywhere; }
 .detail-section { margin: 16px 0 0; padding: 24px 0 36px; background: var(--surface); border-radius: 12px; overflow-wrap: anywhere; }
 .detail-section h2 { margin-top: 0; }
 .markdown-body pre { overflow-x: auto; padding: 16px; background: var(--background); border-radius: 8px; }
@@ -205,6 +206,9 @@ h1 { margin: 0; font-size: 34px; line-height: 1.2; font-weight: 700; letter-spac
 mark { background: var(--mark); color: var(--text); border-radius: 2px; }
 .admin-section { margin-top: 28px; padding: 20px; border-radius: 12px; background: var(--surface); }
 .admin-section h2 { margin-top: 0; }
+.admin-section .search-form { flex-wrap: wrap; align-items: center; }
+.admin-section .search-form input { flex: 1 1 180px; width: auto; }
+.list-heading > a { flex-shrink: 0; }
 .admin-table-wrap { overflow-x: auto; }
 .admin-table { border-collapse: collapse; width: 100%; text-align: left; font-size: 14px; }
 .admin-table caption { text-align: left; padding: 12px 0; }
@@ -234,6 +238,13 @@ mark { background: var(--mark); color: var(--text); border-radius: 2px; }
   .recording-card h2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
   .pagination { gap: 20px; }
   .segmented-control { width: 100%; }
+  .admin-table, .admin-table tbody, .admin-table caption { display: block; }
+  .admin-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .admin-table tr { display: block; padding-block: 12px; }
+  .admin-table tbody tr + tr { border-top: 1px solid var(--separator); }
+  .admin-table td { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 12px; min-width: 0; padding: 6px 0; border: 0; }
+  .admin-table td::before { content: attr(data-label); color: var(--secondary); }
+  .admin-table time { min-width: 0; }
 }
 
 /* Summary document only: transcript typography and interactions stay isolated. */
@@ -246,8 +257,6 @@ mark { background: var(--mark); color: var(--text); border-radius: 2px; }
   --document-quote: #D1D1D6;
   background: #FFFFFF; color: var(--document-text); font-size: 16px; line-height: 1.8;
 }
-.summary-metadata { padding: 12px 16px; border-radius: 8px; background: var(--document-meta); color: var(--document-secondary); font-size: 14px; }
-.summary-metadata p { margin: 0; }
 .summary-disclaimer { margin: 8px 0 0; font-size: 12px; color: #8E8E93; }
 .summary-document .markdown-body { margin-top: 12px; }
 .summary-document .markdown-body h1,

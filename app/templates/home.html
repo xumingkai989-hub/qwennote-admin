@@ -3,13 +3,11 @@
   {% set list_path = '/search' if search_query else '/' %}
   {% set clear_url = '/search?q=' ~ (search_query | urlencode) if search_query else '/' %}
   <header class="topbar">
-    <a class="brand" href="/">QwenNote<span>录音笔记</span></a>
+    <a class="brand" href="/">QwenNote</a>
     <div class="account"><span>{{ user.name }}</span><form action="/auth/logout" method="post"><button class="text-button" type="submit">退出</button></form></div>
     <button id="sync-button" type="button">{{ '重试' if sync_run and sync_run.status == 'failed' else '更新' }}</button>
   </header>
   <div class="list-heading">{% if search_query %}<h1>搜索「{{ search_query }}」，共 {{ recordings.total }} 条</h1>{% else %}<h1>录音列表</h1><span>共 {{ recordings.total }} 场</span>{% endif %}</div>
-  <p class="selected-period">筛选：{% if filters.mode == 'all' %}全部录音{% else %}{{ filters.start }}{% if filters.mode == 'range' %} — {{ filters.end }}{% endif %} · <a href="{{ clear_url }}">清除</a>{% endif %}</p>
-  <p class="time-note">时间均为笔记创建时间，非录音开始时间（Asia/Shanghai）</p>
   <form class="search-form" action="/search" method="get" role="search">
       <input type="search" name="q" aria-label="搜索录音" placeholder="搜索标题、总结、转写" value="{{ search_query | default('') }}">
       {% if search_query %}{% for name, value in filters.params.items() %}<input type="hidden" name="{{ name }}" value="{{ value }}">{% endfor %}{% endif %}
@@ -17,12 +15,12 @@
   </form>
   <section class="sync-panel" aria-label="同步状态" aria-live="polite" aria-atomic="true">
     <p id="sync-time">上次同步时间：{{ (sync_run.finished_at or sync_run.started_at) if sync_run else '尚未同步' }}</p>
-    <p id="sync-status">状态：{{ sync_run.status if sync_run else '尚未同步' }}</p>
-    <p id="sync-counts">{{ ('拉取 %s · 新增 %s · 更新 %s' % (sync_run.fetched, sync_run.inserted, sync_run.updated)) if sync_run else '拉取 0 · 新增 0 · 更新 0' }}</p>
+    <p id="sync-status">{% if sync_run %}状态：{{ sync_run.status }}{% endif %}</p>
+    <p id="sync-counts">{{ ('拉取 %s · 新增 %s · 更新 %s' % (sync_run.fetched, sync_run.inserted, sync_run.updated)) if sync_run else '' }}</p>
     <p id="sync-error">{{ sync_run.error if sync_run and sync_run.error else '' }}</p>
   </section>
   <section class="filters" aria-label="日期筛选">
-    <form action="{{ list_path }}" method="get" class="date-filter" {% if filters.mode != 'all' %}aria-current="true"{% endif %} aria-describedby="date-help">
+    <form action="{{ list_path }}" method="get" class="date-filter" {% if filters.mode != 'all' %}aria-current="true"{% endif %}>
       {% if search_query %}<input type="hidden" name="q" value="{{ search_query }}">{% endif %}
       <label for="from">从</label>
       <input id="from" type="date" name="from" aria-label="起始日期" value="{{ filters.start or '' }}">
@@ -31,7 +29,6 @@
       <div class="date-actions"><button class="secondary" type="submit">筛选</button><a href="{{ clear_url }}" class="filter-link" aria-label="清除筛选">清除</a></div>
     </form>
   </section>
-  <p id="date-help" class="time-note filter-help">只填起始日期可查看单日，填写两个日期可查看区间。</p>
   <section class="{{ 'recording-grid' if search_query else 'recording-list inset-grouped' }}" aria-label="录音列表">
     {% if not search_query and recordings.items %}
     <div class="recording-list-header" aria-hidden="true"><span>时间</span><span>标题</span><span class="recording-duration">时长</span><span>状态</span></div>
@@ -43,7 +40,7 @@
       <span class="badge badge-{{ status }}">{{ status_label }}</span>
       <h2><a href="/recordings/{{ recording.recording_id | urlencode }}{{ detail_query }}">{{ recording.title or '未命名录音' }}</a></h2>
       <div class="card-meta"><time datetime="{{ recording.created_at.isoformat() }}">{{ recording.created_at.strftime('%Y-%m-%d %H:%M') }}</time><span aria-label="录音时长">{{ (recording.duration_min ~ ' 分钟') if recording.duration_min is not none else '—' }}</span></div>
-      {% if search_query %}
+      {% if snippets[recording.recording_id] %}
       <div class="search-hits">
         {% for snippet in snippets[recording.recording_id] %}
         <div class="search-hit"><span class="hit-label">{{ snippet.label }}</span><p class="search-snippet">{% for part in snippet.parts %}{% if part.highlighted %}<mark>{{ part.text }}</mark>{% else %}{{ part.text }}{% endif %}{% endfor %}</p></div>
@@ -77,6 +74,7 @@
     <span>第 {{ recordings.page }} / {{ recordings.pages }} 页</span>
     {% if next_url %}<a href="{{ next_url }}" rel="next">下一页</a>{% else %}<span aria-disabled="true">下一页</span>{% endif %}
   </nav>
+  <p class="time-note">时间为笔记创建时间</p>
   <script>
     const button = document.getElementById('sync-button');
     button.addEventListener('click', async () => {

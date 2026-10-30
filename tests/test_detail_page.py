@@ -362,9 +362,12 @@ def test_speaker_palette_is_stable_and_accessible():
 
 def test_summary_document_metadata_and_disclaimer(detail_client):
     html = detail_client.get('/recordings/detail?view=summary').text
-    metadata = re.search(r'<div class="summary-metadata">(.*?)</div>', html, re.S)[1]
-    assert re.findall(r'<p>(.*?)</p>', metadata) == [
-        '录音主题：项目例会', '录音时间：2026-10-29 09:30 · 12 分钟（GMT+08）']
+    assert 'summary-metadata' not in html
+    assert '<h1 title="项目例会">项目例会</h1>' in html
+    metadata = re.search(r'<div class="detail-meta">(.*?)</div>', html, re.S)[1]
+    assert '2026-10-29 09:30' in metadata
+    assert '12 分钟' in metadata
+    assert 'title="GMT+08"' in metadata
     assert '智能纪要由 AI 生成，可能不准确，请谨慎甄别后使用' in html
     assert 'class="detail-section summary-document"' in html
 
@@ -373,7 +376,8 @@ def test_summary_document_metadata_and_disclaimer(detail_client):
 def test_summary_metadata_missing_or_zero_duration(detail_client, duration, expected):
     detail_client.add(duration=duration)
     html = detail_client.get('/recordings/detail').text
-    assert '· ' + expected + '（GMT+08）' in html
+    metadata = re.search(r'<div class="detail-meta">(.*?)</div>', html, re.S)[1]
+    assert '<span>' + expected + '</span>' in metadata
 
 
 def test_summary_headings_and_first_h1_separator(detail_client):

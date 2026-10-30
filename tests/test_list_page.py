@@ -104,7 +104,7 @@ def test_default_is_all_dates_sorted_by_created_time(list_client, add_recording)
     assert page.cards == ['tomorrow', 'late', 'early', 'yesterday']
     assert response.context['filters']['start'] is None
     assert response.context['filters']['end'] is None
-    assert '筛选：全部录音' in response.text
+    assert all(field.get('value') == '' for field in page.inputs if field.get('type') == 'date')
     assert not page.selected
     assert response.headers['cache-control'] == 'no-store'
 
@@ -182,7 +182,7 @@ def test_row_metadata_four_states_and_no_recording_bodies(list_client, add_recor
     }
     assert '>10-29 09:30</time>' in html
     assert '18 分</span>' in html and '—' in html
-    assert '时间均为笔记创建时间，非录音开始时间' in html
+    assert '时间为笔记创建时间' in html
     assert 'SUMMARY_BODY_PRIVATE' not in html and 'TRANSCRIPT_BODY_PRIVATE' not in html
     assert len(html) < 20000
     assert {link['href'] for link in Page(html).links if link.get('href', '').startswith('/recordings/')} == {
@@ -337,20 +337,21 @@ def test_all_dates_total_matches_database_and_first_page_has_20(list_client, add
 
 
 @pytest.mark.parametrize('query,label', [
-    ({'date': '2026-10-29'}, '筛选：2026-10-29'),
-    ({'from': '2026-10-29', 'to': '2026-10-30'}, '筛选：2026-10-29 — 2026-10-30'),
+    ({'date': '2026-10-29'}, ['2026-10-29', '']),
+    ({'from': '2026-10-29', 'to': '2026-10-30'}, ['2026-10-29', '2026-10-30']),
 ])
 def test_filter_visible_and_clear_returns_all(list_client, add_recording, query, label):
     add_recording('outside', '2026-10-28T12:00:00+08:00')
     add_recording('inside')
     response = list_client.get('/', params=query)
-    assert label in response.text
+    assert [field['value'] for field in Page(response.text).inputs if field.get('type') == 'date'] == label
+    assert 'aria-current="true"' in response.text
     assert Page(response.text).cards == ['inside']
     clear, = [link for link in Page(response.text).links if link.get('aria-label') == '清除筛选']
     assert clear['href'] == '/'
     cleared = list_client.get(clear['href'])
     assert Page(cleared.text).cards == ['inside', 'outside']
-    assert '筛选：全部录音' in cleared.text
+    assert all(field.get('value') == '' for field in Page(cleared.text).inputs if field.get('type') == 'date')
 
 
 @pytest.mark.parametrize('query', [
