@@ -142,6 +142,7 @@ ls -lt /opt/qwennote/backups/qwennote-*.db
 ```
 
 `backup.sh` 在线 `.backup` 到临时文件，校验为 ok 后重命名，独立备份锁避免重叠；只保留最近 7 个日期。
+快照包含数据库内的录音、同步批次（含 mode/skipped）、同步策略 settings 及调度领取状态 scheduler_state。
 **已知缺口：只备份了数据库，token 未纳入。** 环境文件、secret.key、TLS 私钥也不在该脚本范围；备份只在本机，无异地副本。
 恢复模型密文必须有备份时匹配的 `/etc/qwennote/secret.key`；token 可续期变化，旧副本不保证仍有效。
 应通过受限的独立备份渠道保管这些文件并演练；当前仓库没有完整密钥备份/恢复自动化，不能只凭数据库备份宣布灾备完成。
@@ -189,13 +190,16 @@ systemctl list-timers --all 'qwennote-*'
 
 | 任务 | 时刻与作用 | 查看方式 |
 | --- | --- | --- |
-| qwennote-tick.timer → service | 上海每 10 分钟；读设置执行到期快速/全盘同步、每周全盘、词表维护和可选保留期清理 | `systemctl status qwennote-tick.timer`；`journalctl -u qwennote-tick.service` |
+| qwennote-tick.timer → service | 上海每 10 分钟唤醒；按 sync → full_sync → tag → retention 检查到期任务 | `systemctl status qwennote-tick.timer`；`journalctl -u qwennote-tick.service` |
+| tick 内 sync（每日/间隔同步） | 默认每日 03:00 快速同步；sync_mode_default 可改 full，也可设置小时间隔 | 设置中心同步策略、scheduler_state 的 sync；tick 日志 |
+| tick 内 full_sync（每周全盘） | full_sync_enabled 默认开；full_sync_weekday 默认 6=周日，full_sync_time 默认 03:30；强制全盘，忽略水位 | 设置中心下次全盘时间、scheduler_state 的 full_sync；tick 日志 |
 | qwennote-backup.timer → service | 上海每日 04:00；数据库在线备份并保留 7 个日期 | `systemctl status qwennote-backup.timer`；`journalctl -u qwennote-backup.service` |
 | certbot-renew.timer 或 qwennote-acme.timer | 由 certificate 阶段实际选择；证书续期及 nginx 重载 | `systemctl list-timers --all`，检查实际续期服务日志 |
 | qwennote-sync.timer、qwennote-tag-maintenance.timer | 已退役，统一 tick 安装时禁用，避免重复运行 | `systemctl is-enabled qwennote-sync.timer qwennote-tag-maintenance.timer` |
 
 设置中心默认每日 03:00 快速同步、每周日 03:30 全盘同步、词表维护 05:00；tag 定时任务维护词表，新增录音的打标由同步触发。
 tick 先领取后执行；普通失败和同步锁冲突均消耗本次槽位，每日任务等下个周期，每周全盘等下一周配置的星期。不要用删除锁文件的方式强行重跑。
+每周最多一次按上海时区周一开始的自然周和 last_run_at 判定；本周改星期/时间也不重复领取，停机错过配置日则等下一周。手动全盘与两类定时同步共用 sync.lock，但不消耗每周调度槽位。
 要手动验证调度，可执行 `systemctl start qwennote-tick.service`；它仍遵循数据库中的到期判断，不是强制同步命令。
 
 ## 5. 日志与故障排查
@@ -217,7 +221,8 @@ systemctl status qwennote.service qwennote-tick.timer qwennote-backup.timer
 | 登录被拒绝 | 不在活动白名单，或管理员 ID 类型不匹配 | 依据拒绝页核对 union_id/open_id，检查管理员配置和停用状态 |
 | 登录 state / 管理表单 CSRF 失败 | cookie 过期、会话变更、回调域名或 HTTPS 设置不一致 | 核对回调后重新登录、刷新表单；不要绕过校验 |
 | 同步返回 409 | 同库已有同步持锁 | 等现有批次结束，查 journal；不删除 *.sync.lock |
-| 一部分录音未更新 | 详情/校验失败或超出补拉窗口 | 查看 sync_runs 安全摘要、核对设置补拉天数，再重试 |
+| 一部分录音未更新 | 快速同步跳过老记录/已完整记录、列表早停漏项、详情失败或超出补拉范围 | 查看 sync_runs 的 mode/skipped/安全摘要，核对补拉天数后手动全盘，或等每周全盘 |
+| 同步耗时异常变长 | 被切到全盘模式、无有效水位退化全盘、补拉天数过大或上游限流 | 检查实际 sync_runs.mode、每日模式 sync_mode_default、补拉天数与上游限流日志；列表全盘进行中会显示「正在扫描…」 |
 | 修改的词搜不到 | 索引仅覆盖同步原文 | 使用原词检索；人工覆盖索引尚未实现，rebuild 也不会索引覆盖值 |
 | FTS5/trigram 不可用 | 解释器加载了系统旧 SQLite | 检查 prepare 结果、release/.sqlite 与 unit 的 LD_LIBRARY_PATH |
 | 搜索原文漏项且索引疑似损坏 | search_text 或 FTS 索引需要重建 | 备份后运行下方 rebuild 命令；不要手动修改影子表 |

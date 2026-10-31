@@ -1,4 +1,5 @@
 """文档契约检查；仅使用标准库，不读取运行配置或连接外部服务。"""
+import ast
 from collections import Counter
 from pathlib import Path
 import re
@@ -101,7 +102,8 @@ class DocumentationTests(unittest.TestCase):
 
     def test_readme_length_and_section_order(self):
         text = README.read_text()
-        self.assertTrue(150 <= len(text.splitlines()) <= 200)
+        # 21–30 的开发记录与同步策略说明增加后，仍保持入口文档简短。
+        self.assertTrue(150 <= len(text.splitlines()) <= 220)
         self.assertEqual(re.findall(r'^## (.+)$', text, re.MULTILINE), [
             '它解决什么问题', '功能', '技术栈与取舍', '快速开始', '配置',
             '部署', '测试', '目录结构', '开发记录', '许可证',
@@ -118,11 +120,39 @@ class DocumentationTests(unittest.TestCase):
         self.assertTrue(all(count == 1 for count in Counter(listed).values()))
         self.assertIn('过程记录，非面向使用者的说明', records)
 
-    def test_prd_has_fifteen_unique_requirement_rows(self):
+    def test_prd_has_sixteen_unique_requirement_rows(self):
         requirements = section((ROOT / 'docs/PRD.md').read_text(), '4. 功能需求')
         rows = re.findall(r'^\| (F\d+) \| (.+) \| (.+) \| (P[012]) \|$',
                           requirements, re.MULTILINE)
-        self.assertEqual([row[0] for row in rows], [f'F{i}' for i in range(1, 16)])
+        self.assertEqual([row[0] for row in rows], [f'F{i}' for i in range(1, 17)])
+
+    def test_readme_documents_sync_modes_and_watermark(self):
+        text = README.read_text()
+        for term in ('快速同步', '全盘同步', '水位'):
+            with self.subTest(term=term):
+                self.assertIn(term, text)
+
+    def test_prd_documents_sync_modes_and_watermark(self):
+        text = (ROOT / 'docs/PRD.md').read_text()
+        for term in ('快速同步', '全盘同步', '水位'):
+            with self.subTest(term=term):
+                self.assertIn(term, text)
+
+    def test_sync_mode_configuration_is_documented(self):
+        # 只解析源码，不导入应用或读取运行环境。
+        tree = ast.parse((ROOT / 'app/automation.py').read_text())
+        settings = next(node for node in tree.body
+                        if isinstance(node, ast.ClassDef) and node.name == 'AutomationSettings')
+        names = {node.target.id for node in settings.body
+                 if isinstance(node, ast.AnnAssign)
+                 and (node.target.id.startswith('full_sync_')
+                      or node.target.id == 'sync_mode_default')}
+        self.assertTrue(names, '未找到同步模式配置项')
+        for path in (README, ROOT / 'docs/PRD.md'):
+            text = path.read_text()
+            for name in sorted(names):
+                with self.subTest(document=path.name, setting=name):
+                    self.assertIn(name, text)
 
     def test_new_guides_have_no_broken_local_markdown_links(self):
         paths = [README, *(ROOT / 'docs' / name for name in

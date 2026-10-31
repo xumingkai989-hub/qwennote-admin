@@ -14,16 +14,19 @@
 ### 同步
 
 - 手动同步与设置驱动的定时同步，按录音 ID 幂等入库；数据库旁文件锁阻止并发，逐条提交并记录批次。
-- 快速同步以最近成功同步的 `started_at` 为水位，从水位前 10 分钟到当前时间扫描；起点不早于补拉范围。无成功记录、水位异常或查询失败时退化为全盘。
-- 快速同步只处理窗口内记录：总结与转写均完整时跳过详情；缺任一内容仍重拉。窗口以前的内容完全不碰；全盘同步按补拉天数（默认 90 天）逐条拉详情。
-- 列表提供「快速同步」（`POST /sync`）和「全盘同步」（`POST /sync?full=1`）。千问列表经实测按创建时间降序，快速同步遇到窗口以前的记录停止翻页；检测到非降序时继续拉取全部窗口。
-- 设置中心「同步策略」默认每日快速同步、每周日 03:30 全盘同步；显示两类任务下次运行时间。同步共用同一把锁，撞锁消耗本次调度槽位，避免每 10 分钟重复尝试。
+- 快速同步：从上次成功同步前 10 分钟开始，跳过总结与转写均完整的记录；缺任一内容仍拉详情。无新内容时通常 1–2 秒，实际耗时取决于上游响应。
+- 水位是最近成功批次的 `started_at`；窗口起点 = 水位 − 10 分钟，且不早于补拉范围，不再固定回退 2 天。水位缺失、异常或查询失败时退化全盘；快速同步不更新窗口以前的老记录，需用全盘发现其修改。
+- 全盘同步：忽略水位，按补拉天数（默认 90 天）全量扫描并逐条拉详情，用于补历史与修复漏数据。
+- 列表以「快速同步」（`POST /sync`）为主按钮、「全盘同步」（`POST /sync?full=1`）为次按钮；全盘时显示「正在扫描…」，同步期间禁用两按钮。「上次」摘要行显示模式、检查/新增/更新/跳过计数。
+- 千问列表实测按创建时间降序；快速同步遇到早于窗口起点的记录即停止后续翻页，若已检测到非降序则禁用早停。
+- 设置中心默认每日 03:00 快速同步（`sync_mode_default=quick`），每周日 03:30 全盘同步（`full_sync_enabled=true`、`full_sync_weekday=6`、`full_sync_time=03:30`）；两类下次时间均可见。同步共用一把锁，撞锁消耗本次调度槽位，每周全盘按自然周最多领取一次。
 - CLI：`python -m scripts.sync_once --mode quick|full`；省略参数时读取 `sync_mode_default`（默认 `quick`）。每次结果与 `sync_runs` 都记录实际模式；首次快速请求退化全盘时记录为 `full`。 结果显示「检查 N 条 · 新增 X · 更新 Y · 跳过 Z」；检查只统计窗口内去重记录。
 
 ### 阅读
 
 - 列表按上海日期分组，每页 20 条，按笔记创建时间倒序。
 - 详情提供总结 / 转写双视图，支持本场转写搜索与段落复制。
+- 转写段落缺少 `speakerName` 时用「未标注发言人」占位；无效段落跳过，不再使整条录音详情失败。
 
 ### 编辑
 
@@ -166,6 +169,7 @@ LAYOUT_PAGES=/tmp/qwennote-layout node --test tests/home_layout.cjs tests/detail
 Python 层用 TestClient、假数据源、MockTransport 和临时 SQLite，阻断真实网络；覆盖权限、同步、搜索及配置等逻辑。
 JS 层验证同步按钮、搜索、复制和菜单等交互；浏览器层验证实际布局及完整交互路径。
 文档测试核对环境变量集合、全部 Python 模块、IP 与密钥模式，防止后续修改遗漏文档。
+文档一致性测试同时校验同步模式相关配置项，以及 README / PRD 的「快速同步」「全盘同步」「水位」术语。
 
 ## 目录结构
 
@@ -194,6 +198,15 @@ JS 层验证同步按钮、搜索、复制和菜单等交互；浏览器层验�
 - [词级粒度（18）](docs/hotword-granularity-18.md)
 - [上游热词（19）](docs/hotword-upstream-19.md)
 - [热词交互（20）](docs/hotwords-20.md)
+- [完整性自检（21，提交记录）](https://github.com/xumingkai989-hub/qwennote-admin/commit/b898715211c70c37681b84ffa6c03f180aae8c4c)
+- [文档重写（22，提交记录）](https://github.com/xumingkai989-hub/qwennote-admin/commit/fa051ff66540f47ab7514d81dc2c2b8dca2c1a76)
+- [部署实例环境变量（23，提交记录）](https://github.com/xumingkai989-hub/qwennote-admin/commit/bfd4a99846f19658d9984afec635f808c2eac2a3)
+- [MIT 开源与脱敏（24，提交记录）](https://github.com/xumingkai989-hub/qwennote-admin/commit/7a23b4365f60ddcff488abb9fd68d0cc31c3e6ee)
+- [增量同步（25，提交记录）](https://github.com/xumingkai989-hub/qwennote-admin/commit/2b9421ddcfb41067ae45c8555d90018338ab1089)
+- 同步部署（26）与完整性验证（27）：未形成独立仓库过程文件，后续修复见 28。
+- [段落缺发言人容错（28，提交记录）](https://github.com/xumingkai989-hub/qwennote-admin/commit/ec52c267ce5228cb8b84db6921b84601aa990f20)
+- [同步模式与实测（29）](docs/sync-modes-29.md)
+- [同步按钮主次与进行中状态（30，提交记录）](https://github.com/xumingkai989-hub/qwennote-admin/commit/4b12f5d346f99713022be25bf7051e7792acb25b)
 
 ## 许可证
 
