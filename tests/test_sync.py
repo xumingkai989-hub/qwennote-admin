@@ -24,13 +24,18 @@ def rows(settings, table):
 
 @pytest.fixture
 def source():
-    day = datetime.now(SHANGHAI).replace(hour=10, minute=0, second=0, microsecond=0)
+    day = datetime.now(SHANGHAI) - timedelta(hours=1)
     return FakeMinutesSource(
         [RecordingMeta('demo-1', '示例会议', day, 18),
          RecordingMeta('demo-2', '待转录', day, None)],
         {'demo-1': RecordingDetail('demo-1', '## 总结', '[00:00:26.600–00:00:30.000] 发言人 1：测试', True, True),
          'demo-2': RecordingDetail('demo-2', None, None, False, False)},
     )
+
+
+def test_sync_fixture_is_in_the_past(source):
+    for meta in source.recordings:
+        assert meta.created_at <= datetime.now(SHANGHAI)
 
 
 @pytest.fixture
@@ -114,6 +119,9 @@ def test_duplicates_are_fetched_once(sync_client, settings, source):
 
 def test_backfill_includes_today_and_89_previous_shanghai_days(sync_client, settings, source):
     today = datetime.now(SHANGHAI).date()
+    # Keep the "today" samples on this date even when the fixture crosses midnight.
+    day_start = datetime.combine(today, datetime.min.time(), SHANGHAI)
+    source.recordings = [replace(meta, created_at=day_start) for meta in source.recordings]
     source.recordings += [
         replace(source.recordings[0], recording_id='boundary', created_at=datetime.combine(today-timedelta(days=89), datetime.min.time(), SHANGHAI)),
         replace(source.recordings[0], recording_id='old', created_at=datetime.combine(today-timedelta(days=90), datetime.min.time(), SHANGHAI)),

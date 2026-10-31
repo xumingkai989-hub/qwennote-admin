@@ -13,6 +13,8 @@ from app.main import create_app
 from app.store import SQLiteStore
 
 
+# Build time-sensitive samples relative to datetime.now(), never a fixed hour.
+# Tests for calendar dates or window boundaries must construct those relations explicitly.
 @pytest.fixture(autouse=True)
 def no_network(monkeypatch):
     monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
