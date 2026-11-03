@@ -8,6 +8,7 @@ import os
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
+from threading import RLock
 from typing import Protocol
 from zoneinfo import ZoneInfo
 
@@ -38,11 +39,18 @@ class RecordingDetail:
 class MinutesSource(Protocol):
     def list_by_date(self, day: date) -> list[RecordingMeta]: ...
 
-    def get_detail(self, recording_id: str) -> RecordingDetail: ...
+    def get_detail(self, recording_id: str, *, meta: RecordingMeta | None = None) -> RecordingDetail: ...
 
 
 class MinutesSourceError(Exception):
     """A safe, credential-free source error; provider bodies are never surfaced."""
+
+
+class MinutesRetryableError(MinutesSourceError):
+    """HTTP status preserved without provider bodies, URLs or credentials."""
+    def __init__(self, status_code: int):
+        super().__init__('千问服务暂不可用，请重试')
+        self.status_code = status_code
 
 
 def _text(value) -> str:
@@ -103,7 +111,7 @@ class FixtureMinutesSource:
     def list_by_date(self, day: date) -> list[RecordingMeta]:
         return [record for record in self.records if record.created_at.date() == day]
 
-    def get_detail(self, recording_id: str) -> RecordingDetail:
+    def get_detail(self, recording_id: str, *, meta: RecordingMeta | None = None) -> RecordingDetail:
         try:
             return self.details[recording_id]
         except KeyError:
@@ -133,12 +141,15 @@ class HttpMinutesSource:
         self._session_id: str | None = None
         self._initialized = False
         self._request_id = 0
+        self._state_lock = RLock()
 
     def _rpc(self, method: str, params: dict | None = None, *, notification: bool = False) -> dict:
-        self._request_id += 1
+        with self._state_lock:
+            self._request_id += 1
+            request_id = self._request_id
         message = {'jsonrpc': '2.0', 'method': method}
         if not notification:
-            message['id'] = self._request_id
+            message['id'] = request_id
         if params is not None:
             message['params'] = params
         headers = {
@@ -177,10 +188,18 @@ class HttpMinutesSource:
                             or not isinstance(payload.get('result'), dict)):
                         raise MinutesSourceError('千问 MCP 请求失败或响应无效')
                     return payload['result']
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 429 or 500 <= exc.response.status_code < 600:
+                raise MinutesRetryableError(exc.response.status_code) from None
+            raise MinutesSourceError('千问 MCP 请求失败，请检查凭据与网络配置') from None
         except (httpx.HTTPError, ValueError, TypeError):
             raise MinutesSourceError('千问 MCP 请求失败，请检查凭据与网络配置') from None
 
     def _initialize(self):
+        with self._state_lock:
+            self._initialize_locked()
+
+    def _initialize_locked(self):
         if self._initialized:
             return
         result = self._rpc('initialize', {
@@ -270,7 +289,7 @@ class HttpMinutesSource:
             self._session_id = None
             raise MinutesSourceError('千问录音列表拉取失败，请检查凭据、网络或数据格式') from None
 
-    def get_detail(self, recording_id: str) -> RecordingDetail:
+    def get_detail(self, recording_id: str, *, meta: RecordingMeta | None = None) -> RecordingDetail:
         try:
             self._initialize()
             summary = self._call('get_minutes_ai_summary', {'taskUuid': recording_id})
@@ -290,7 +309,9 @@ class HttpMinutesSource:
                     )
             return RecordingDetail(recording_id, summary_md if has_summary else None,
                                    '\n\n'.join(paragraphs) if has_transcript else None,
-                                   has_transcript, has_summary)
+                                   has_transcript, has_summary, meta.media_type if meta else None)
+        except MinutesRetryableError:
+            raise
         except (MinutesSourceError, KeyError, ValueError, TypeError):
             self._initialized = False
             self._session_id = None

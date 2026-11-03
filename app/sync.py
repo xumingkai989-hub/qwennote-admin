@@ -1,12 +1,15 @@
 import logging
+import random
+import time
 
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import AbstractContextManager
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timedelta
 from typing import Protocol
 
 from app.mcp import TokenRefreshError
-from app.minutes import MinutesSource, RecordingDetail, RecordingMeta, SHANGHAI
+from app.minutes import MinutesRetryableError, MinutesSource, RecordingDetail, RecordingMeta, SHANGHAI
 
 OVERLAP = timedelta(minutes=10)
 
@@ -28,6 +31,8 @@ class SyncRun:
     refreshed_token: int = 0
     skipped: int = 0
     mode: str = 'quick'
+    duration_ms: int = 0
+    detail_serialized: int = 0
 
     def result(self) -> dict:
         return {key: value for key, value in asdict(self).items() if key != 'id'}
@@ -54,6 +59,7 @@ def run_sync(source: MinutesSource, store: SyncStore, *, backfill_days: int = 90
     if type(backfill_days) is not int or backfill_days < 1:
         raise ValueError('backfill_days must be a positive integer')
     with store.sync_lock():
+        clock_started = time.perf_counter()
         started = datetime.now(SHANGHAI)
         # Full recovery and invalid watermarks scan the bounded backfill window.
         floor = started - timedelta(days=min(backfill_days, started.toordinal() - 1))
@@ -79,6 +85,7 @@ def run_sync(source: MinutesSource, store: SyncStore, *, backfill_days: int = 90
         tag_ids = []
         judge_ids = []
         refresh_before = getattr(source, 'refresh_count', 0)
+        detail_serialized = False
         try:
             if hasattr(source, 'sync_range'):
                 batches = (source.sync_range(start, started, early_stop=mode == 'quick'),)
@@ -92,6 +99,8 @@ def run_sync(source: MinutesSource, store: SyncStore, *, backfill_days: int = 90
             recordings = sorted((meta for batch in batches for meta in batch
                                  if start <= meta.created_at <= started),
                                 key=lambda meta: meta.created_at, reverse=True)
+            pending = []
+            previous_by_id = {}
             for meta in recordings:
                 if meta.recording_id in seen:
                     continue
@@ -106,28 +115,48 @@ def run_sync(source: MinutesSource, store: SyncStore, *, backfill_days: int = 90
                         and previous.has_summary and previous.has_transcript):
                     skipped += 1
                     continue
-                try:
-                    detail = source.get_detail(meta.recording_id)
-                except TokenRefreshError:
-                    raise
-                except Exception:
-                    # Never persist provider exception text: it may include credentials.
-                    errors.append(f'录音 {meta.recording_id}：详情拉取失败，请重试')
-                    continue
-                try:
-                    outcome = store.upsert_recording(meta, detail, datetime.now(SHANGHAI).isoformat())
-                except Exception:
-                    errors.append(f'录音 {meta.recording_id}：校验或入库失败，请重试')
-                    continue
-                inserted += outcome == 'inserted'
-                updated += outcome == 'updated'
-                if previous is None or (previous.summary_md, previous.transcript_md,
-                        previous.has_summary, previous.has_transcript) != (
-                        detail.summary_md or '', detail.transcript_md or '', detail.has_summary, detail.has_transcript):
-                    judge_ids.append(meta.recording_id)
-                if previous is None or (previous.title, previous.summary_md, previous.transcript_md) != (
-                        meta.title or '', detail.summary_md or '', detail.transcript_md or ''):
-                    tag_ids.append(meta.recording_id)
+                pending.append(meta)
+                previous_by_id[meta.recording_id] = previous
+
+            # Submit only one wave of at most 3. Once throttling is established,
+            # there are no queued requests left to race the serial fallback.
+            consecutive_limited = 0
+            with ThreadPoolExecutor(max_workers=3) as pool:
+                for offset in range(0, len(pending), 3):
+                    wave = pending[offset:offset + 3]
+                    if detail_serialized:
+                        results = {m.recording_id: _fetch_detail(source, m) for m in wave}
+                    else:
+                        futures = {m.recording_id: pool.submit(_fetch_detail, source, m) for m in wave}
+                        results = {rid: future.result() for rid, future in futures.items()}
+                    for meta in wave:
+                        detail, error = results[meta.recording_id]
+                        limited = isinstance(error, MinutesRetryableError) and error.status_code == 429
+                        consecutive_limited = consecutive_limited + 1 if limited else 0
+                        if consecutive_limited >= 3 and not detail_serialized:
+                            detail_serialized = True
+                            logging.getLogger(__name__).warning('连续 3 条录音限流失败，本轮剩余详情请求降为串行')
+                        if isinstance(error, TokenRefreshError):
+                            raise error
+                        if error is not None:
+                            # Never persist exception text: it may contain credentials.
+                            errors.append(f'录音 {meta.recording_id}：详情拉取失败，请重试')
+                            continue
+                        previous = previous_by_id[meta.recording_id]
+                        try:
+                            outcome = store.upsert_recording(meta, detail, datetime.now(SHANGHAI).isoformat())
+                        except Exception:
+                            errors.append(f'录音 {meta.recording_id}：校验或入库失败，请重试')
+                            continue
+                        inserted += outcome == 'inserted'
+                        updated += outcome == 'updated'
+                        if previous is None or (previous.summary_md, previous.transcript_md,
+                                previous.has_summary, previous.has_transcript) != (
+                                detail.summary_md or '', detail.transcript_md or '', detail.has_summary, detail.has_transcript):
+                            judge_ids.append(meta.recording_id)
+                        if previous is None or (previous.title, previous.summary_md, previous.transcript_md) != (
+                                meta.title or '', detail.summary_md or '', detail.transcript_md or ''):
+                            tag_ids.append(meta.recording_id)
         except TokenRefreshError:
             errors.append('千问 OAuth 续期失败，请检查 token 文件、授权或网络后重试')
         except Exception:
@@ -137,6 +166,8 @@ def run_sync(source: MinutesSource, store: SyncStore, *, backfill_days: int = 90
                       status='failed' if errors else 'success', mode=mode, fetched=fetched,
                       inserted=inserted, updated=updated, skipped=skipped,
                       error='\n'.join(errors) if errors else None,
+                      duration_ms=max(1, int((time.perf_counter() - clock_started) * 1000)),
+                      detail_serialized=int(detail_serialized),
                       refreshed_token=int(getattr(source, 'refresh_count', 0) > refresh_before))
         store.finish_sync(run)
         try:
@@ -152,4 +183,21 @@ def run_sync(source: MinutesSource, store: SyncStore, *, backfill_days: int = 90
                 run_tags(store, recording_ids=tag_ids, force=True)
         except Exception:
             logging.getLogger(__name__).warning('打标批次失败；录音同步已完成')
+        # Keep enrichment at its existing point after the first finish_sync,
+        # then include it in the total wall-clock duration returned to callers.
+        run = replace(run, finished_at=datetime.now(SHANGHAI).isoformat(),
+                      duration_ms=max(1, int((time.perf_counter() - clock_started) * 1000)))
+        store.finish_sync(run)
         return run
+
+
+def _fetch_detail(source: MinutesSource, meta: RecordingMeta):
+    for attempt in range(3):
+        try:
+            return source.get_detail(meta.recording_id, meta=meta), None
+        except MinutesRetryableError as error:
+            if attempt == 2:
+                return None, error
+            time.sleep((1, 3)[attempt] + random.uniform(0, 0.25))
+        except Exception as error:
+            return None, error

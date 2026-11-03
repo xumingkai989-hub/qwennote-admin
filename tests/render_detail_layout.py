@@ -40,7 +40,7 @@ def render(output):
             store.finish_sync(SyncRun(
                 id=store.start_sync(started), started_at=started,
                 finished_at='2026-10-30T21:40:01+08:00', status='success',
-                fetched=0, inserted=0, updated=0, skipped=0, mode='quick',
+                fetched=0, inserted=0, updated=0, skipped=0, mode='quick', duration_ms=1360,
             ))
             paragraph = '本次检查首页列表与详情页在不同屏幕下的左边界和内容宽度。长文本保持完整展示，通过行高和段间距帮助阅读。' * 4
             summary = '# 项目例会\n\n' + paragraph + '\n\n## 本周进展\n\n- 完成页面检查\n- 核对移动端布局\n\n> 保留完整内容。\n\n## 待办\n\n- [ ] 确认上线验收\n\n```text\n' + 'long_code_' * 30 + '\n```\n\n| 项目 | 状态 | 备注 |\n| --- | --- | --- |\n| 页面检查 | 完成 | 六种视口 |'

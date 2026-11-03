@@ -86,7 +86,7 @@ test('home timeline, cards and controls fit desktop/mobile and both color scheme
         assert.equal(measurements.fullButton.x - measurements.button.x - measurements.button.width, 8);
         assert.equal(measurements.feedback.x, measurements.heading.x);
         assert.ok(measurements.feedback.y >= measurements.button.y + measurements.button.height);
-        assert.equal(measurements.feedbackText, '上次：10-30 21:40 · 快速同步 · 检查 0 条 · 新增 0 · 更新 0 · 跳过 0');
+        assert.equal(measurements.feedbackText, '上次：10-30 21:40 · 快速同步 · 检查 0 条 · 新增 0 · 更新 0 · 跳过 0 · 耗时 1360 毫秒');
         const accent = colorScheme === 'dark' ? 'rgb(10, 132, 255)' : 'rgb(0, 122, 255)';
         assert.equal(measurements.syncStyles[0].background, accent);
         assert.equal(measurements.syncStyles[0].color, 'rgb(255, 255, 255)');

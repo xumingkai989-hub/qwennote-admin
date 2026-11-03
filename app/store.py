@@ -316,6 +316,10 @@ class SQLiteStore:
                 conn.execute("ALTER TABLE sync_runs ADD COLUMN mode TEXT NOT NULL DEFAULT 'quick' CHECK (mode IN ('quick', 'full'))")
             if 'skipped' not in {row['name'] for row in conn.execute('PRAGMA table_info(sync_runs)')}:
                 conn.execute('ALTER TABLE sync_runs ADD COLUMN skipped INTEGER NOT NULL DEFAULT 0')
+            if 'duration_ms' not in {row['name'] for row in conn.execute('PRAGMA table_info(sync_runs)')}:
+                conn.execute('ALTER TABLE sync_runs ADD COLUMN duration_ms INTEGER NOT NULL DEFAULT 0')
+            if 'detail_serialized' not in {row['name'] for row in conn.execute('PRAGMA table_info(sync_runs)')}:
+                conn.execute('ALTER TABLE sync_runs ADD COLUMN detail_serialized INTEGER NOT NULL DEFAULT 0')
             conn.execute('CREATE INDEX IF NOT EXISTS recordings_created_at_idx '
                          'ON recordings (created_at DESC, recording_id DESC)')
             # Keep the schema change, backfill and index creation in one write
@@ -734,8 +738,8 @@ class SQLiteStore:
     def finish_sync(self, run: SyncRun) -> None:
         with self._connect() as conn:
             conn.execute(
-                "UPDATE sync_runs SET finished_at = ?, status = ?, fetched = ?, inserted = ?, updated = ?, skipped = ?, error = ?, refreshed_token = ?, mode = ? WHERE id = ?",
-                (run.finished_at, run.status, run.fetched, run.inserted, run.updated, run.skipped, run.error, run.refreshed_token, run.mode, run.id),
+                "UPDATE sync_runs SET finished_at = ?, status = ?, fetched = ?, inserted = ?, updated = ?, skipped = ?, error = ?, refreshed_token = ?, mode = ?, duration_ms = ?, detail_serialized = ? WHERE id = ?",
+                (run.finished_at, run.status, run.fetched, run.inserted, run.updated, run.skipped, run.error, run.refreshed_token, run.mode, run.duration_ms, run.detail_serialized, run.id),
             )
 
     def latest_sync(self) -> SyncRun | None:

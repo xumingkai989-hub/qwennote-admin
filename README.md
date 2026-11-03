@@ -206,6 +206,7 @@ JS 层验证同步按钮、搜索、复制和菜单等交互；浏览器层验�
 - 同步部署（26）与完整性验证（27）：未形成独立仓库过程文件，后续修复见 28。
 - [段落缺发言人容错（28，提交记录）](https://github.com/xumingkai989-hub/qwennote-admin/commit/ec52c267ce5228cb8b84db6921b84601aa990f20)
 - [同步模式与实测（29）](docs/sync-modes-29.md)
+- [同步性能内核（33）](docs/sync-performance-33.md)
 - [同步按钮主次与进行中状态（30，提交记录）](https://github.com/xumingkai989-hub/qwennote-admin/commit/4b12f5d346f99713022be25bf7051e7792acb25b)
 
 ## 许可证

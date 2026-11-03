@@ -218,7 +218,7 @@ def test_sync_judges_only_new_or_changed_content(populated, store, monkeypatch):
     class Source:
         body = BODY
         def list_by_date(self, day): return [RecordingMeta(r.recording_id, r.title, r.created_at, r.duration_min)]
-        def get_detail(self, rid): return RecordingDetail(rid, self.body, BODY, True, True)
+        def get_detail(self, rid, *, meta=None): return RecordingDetail(rid, self.body, BODY, True, True)
     calls = []
     monkeypatch.setattr('app.hotword_judge.run_judgments', lambda store, **kw: calls.append(kw))
     source = Source()

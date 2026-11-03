@@ -10,10 +10,11 @@ import tempfile
 import time as clock
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
+from threading import RLock
 
 import httpx
 
-from app.minutes import (HttpMinutesSource, MinutesSourceError, RecordingDetail,
+from app.minutes import (HttpMinutesSource, MinutesRetryableError, MinutesSourceError, RecordingDetail,
                          RecordingMeta, SHANGHAI, _flag, _items, _optional_text, _text)
 
 
@@ -98,7 +99,7 @@ class OAuthTokenManager:
 
 
 class McpMinutesSource(HttpMinutesSource):
-    TOOLS = HttpMinutesSource.TOOLS | {'get_minutes_basic_info'}
+    TOOLS = HttpMinutesSource.TOOLS
 
     def __init__(self, *, token_file=None, url=None, transport=None, now=None, sleep=None):
         self.URL = url or os.environ.get('QWENNOTE_MCP_URL', self.URL)
@@ -110,16 +111,19 @@ class McpMinutesSource(HttpMinutesSource):
         self._session_id = None
         self._initialized = False
         self._request_id = 0
+        self._state_lock = RLock()
 
     @property
     def refresh_count(self):
         return self.tokens.refresh_count
 
     def _rpc(self, method, params=None, *, notification=False):
-        self._request_id += 1
+        with self._state_lock:
+            self._request_id += 1
+            request_id = self._request_id
         message = {'jsonrpc': '2.0', 'method': method}
         if not notification:
-            message['id'] = self._request_id
+            message['id'] = request_id
         if params is not None:
             message['params'] = params
         retries = 0
@@ -167,6 +171,13 @@ class McpMinutesSource(HttpMinutesSource):
             except TokenRefreshError:
                 raise
             except httpx.HTTPError as exc:
+                # Detail retries belong to the recording, not each RPC. Avoid
+                # multiplying the sync worker's 3 attempts into 9 upstream calls.
+                if (isinstance(exc, httpx.HTTPStatusError)
+                        and (exc.response.status_code == 429 or 500 <= exc.response.status_code < 600)
+                        and method == 'tools/call' and params
+                        and params.get('name') in {'get_minutes_ai_summary', 'get_minutes_transcription'}):
+                    raise MinutesRetryableError(exc.response.status_code) from None
                 retryable = (not isinstance(exc, httpx.HTTPStatusError)
                              or exc.response.status_code in (408, 429)
                              or exc.response.status_code >= 500)
@@ -193,7 +204,10 @@ class McpMinutesSource(HttpMinutesSource):
             if not isinstance(cursor, str) or not cursor or cursor in seen:
                 raise MinutesSourceError('千问返回的分页游标无效')
             seen.add(cursor)
-            arguments = {**arguments, 'cursor' if name == 'list_my_minutes' else 'nextToken': cursor}
+            # Production probe 2026-11-02: list_my_minutes ignores cursor,
+            # pageToken and token; only nextToken advances beyond the first 20.
+            # Transcription uses nextToken too.
+            arguments = {**arguments, 'nextToken': cursor}
 
     def _range(self, start, end, *, early_stop=False):
         try:
@@ -246,10 +260,9 @@ class McpMinutesSource(HttpMinutesSource):
         start = datetime.combine(day, time.min, SHANGHAI)
         return [m for m in self._range(start, start+timedelta(days=1)) if m.created_at.date() == day]
 
-    def get_detail(self, recording_id):
+    def get_detail(self, recording_id, *, meta: RecordingMeta | None = None):
         try:
             self._initialize()
-            basic = self._call('get_minutes_basic_info', {'taskUuid': recording_id})
             summary = self._call('get_minutes_ai_summary', {'taskUuid': recording_id})
             has_summary = _flag(summary['hasSummary'])
             paragraphs = []
@@ -265,8 +278,8 @@ class McpMinutesSource(HttpMinutesSource):
             transcript = ''.join(paragraphs) if has_transcript else None
             return RecordingDetail(recording_id,
                 _optional_text(summary.get('fullSummary')) if has_summary else None,
-                transcript, has_transcript, has_summary, _optional_text(basic.get('mediaType')))
-        except TokenRefreshError:
+                transcript, has_transcript, has_summary, meta.media_type if meta else None)
+        except (TokenRefreshError, MinutesRetryableError):
             raise
         except (MinutesSourceError, KeyError, ValueError, TypeError):
             raise MinutesSourceError('千问录音详情拉取失败，请检查授权、网络或数据格式') from None

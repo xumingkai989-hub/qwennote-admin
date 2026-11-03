@@ -63,7 +63,7 @@ class Server:
                     raise httpx.ReadTimeout('must not persist private body', request=request)
                 return httpx.Response(self.failure[1])
             if name == 'list_my_minutes':
-                record_id = 'real-2' if 'cursor' in args else 'real-1'
+                record_id = 'real-2' if 'nextToken' in args else 'real-1'
                 day = 30 if record_id == 'real-2' else 29
                 payload = {'items': [{'uuid': record_id, 'title': record_id,
                     'gmtCreate': int(datetime(2026, 10, day, 10, tzinfo=SHANGHAI).timestamp()*1000),
@@ -122,10 +122,10 @@ def test_window_two_pages_idempotent_and_local_dates(setup_source, store, sse):
     assert store.list_recordings(NOW.date().replace(day=29), NOW.date().replace(day=29)).total == 1
     assert store.list_recordings(NOW.date(), NOW.date()).items[0].recording_id == 'real-2'
     calls = [a for n,a in server.calls if n == 'list_my_minutes']
-    assert len(calls) == 3 and calls[1]['cursor'] == 'page-two'
+    assert len(calls) == 3 and calls[1]['nextToken'] == 'page-two'
     assert calls[0]['startTime'] == int((datetime.fromisoformat(first.started_at) - timedelta(days=90)).timestamp()*1000)
     assert calls[0]['endTime'] == int(datetime.fromisoformat(first.started_at).timestamp()*1000)
-    assert next(r for r in db_rows(store, 'recordings') if r['recording_id'] == 'real-1')['media_type'] == 'VIDEO'
+    assert next(r for r in db_rows(store, 'recordings') if r['recording_id'] == 'real-1')['media_type'] == 'AUDIO'
 
 
 def test_date_query_filters_provider_cross_day(setup_source):
@@ -133,11 +133,11 @@ def test_date_query_filters_provider_cross_day(setup_source):
     assert [m.recording_id for m in source.list_by_date(NOW.date().replace(day=29))] == ['real-1']
 
 
-def test_full_transcription_format_and_basic_info(setup_source):
+def test_full_transcription_without_basic_info(setup_source):
     source, server, _ = setup_source
     detail = source.get_detail('real-1')
     assert detail.transcript_md == '[00:01.234–01:05.001] 发言人\n\n正文\n\n' * 2
-    assert detail.has_summary and detail.has_transcript and detail.media_type == 'VIDEO'
+    assert detail.has_summary and detail.has_transcript and detail.media_type is None
     calls = [a for n,a in server.calls if n == 'get_minutes_transcription']
     assert len(calls) == 2 and calls[1]['nextToken'] == 'transcript-two'
 
@@ -294,10 +294,13 @@ def test_single_detail_failure_does_not_stop_other_records(setup_source, store, 
     original = server.__call__
     def handler(request):
         data = json.loads(request.content)
-        if data.get('params', {}).get('arguments', {}).get('taskUuid') == 'real-1':
-            server.failure = ('get_minutes_basic_info', failure)
-        else:
-            server.failure = None
+        params = data.get('params', {})
+        if (params.get('arguments', {}).get('taskUuid') == 'real-1'
+                and params.get('name') == 'get_minutes_ai_summary'):
+            server.calls.append((params['name'], params['arguments']))
+            if failure == 'timeout':
+                raise httpx.ReadTimeout('must not persist private body', request=request)
+            return httpx.Response(failure)
         return original(request)
     source._transport = httpx.MockTransport(handler)
     store.migrate()
@@ -305,7 +308,7 @@ def test_single_detail_failure_does_not_stop_other_records(setup_source, store, 
     assert result.status == 'failed' and result.fetched == 2 and result.inserted == 1
     assert 'real-1' in result.error
     assert db_rows(store, 'recordings')[0]['recording_id'] == 'real-2'
-    attempts = [a for n,a in server.calls if n == 'get_minutes_basic_info' and a['taskUuid'] == 'real-1']
+    attempts = [a for n,a in server.calls if n == 'get_minutes_ai_summary' and a['taskUuid'] == 'real-1']
     assert len(attempts) == (3 if failure in ('timeout', 503) else 1)
 
 
@@ -371,3 +374,64 @@ def test_refresh_without_rotation_preserves_refresh_token(setup_source):
     source.tokens._transport = httpx.MockTransport(handler)
     assert source.tokens.access_token(rejected_token='access-old') == 'access-new'
     assert json.loads(token.read_text())['refresh_token'] == 'refresh-old'
+
+
+def test_detail_uses_meta_media_type_without_basic_info(setup_source):
+    from app.minutes import RecordingMeta
+    source, server, _ = setup_source
+    meta = RecordingMeta('real-1', 'list title', NOW, 2, 'AUDIO')
+    assert source.get_detail('real-1', meta=meta).media_type == 'AUDIO'
+    assert not any(name == 'get_minutes_basic_info' for name, _ in server.calls)
+    assert [name for name, _ in server.calls] == [
+        'get_minutes_ai_summary', 'get_minutes_transcription', 'get_minutes_transcription']
+
+
+def test_list_three_pages_fetches_all_45_with_next_token(setup_source, monkeypatch):
+    source, _, _ = setup_source
+    calls = []
+    def call(name, arguments):
+        assert name == 'list_my_minutes'
+        assert 'cursor' not in arguments
+        calls.append(arguments.copy())
+        page = int(arguments.get('nextToken', '0'))
+        return {'items': [{'uuid': f'id-{i}', 'title': '录音', 'gmtCreate': int(NOW.timestamp()*1000)}
+                          for i in range(page * 20, min(45, (page + 1) * 20))],
+                'hasMore': page < 2, 'nextToken': str(page + 1)}
+    monkeypatch.setattr(source, '_initialize', lambda: None)
+    monkeypatch.setattr(source, '_call', call)
+    records = source.sync_range(NOW - timedelta(days=1), NOW)
+    assert len(records) == len({r.recording_id for r in records}) == 45
+    assert [args.get('nextToken') for args in calls] == [None, '1', '2']
+
+
+def test_ignored_cursor_raises_existing_error_without_loop(setup_source, monkeypatch):
+    from app.minutes import MinutesSourceError
+    source, _, _ = setup_source
+    calls = []
+    def call(name, arguments):
+        calls.append(arguments)
+        assert len(calls) <= 2
+        return {'items': [], 'hasMore': True, 'nextToken': 'same'}
+    monkeypatch.setattr(source, '_call', call)
+    with pytest.raises(MinutesSourceError, match='千问返回的分页游标无效'):
+        list(source._pages('list_my_minutes', {}))
+    assert len(calls) == 2 and calls[1]['nextToken'] == 'same'
+
+
+def test_shared_source_initializes_once_and_assigns_unique_parallel_rpc_ids(setup_source):
+    from threading import Barrier
+    source, server, _ = setup_source
+    barrier = Barrier(3)
+    def handler(request):
+        data = json.loads(request.content)
+        if data.get('params', {}).get('name') == 'get_minutes_ai_summary':
+            barrier.wait(timeout=3)
+        return server(request)
+    source._transport = httpx.MockTransport(handler)
+    with ThreadPoolExecutor(3) as pool:
+        details = list(pool.map(source.get_detail, ['a', 'b', 'c']))
+    assert {d.recording_id for d in details} == {'a', 'b', 'c'}
+    envelopes = [json.loads(r.content) for r in server.requests]
+    assert sum(e['method'] == 'initialize' for e in envelopes) == 1
+    ids = [e['id'] for e in envelopes if 'id' in e]
+    assert len(ids) == len(set(ids))

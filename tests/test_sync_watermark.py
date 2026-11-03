@@ -34,7 +34,7 @@ def test_list_paging_stops_only_when_confirmed_descending(setup_source, monkeypa
         assert arguments['startTime'] == int(start.timestamp() * 1000)
         assert arguments['endTime'] == int(NOW.timestamp() * 1000)
         assert arguments['pageSize'] == 100
-        index = int(arguments.get('cursor', 0))
+        index = int(arguments.get('nextToken', 0))
         calls.append(index)
         return {'items': [{'uuid': f'{index}-{i}', 'title': '录音',
                           'gmtCreate': int(t.timestamp() * 1000)}
@@ -56,7 +56,7 @@ def test_non_descending_later_page_disables_early_stop(setup_source, monkeypatch
              [NOW - timedelta(minutes=3)]]
     calls = []
     def call(name, args):
-        index = int(args.get('cursor', 0)); calls.append(index)
+        index = int(args.get('nextToken', 0)); calls.append(index)
         return {'items': [{'uuid': f'{index}-{i}', 'title': '',
                           'gmtCreate': int(at.timestamp()*1000)} for i, at in enumerate(pages[index])],
                 'hasMore': index < 2, 'nextToken': str(index + 1)}

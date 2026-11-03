@@ -19,7 +19,7 @@ class FakeMinutesSource:
             raise self.list_error
         return [r for r in self.recordings if r.created_at.astimezone(ZoneInfo('Asia/Shanghai')).date() == day]
 
-    def get_detail(self, recording_id):
+    def get_detail(self, recording_id, *, meta=None):
         self.detail_calls.append(recording_id)
         if self.detail_entered:
             self.detail_entered.set()
