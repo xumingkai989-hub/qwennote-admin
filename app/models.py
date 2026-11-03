@@ -170,4 +170,19 @@ class ModelRegistry:
 
 def resolve_model(store):
     from app.tag import TagSettings
-    return ModelRegistry(store).credentials() or TagSettings.from_env()
+    # All sync/CLI/worker callers share this priority: enabled database default,
+    # process environment, then the Claude env file (also in bare CLI processes).
+    # A broken database default remains an error; never silently change models.
+    configured = ModelRegistry(store).credentials()
+    if configured is not None:
+        return configured
+    configured = TagSettings.from_env()
+    if configured.auth_token:
+        return configured
+    try:
+        values = dotenv_values(CLAUDE_ENV_PATH, interpolate=False) if CLAUDE_ENV_PATH.is_file() else {}
+        return TagSettings((values.get('ANTHROPIC_AUTH_TOKEN') or '').strip(),
+                           (values.get('ANTHROPIC_BASE_URL') or '').strip() or TagSettings.base_url,
+                           (values.get('ANTHROPIC_MODEL') or '').strip() or TagSettings.model)
+    except (OSError, ValueError, UnicodeError):
+        return configured

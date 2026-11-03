@@ -82,11 +82,15 @@ def enqueue(store, recording_ids, *, sync_run_id=None, tag_ids=None, hotword_ids
             for kind, selected in (('tag', tag_ids), ('hotword', hotword_ids)):
                 if recording_id not in selected:
                     continue
-                task_id = conn.execute('''INSERT INTO enrichment_tasks
+                conn.execute('''INSERT INTO enrichment_tasks
                     (recording_id,kind,status,created_at,updated_at) VALUES (?,?,'pending',?,?)
                     ON CONFLICT(recording_id,kind) DO UPDATE SET status='pending',attempts=0,
-                    last_error=NULL,claim_token=NULL,updated_at=excluded.updated_at RETURNING id''',
-                    (recording_id, kind, stamp, stamp)).fetchone()[0]
+                    last_error=NULL,claim_token=NULL,updated_at=excluded.updated_at''',
+                    (recording_id, kind, stamp, stamp))
+                # lastrowid is stale on an upsert's UPDATE branch. Read the
+                # unique key in this transaction; supports SQLite before 3.35.
+                task_id = conn.execute('SELECT id FROM enrichment_tasks WHERE recording_id=? AND kind=?',
+                                       (recording_id, kind)).fetchone()[0]
                 conn.execute('INSERT INTO enrichment_run_tasks VALUES (?,?)', (run_id, task_id))
                 total += 1
         conn.execute('UPDATE enrichment_runs SET total=? WHERE id=?', (total, run_id))
@@ -121,11 +125,13 @@ def _claim(store, task_id):
     stamp = now()
     with store._connect() as conn:
         conn.execute('BEGIN IMMEDIATE')
-        row = conn.execute("""UPDATE enrichment_tasks SET status='running',updated_at=?,claim_token=?
-            WHERE id=? AND status='pending' RETURNING *""", (stamp, uuid4().hex, task_id)).fetchone()
-        if row:
-            _refresh_runs(conn, stamp)
-        return dict(row) if row else None
+        claimed = conn.execute("""UPDATE enrichment_tasks SET status='running',updated_at=?,claim_token=?
+            WHERE id=? AND status='pending'""", (stamp, uuid4().hex, task_id)).rowcount
+        if not claimed:
+            return None
+        row = conn.execute('SELECT * FROM enrichment_tasks WHERE id=?', (task_id,)).fetchone()
+        _refresh_runs(conn, stamp)
+        return dict(row)
 
 
 def _execute(store, task):

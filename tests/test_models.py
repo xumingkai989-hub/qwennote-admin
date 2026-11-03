@@ -302,6 +302,31 @@ def test_env_fallback_without_default_and_no_configuration_skip(registry, store,
     assert tag.run_tags(store)['attempted'] == 0
 
 
+def test_shared_model_priority_default_then_process_then_file(registry, store, monkeypatch):
+    models.CLAUDE_ENV_PATH.write_text('ANTHROPIC_AUTH_TOKEN=synthetic-file-key\n'
+                                     'ANTHROPIC_MODEL=file-model\n'
+                                     'ANTHROPIC_BASE_URL=https://file.invalid/v1\n')
+    monkeypatch.setenv('ANTHROPIC_AUTH_TOKEN', 'synthetic-process-key')
+    monkeypatch.setenv('ANTHROPIC_MODEL', 'process-model')
+    ident = add(registry, model_id='default-model')
+    registry.mutate(ident, 'default')
+    assert models.resolve_model(store).model == 'default-model'
+    with store._connect() as conn:
+        conn.execute('UPDATE models SET is_default=0')
+    assert models.resolve_model(store).model == 'process-model'
+    monkeypatch.delenv('ANTHROPIC_AUTH_TOKEN')
+    resolved = models.resolve_model(store)
+    assert (resolved.auth_token, resolved.model, resolved.base_url) == (
+        'synthetic-file-key', 'file-model', 'https://file.invalid/v1')
+
+
+def test_file_fallback_is_literal_and_uses_defaults(registry, store):
+    models.CLAUDE_ENV_PATH.write_text('ANTHROPIC_AUTH_TOKEN="synthetic-${LITERAL}-key"\n')
+    resolved = models.resolve_model(store)
+    assert resolved.auth_token == 'synthetic-${LITERAL}-key'
+    assert (resolved.base_url, resolved.model) == (tag.TagSettings.base_url, tag.TagSettings.model)
+
+
 def test_maintenance_uses_default_model(registry, store):
     ident = add(registry, model_id='maintenance-model', base_url='https://semantic.invalid/v1')
     registry.mutate(ident, 'default')

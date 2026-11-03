@@ -3,6 +3,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 import json
+import sqlite3
 from threading import Barrier, Event, Lock
 import time
 
@@ -99,12 +100,74 @@ def test_three_failures_are_safe_and_retry_resets_budget(queued, monkeypatch):
 
 def test_no_model_is_terminal_and_not_retryable(queued, monkeypatch):
     store, _, run = queued
-    monkeypatch.setattr(e, 'resolve_model', lambda _: TagSettings(''))
+    # Exercise the real resolver with neither a database default nor env/file.
+    monkeypatch.delenv('ANTHROPIC_AUTH_TOKEN', raising=False)
     assert e.process_pending(store) == 2
     assert {t['status'] for t in tasks(store)} == {'failed'}
     assert {t['last_error'] for t in tasks(store)} == {e.NO_MODEL}
     assert e.retry_failed(store) == e.process_pending(store) == 0
     assert not e.status(store, run.enrichment_run_id)['records'][0]['hotword_retryable']
+    assert not e.status(store, run.enrichment_run_id)['records'][0]['tag_retryable']
+
+
+@pytest.mark.parametrize('fallback', ['process', 'file'])
+def test_empty_models_worker_uses_shared_fallback_and_persists_both_kinds(queued, monkeypatch, tmp_path, fallback):
+    from app import models
+    store, _, run = queued
+    values = {'ANTHROPIC_AUTH_TOKEN': 'offline-fallback-key',
+              'ANTHROPIC_BASE_URL': 'https://fallback.invalid/v1', 'ANTHROPIC_MODEL': 'fallback-model'}
+    if fallback == 'process':
+        for key, value in values.items():
+            monkeypatch.setenv(key, value)
+    else:
+        path = tmp_path / 'model.env'
+        path.write_text('\n'.join(f'{key}={value}' for key, value in values.items()))
+        monkeypatch.setattr(models, 'CLAUDE_ENV_PATH', path)
+        monkeypatch.delenv('ANTHROPIC_AUTH_TOKEN', raising=False)
+    store.add_hotword('标准词')
+    with store._connect() as conn:
+        assert conn.execute('SELECT count(*) FROM models').fetchone()[0] == 0
+    seen = []
+    def respond(request):
+        body = json.loads(request.content)
+        assert request.headers['x-api-key'] == values['ANTHROPIC_AUTH_TOKEN']
+        assert str(request.url) == 'https://fallback.invalid/v1/messages'
+        assert body['model'] == 'fallback-model'
+        seen.append(body['max_tokens'])
+        answer = '{"tags":["述职"]}' if body['max_tokens'] == 256 else '{"replacements":[]}'
+        return httpx.Response(200, json={'content': [{'type': 'text', 'text': answer}]})
+    client = httpx.AsyncClient
+    monkeypatch.setattr(httpx, 'AsyncClient', lambda **kw: client(**{**kw, 'transport': httpx.MockTransport(respond)}))
+    assert e.process_pending(store) == 2
+    result = e.status(store, run.enrichment_run_id)
+    assert (result['status'], result['total'], result['done'], result['failed']) == ('done', 2, 2, 0)
+    assert result['records'][0]['tags'] == ['述职']
+    assert {t['status'] for t in tasks(store)} == {'done'}
+    assert store.hotword_checks('enhance')
+    assert 256 in seen and 2048 in seen
+
+
+def test_enqueue_requeue_and_claim_without_sqlite_returning(queued, monkeypatch):
+    store, _, first = queued
+    original_ids = [t['id'] for t in tasks(store)]
+    statements = []
+    class LegacyConnection(sqlite3.Connection):
+        def execute(self, sql, *args):
+            statements.append(sql)
+            if 'RETURNING' in sql.upper():
+                raise sqlite3.OperationalError('near "RETURNING": syntax error')
+            return super().execute(sql, *args)
+    connect = sqlite3.connect
+    monkeypatch.setattr(sqlite3, 'connect', lambda *a, **kw: connect(*a, **kw, factory=LegacyConnection))
+    run = e.enqueue(store, ['enhance'])
+    assert [t['id'] for t in tasks(store)] == original_ids
+    assert run != first.enrichment_run_id
+    monkeypatch.setattr(e, '_execute', lambda *_: None)
+    assert e.process_pending(store) == 2
+    assert e.status(store, run)['status'] == 'done'
+    assert e.status(store, first.enrichment_run_id)['status'] == 'done'
+    assert e._claim(store, original_ids[0]) is None
+    assert statements and all('RETURNING' not in sql.upper() for sql in statements)
 
 
 def test_timeout_recovery_preserves_fresh_lease(queued):

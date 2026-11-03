@@ -16,8 +16,10 @@ from app.store import SQLiteStore
 # Build time-sensitive samples relative to datetime.now(), never a fixed hour.
 # Tests for calendar dates or window boundaries must construct those relations explicitly.
 @pytest.fixture(autouse=True)
-def no_network(monkeypatch):
+def no_network(monkeypatch, tmp_path):
     monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
+    # Never read a developer machine's real model credentials in offline tests.
+    monkeypatch.setattr('app.models.CLAUDE_ENV_PATH', tmp_path / 'absent-model.env')
     def blocked(*args, **kwargs):
         raise AssertionError("Tests must not access the network")
 
