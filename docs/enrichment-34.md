@@ -25,4 +25,4 @@ node --test tests/home_interactions.cjs tests/enrichment_interactions.cjs tests/
 
 部署仅 app-only，复用上一工单的安全部署适配器，prepare 不写 `/etc/`；备份业务库并记录 `/etc/` 文件哈希，发布后核对原录音/手工内容、SQLite 完整性、权限接口及 release。实测使用同一生产备份和真实上游录音的隔离数据库，仅模拟一次本地不存在查询，不删除生产或测试数据。报告分别记录旧请求耗时、新请求耗时、后台标签延迟、实际新录音是否存在及真实 kill + 十分钟租约恢复结果，不把合成模型延迟当成生产指标。
 
-业务验收 HTML、截图、部署日志和原始证据保存在仓库外 `../qwennote-admin-artifacts/enrichment-34-20261103/`，未获得公开业务内容授权，保持私有。回滚可切回前一 release，保留新增表和原始录音；旧版忽略新增任务表，但会重新启用同步内的 AI 路径。
+业务验收 HTML、截图、部署日志和原始证据保存在仓库外 `../qwennote-admin-artifacts/enrichment-34-20261103/`，未获得公开业务内容授权，保持私有。新增的 `sync_runs.enrichment_run_id` 会被旧版 `SyncRun(**row)` 读取，因此不能直接把旧 release 接到新库回滚。应先给旧版 `SyncRun` 加上可选关联字段（或显式忽略未知列），再切回已验证兼容的 release；保留新增表、任务审计和原始录音。兼容旧版仍会重新启用同步内的 AI 路径，不应丢弃或恢复覆盖当前业务库。
