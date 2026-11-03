@@ -1,5 +1,7 @@
 # 工单 33：同步性能内核
 
+后续变更：工单 34 已将 AI 增强移出同步请求；当前 `duration_ms` 只计拉取、入库和任务入队，详见 [增强队列](enrichment-34.md)。
+
 `list_my_minutes` 的分页和转写分页统一使用 `nextToken`。2026-11-02 生产实测表明，录音列表会忽略 `cursor`、`pageToken` 和 `token`，重复第一页；重复游标继续抛出既有错误，避免死循环。
 
 详情不再默认调用 `get_minutes_basic_info`，也不再将其列为必需工具。`get_detail(recording_id, meta=...)` 使用列表元数据的 `media_type`；没有 meta 时允许为空。每条仍按总结、转写的顺序拉取。

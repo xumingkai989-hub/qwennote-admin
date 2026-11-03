@@ -32,6 +32,8 @@
     <article class="recording-card" data-recording-id="{{ recording.recording_id }}">
       <span class="badge badge-{{ status }}">{{ status_label }}</span>
       <h2><a href="/recordings/{{ recording.recording_id | urlencode }}{{ detail_query }}">{{ recording.title or '未命名录音' }}</a></h2>
+      {% set state = enrichment_states.get(recording.recording_id, {}) if enrichment_states is defined else {} %}
+      {% include 'enrichment_card.html' %}
       <div class="card-meta"><time datetime="{{ recording.created_at.isoformat() }}">{{ recording.created_at.strftime('%Y-%m-%d %H:%M') }}</time><span aria-label="录音时长">{{ (recording.duration_min ~ ' 分钟') if recording.duration_min is not none else '—' }}</span></div>
       {% if snippets[recording.recording_id] %}
       <div class="search-hits">
@@ -40,6 +42,7 @@
         {% endfor %}
       </div>
       {% endif %}
+      <div data-enrichment-retries="">{% if enrichment_csrf and (state.get('tag_retryable') or state.get('hotword_retryable')) %}<button class="text-button" type="button" data-enrichment-retry="{{ recording.recording_id }}">分析失败 · 重试</button>{% endif %}</div>
     </article>
     {% else %}
     <div class="empty-state"><h2>没有找到包含「{{ search_query }}」的录音</h2><p>可以换个关键词，或调整日期区间后重试。</p></div>
@@ -60,14 +63,14 @@
             {% if card.summary %}<p class="card-summary">{{ card.summary }}</p>{% endif %}
             {% if card.duration %}<span class="duration-pill" aria-label="录音时长">录音 · {{ card.duration }}</span>{% endif %}
             <div class="card-footer">
-              {% if recording.tags %}<span class="card-labels">{% endif %}<span class="badge badge-{{ status }}">{{ status_label }}</span>
-              {% if recording.tags %}<span class="recording-tags" title="{{ recording.tags | join(' · ') }}">
-                {% for tag in recording.tags[:3] %}<span class="tag-pill">{{ tag }}</span>{% endfor %}
-                {% if recording.tags | length > 3 %}<span class="tag-pill" title="{{ recording.tags | join(' · ') }}">+{{ recording.tags | length - 3 }}</span>{% endif %}
-              </span></span>{% endif %}
+              {% set state = enrichment_states.get(recording.recording_id, {}) if enrichment_states is defined else {} %}
+              {% if recording.tags or state.get('tag') %}<span class="card-labels">{% endif %}<span class="badge badge-{{ status }}">{{ status_label }}</span>
+              {% include 'enrichment_card.html' %}{% if recording.tags or state.get('tag') %}</span>{% endif %}
               <span class="card-created"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><time class="recording-time" datetime="{{ recording.created_at.isoformat() }}">{{ recording.created_at.strftime('%H:%M') }} 创建</time></span>
             </div>
           </a>
+          {% set state = enrichment_states.get(recording.recording_id, {}) if enrichment_states is defined else {} %}
+          <div data-enrichment-retries="">{% if enrichment_csrf and (state.get('tag_retryable') or state.get('hotword_retryable')) %}<button class="text-button" type="button" data-enrichment-retry="{{ recording.recording_id }}">分析失败 · 重试</button>{% endif %}</div>
         </article>
         {% endfor %}
       </div>
@@ -83,5 +86,6 @@
     {% if next_url %}<a href="{{ next_url }}" rel="next">下一页</a>{% else %}<span aria-disabled="true">下一页</span>{% endif %}
   </nav>
   <p class="time-note">时间为笔记创建时间</p>
-  <script src="{{ url_for('static', path='home.js') }}?v=20261103-33" defer></script>
+  {% include 'enrichment_boot.html' %}
+  <script src="{{ url_for('static', path='home.js') }}?v=20261103-34" defer></script>
 {% endblock %}

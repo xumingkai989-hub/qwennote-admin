@@ -170,7 +170,7 @@ def test_home_has_button_status_counts_and_immediate_result_script(sync_client):
     assert '检查 2 条 · 新增 2 · 更新 0 · 跳过 0' in html
     assert '笔记创建时间' in html and 'home.js' in html
     script = sync_client.get('/static/home.js').text
-    assert all(text in script for text in ('fetch(', '/sync', 'is-complete', '1000', 'window.location.reload()'))
+    assert all(text in script for text in ('fetch(', '/sync', 'is-complete', 'enrichment.refreshList()', 'enrichment.watch('))
 
 
 def test_detail_id_mismatch_is_skipped(sync_client, settings, source):

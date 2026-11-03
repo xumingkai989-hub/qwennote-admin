@@ -24,8 +24,8 @@
       activeButton.classList.remove('is-syncing');
       activeButton.classList.add('is-complete');
       feedback.textContent = resultText(result);
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      window.location.reload();
+      await window.enrichment.refreshList();
+      if (result.enrichment_run_id) window.enrichment.watch([result.enrichment_run_id]);
     } catch (error) {
       errorMessage.textContent = error.message || '同步请求失败，请重试';
       feedback.textContent = result && Number.isInteger(result.duration_ms) ? resultText(result) : '同步失败';

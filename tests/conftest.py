@@ -81,3 +81,10 @@ def client(settings, fake_auth, store):
         follow_redirects=False,
     ) as client:
         yield client
+
+
+@pytest.fixture(autouse=True)
+def controlled_enrichment_dispatch(monkeypatch):
+    # Unit tests own worker timing; integration tests explicitly start/join it.
+    from types import SimpleNamespace
+    monkeypatch.setattr('app.enrichment.start_background', lambda store: SimpleNamespace(join=lambda: None))

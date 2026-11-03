@@ -563,3 +563,9 @@ p.assistant-note { margin: 12px 0 0; }
 
 .hotword-list-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 16px; }
 .hotword-list-heading h2 { margin: 0; }
+
+.enrichment-pending { opacity: .65; cursor: default; }
+.enrichment-failed { color: var(--muted, #64748b); }
+.enrichment-hotword { font-size: 12px; color: var(--muted, #64748b); }
+[data-enrichment-retries]:not(:empty) { padding: 0 18px 12px; }
+#enrichment-message:empty { display: none; }

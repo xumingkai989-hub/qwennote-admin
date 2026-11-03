@@ -21,15 +21,17 @@ function harness(fetch, withFull = false) {
   const error = {textContent: 'old error'};
   const feedback = {textContent: ''};
   let reloads = 0;
+  let refreshes = 0;
+  let watched = [];
   let finish;
   let delay;
   vm.runInNewContext(script, {document: {getElementById: id => ({'sync-button': button, 'full-sync-button': withFull ? fullButton : null, 'sync-error': error, 'sync-feedback': feedback})[id]},
-    fetch, setTimeout: (callback, ms) => {finish = callback; delay = ms;}, window: {location: {reload: () => reloads++}}});
-  return {button, fullButton, fullClasses, fullAttrs, fullLabel, classes, attrs, error, feedback, click: () => click(), fullClick: () => fullClick(), finish: () => finish(), get delay() {return delay;}, get reloads() {return reloads;}};
+    fetch, setTimeout: (callback, ms) => {finish = callback; delay = ms;}, window: {enrichment: {refreshList: async () => { refreshes++; }, watch: runs => { watched.push(...runs); }}, location: {reload: () => reloads++}}});
+  return {button, fullButton, fullClasses, fullAttrs, fullLabel, classes, attrs, error, feedback, click: () => click(), fullClick: () => fullClick(), finish: () => finish(), get delay() {return delay;}, get reloads() {return reloads;}, get refreshes() {return refreshes;}, get watched() {return watched;}};
 }
-test('sync success shows a check for one second, locks button, then reloads current URL', async () => {
+test('sync success locks button and updates the list without reloading', async () => {
   const calls = [];
-  const h = harness(async (...args) => {calls.push(args); return {ok: true, json: async () => ({status: 'success', fetched: 8, inserted: 2, updated: 1, skipped: 5, duration_ms: 1234})};});
+  const h = harness(async (...args) => {calls.push(args); return {ok: true, json: async () => ({status: 'success', fetched: 8, inserted: 2, updated: 1, skipped: 5, duration_ms: 1234, enrichment_run_id: 12})};});
   const pending = h.click();
   assert.equal(h.button.disabled, true);
   assert.equal(h.attrs.get('aria-busy'), 'true');
@@ -39,12 +41,14 @@ test('sync success shows a check for one second, locks button, then reloads curr
   assert.equal(calls[0][0], '/sync');
   assert.equal(calls[0][1].method, 'POST');
   assert.equal(calls[0][1].credentials, 'same-origin');
-  assert.ok(h.classes.has('is-complete'));
+  assert.equal(h.refreshes, 1);
+  assert.deepEqual(h.watched, [12]);
   assert.equal(h.feedback.textContent, '快速同步 · 检查 8 条 · 新增 2 · 更新 1 · 跳过 5 · 耗时 1234 毫秒');
-  assert.equal(h.delay, 1000);
+  assert.equal(h.delay, undefined);
   assert.equal(h.reloads, 0);
-  h.finish(); await pending;
-  assert.equal(h.reloads, 1);
+  await pending;
+  assert.equal(h.reloads, 0);
+  assert.equal(h.refreshes, 1);
   assert.equal(h.button.disabled, false);
 });
 test('full sync posts the explicit URL and locks both buttons until completion', async () => {
@@ -64,13 +68,14 @@ test('full sync posts the explicit URL and locks both buttons until completion',
   assert.equal(calls[0][1].method, 'POST');
   assert.equal(calls[0][1].credentials, 'same-origin');
   assert.equal(h.feedback.textContent, '全盘同步 · 检查 4 条 · 新增 1 · 更新 3 · 跳过 0 · 耗时 5678 毫秒');
-  h.finish(); await pending;
+  await pending;
   assert.equal(h.button.disabled, false);
   assert.equal(h.fullButton.disabled, false);
   assert.equal(h.fullLabel.textContent, '全盘同步');
   assert.equal(h.fullAttrs.has('aria-busy'), false);
   assert.equal(h.fullClasses.size, 0);
-  assert.equal(h.reloads, 1);
+  assert.equal(h.reloads, 0);
+  assert.equal(h.refreshes, 1);
 });
 test('a failed full sync unlocks both buttons for retry', async () => {
   const h = harness(async () => {throw new Error('网络不可用');}, true);

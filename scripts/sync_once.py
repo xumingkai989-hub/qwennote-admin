@@ -23,7 +23,12 @@ def main(argv=None):
     preferences = store.get_settings(backfill_days=settings.backfill_days)
     mode = args.mode or preferences.sync_mode_default
     result = run_sync(source, store, backfill_days=preferences.backfill_days, full=mode == 'full')
-    print(json.dumps(result.result(), ensure_ascii=False))
+    print(json.dumps(result.result(), ensure_ascii=False), flush=True)
+    if result.enrichment_run_id:
+        from app.enrichment import start_background
+        # Print synchronization immediately; keep this one-shot process alive
+        # for its background batch (a killed CLI is recovered by the timer).
+        start_background(store).join()
     return 0 if result.status == 'success' else 1
 
 

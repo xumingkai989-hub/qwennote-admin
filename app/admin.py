@@ -83,6 +83,28 @@ def install_admin(app: FastAPI, *, settings: Settings, templates: Jinja2Template
                    valid_csrf=valid_csrf, csrf=csrf, session_binding=session_binding,
                    parse_form=parse_form)
 
+    @app.post('/api/enrichment/retry')
+    async def retry_enrichment(request: Request):
+        from app.enrichment import retry_failed, start_background, runs_for_records
+        from fastapi.responses import JSONResponse
+        subject = sessions.decode(request.cookies.get('session'))
+        if not subject:
+            return JSONResponse({'detail': '请先登录'}, status_code=401)
+        denied = authorize(request)
+        if denied is not None:
+            return JSONResponse({'detail': '仅管理员可以重试分析'}, status_code=403)
+        fields = await parse_form(request, cookie_name='recording_csrf')
+        if not isinstance(fields, dict):
+            return JSONResponse({'detail': 'CSRF 校验失败'}, status_code=403)
+        recording_id = fields.get('recording_id', [''])[0] or None
+        count = retry_failed(app.state.store, recording_id)
+        with app.state.store._connect() as conn:
+            ids = [r[0] for r in conn.execute("SELECT DISTINCT recording_id FROM enrichment_tasks WHERE status IN ('pending','running')")]
+        response = JSONResponse({'pending': count, 'runs': runs_for_records(app.state.store, ids)}, headers={'Cache-Control': 'no-store'})
+        from starlette.background import BackgroundTask
+        response.background = BackgroundTask(start_background, app.state.store)
+        return response
+
     @app.get('/admin')
     def admin(request: Request):
         denied = authorize(request)

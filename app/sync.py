@@ -33,6 +33,7 @@ class SyncRun:
     mode: str = 'quick'
     duration_ms: int = 0
     detail_serialized: int = 0
+    enrichment_run_id: int | None = None
 
     def result(self) -> dict:
         return {key: value for key, value in asdict(self).items() if key != 'id'}
@@ -170,25 +171,16 @@ def run_sync(source: MinutesSource, store: SyncStore, *, backfill_days: int = 90
                       detail_serialized=int(detail_serialized),
                       refreshed_token=int(getattr(source, 'refresh_count', 0) > refresh_before))
         store.finish_sync(run)
-        try:
-            from app.hotword_judge import run_judgments
-            if judge_ids:
-                run_judgments(store, recording_ids=judge_ids)
-        except Exception:
-            logging.getLogger(__name__).warning('热词判断批次失败；未判断内容保持原文')
-        # Tags are optional enrichment; never turn a successful sync into failure.
-        try:
-            from app.tag import run_tags
-            if not hasattr(store, 'get_settings') or store.get_settings().tag_enabled:
-                run_tags(store, recording_ids=tag_ids, force=True)
-        except Exception:
-            logging.getLogger(__name__).warning('打标批次失败；录音同步已完成')
-        # Keep enrichment at its existing point after the first finish_sync,
-        # then include it in the total wall-clock duration returned to callers.
-        run = replace(run, finished_at=datetime.now(SHANGHAI).isoformat(),
-                      duration_ms=max(1, int((time.perf_counter() - clock_started) * 1000)))
-        store.finish_sync(run)
-        return run
+    # The producer lock is released before tasks become visible to any worker.
+    if run.status == 'success':
+        from app.enrichment import enqueue
+        enrichment_run_id = enqueue(store, [*tag_ids, *judge_ids], sync_run_id=run_id,
+                                    tag_ids=tag_ids, hotword_ids=judge_ids)
+        run = replace(run, enrichment_run_id=enrichment_run_id)
+    run = replace(run, finished_at=datetime.now(SHANGHAI).isoformat(),
+                  duration_ms=max(1, int((time.perf_counter() - clock_started) * 1000)))
+    store.finish_sync(run)
+    return run
 
 
 def _fetch_detail(source: MinutesSource, meta: RecordingMeta):

@@ -347,7 +347,8 @@ def test_sync_survives_absent_or_broken_model(registry, store, configuration):
     assert result.status == 'success' and result.inserted == 1
     assert store.get_recording(record.recording_id).title == '仍然同步'
     with store._connect() as conn:
-        assert conn.execute('SELECT COUNT(*) FROM tag_runs').fetchone()[0] == 1
+        assert conn.execute('SELECT COUNT(*) FROM tag_runs').fetchone()[0] == 0
+        assert conn.execute("SELECT COUNT(*) FROM enrichment_tasks WHERE status='pending'").fetchone()[0] == 2
         assert conn.execute('SELECT COUNT(*) FROM recording_tags').fetchone()[0] == 0
 
 

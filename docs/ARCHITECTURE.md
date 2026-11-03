@@ -38,7 +38,8 @@
 | `settings_admin.py` | 自动化设置页面、保存与下次运行展示 | admin |
 | `store.py` | SQLite 迁移、查询、事务、文件锁及业务持久化 | 路由、同步、AI、调度与 CLI |
 | `summary.py` | 安全 Markdown 渲染、只读待办和文档样式修饰 | recording_content、main |
-| `sync.py` | quick/full 编排、水位与退化、跳过完整记录、批次计数及可选 AI 增强 | main、scheduler_tick、scripts/sync_once.py |
+| `enrichment.py` | 持久化增强队列、原子领取、失败重试与批次状态；后台线程及调度共用两条并发槽位 | sync、main、admin、scheduler_tick |
+| `sync.py` | quick/full 编排、水位与退化、跳过完整记录、批次计数及增强任务入队 | main、scheduler_tick、scripts/sync_once.py |
 | `tag.py` | 模型打标、重试、并发/用量控制与 CLI | sync、tag_maintenance、models 的后备配置 |
 | `tag_maintenance.py` | 词表归一、语义检查提案、维护运行记录与 CLI | scheduler_tick、命令行 |
 | `tag_vocabulary.py` | 词表迁移、别名归一、事务合并及提案处理 | store、assistant、tag、tag_maintenance、tagging |
@@ -75,7 +76,7 @@ nginx 终止 TLS 并设置 Host、转发协议与来源地址；Uvicorn 只监�
 ## 3. 同步管道时序
 
 结论：先可靠保存原文，再做可失败的 AI 增强。产品逻辑可分为拉取 → 归一化 → 去重/幂等 → 入库 → 打标/热词判断。
-**实际执行顺序是入库 → 记录同步结果 → 热词判断 → 打标**，以 `app/sync.py:run_sync` 为准。
+**实际执行顺序是入库 → 释放同步锁 → 增强任务入队 → 返回；后台或 tick 独立执行热词判断和打标**，以 `app/sync.py:run_sync` 为准。
 
 ```mermaid
 sequenceDiagram
@@ -111,11 +112,16 @@ sequenceDiagram
         end
     end
     S->>S: finish_sync 写状态、实际 mode 与计数
-    S->>H: 仅正文/内容状态变化的录音
-    H-->>S: 位置决策与检查结果
-    S->>A: 标题/正文变化的录音（启用打标时）
-    A-->>S: 标签与运行统计
-    S-->>C: 同步结果并释放锁
+    S->>S: 释放锁，原子写入持久增强任务和批次
+    S-->>C: 同步结果及 enrichment_run_id
+    C->>H: 响应发送后启动后台线程（tick 兜底）
+    par 最多两个增强任务
+        H->>H: 热词判断、写入位置决策
+    and
+        A->>A: 打标、写入标签
+    end
+    H-->>S: 更新任务和批次状态
+    A-->>S: 更新任务和批次状态
 ```
 
 - mcp 源读取 OAuth 文件，过期或被拒绝时在独立锁下续期并原子替换，分页/限流异常按客户端规则处理。

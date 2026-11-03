@@ -25,6 +25,8 @@ from app.search import search_snippets
 from app.session import SESSION_MAX_AGE, STATE_MAX_AGE, SignedCookie
 from app.store import SQLiteStore, Store
 from app.sync import SyncInProgress, run_sync
+from app import enrichment
+from starlette.background import BackgroundTask
 from app.summary import MARKDOWN
 
 AUTHORIZE_URL = "https://accounts.feishu.cn/open-apis/authen/v1/authorize"
@@ -184,6 +186,31 @@ def create_app(
     edit_token = install_admin(app, settings=settings, templates=templates, sessions=sessions,
                   error_page=error_page, login_redirect=login_redirect)
 
+    def enrichment_context(request, ids):
+        ids = list(ids)
+        can_retry = navigation_context(request)['navigation_admin']
+        return {'enrichment_states': {rid: enrichment.record_state(repository, rid) for rid in ids},
+                'enrichment_runs': enrichment.runs_for_records(repository, ids),
+                'enrichment_csrf': edit_token(request) if can_retry else '',
+                'enrichment_counts': {rid: repository.hotword_presentation(rid)['count'] for rid in ids}}
+
+    def enrichment_cookie(response, context):
+        if context['enrichment_csrf']:
+            set_cookie(response, EDIT_COOKIE, context['enrichment_csrf'], SESSION_MAX_AGE)
+        return response
+
+    @app.get('/api/enrichment/status')
+    def enrichment_status(request: Request, run: int):
+        subject = sessions.decode(request.cookies.get('session'))
+        if not subject:
+            return JSONResponse({'detail': '请先登录'}, status_code=401)
+        user = repository.get_user(subject)
+        if not user or not user.is_active:
+            return JSONResponse({'detail': '无访问权限'}, status_code=403)
+        result = enrichment.status(repository, run)
+        return JSONResponse(result or {'detail': '分析批次不存在'}, status_code=200 if result else 404,
+                            headers={'Cache-Control': 'no-store'})
+
     @app.get('/search', response_class=HTMLResponse)
     def search(request: Request, store: Annotated[Store, Depends(get_store)]):
         open_id = sessions.decode(request.cookies.get('session'))
@@ -204,7 +231,9 @@ def create_app(
         def page_url(page: int) -> str:
             return '/search?' + urlencode({**params, 'page': page})
 
-        return templates.TemplateResponse(request=request, name='home.html', context={
+        analysis = enrichment_context(request, (r.recording_id for r in recordings.items))
+        response = templates.TemplateResponse(request=request, name='home.html', context={
+            **analysis,
             'title': f'搜索「{query}」', 'user': user, 'sync_run': store.latest_sync(),
             'search_query': query, 'filters': filters, 'recordings': recordings,
             'snippets': {item.recording_id: search_snippets(item, query) for item in recordings.items},
@@ -212,6 +241,7 @@ def create_app(
             'previous_url': page_url(recordings.page - 1) if recordings.page > 1 else None,
             'next_url': page_url(recordings.page + 1) if recordings.page < recordings.pages else None,
         }, headers={'Cache-Control': 'no-store'})
+        return enrichment_cookie(response, analysis)
 
     @app.get("/", response_class=HTMLResponse)
     def home(request: Request, store: Annotated[Store, Depends(get_store)]):
@@ -231,7 +261,9 @@ def create_app(
             def page_url(page: int) -> str:
                 return '/?' + urlencode({**filters['params'], 'page': page})
 
+            analysis = enrichment_context(request, (r.recording_id for r in recordings.items))
             response = templates.TemplateResponse(request=request, name="home.html", context={
+                **analysis,
                 "user": user, "sync_run": store.latest_sync(),
                 'filters': filters, 'recordings': recordings,
                 'date_groups': date_groups(recordings.items, store),
@@ -241,7 +273,7 @@ def create_app(
                 'next_url': page_url(recordings.page + 1) if recordings.page < recordings.pages else None,
             })
             response.headers["Cache-Control"] = "no-store"
-            return response
+            return enrichment_cookie(response, analysis)
         if open_id:
             return error_page(request, 403, '无访问权限', '你的账号不在访问白名单中。')
         return login_redirect()
@@ -304,7 +336,8 @@ def create_app(
                        for token in MARKDOWN.parse(edit_content) if token.level == 0 and token.map]
         response = templates.TemplateResponse(request=request, name='detail.html', context={
             'title': recording.title or '未命名录音', 'recording': recording, 'back_url': back_url,
-            'view': view, 'can_edit': can_edit, 'edit_csrf': token,
+            **enrichment_context(request, [recording_id]),
+            'view': view, 'can_edit': can_edit, 'edit_csrf': token, 'enrichment_csrf': token,
             'edit_content': edit_content, 'edit_blocks': edit_blocks,
             'hotword_trace': store.hotword_presentation(recording_id),
             'edited_at': edit_timestamp(overrides[view]['updated_at']) if view in overrides else None,
@@ -349,7 +382,9 @@ def create_app(
         except SyncInProgress:
             return JSONResponse({'detail': '同步正在进行，请稍后重试'}, status_code=409,
                                 headers={'Cache-Control': 'no-store'})
-        return JSONResponse(run.result(), headers={'Cache-Control': 'no-store'})
+        return JSONResponse(run.result(), headers={'Cache-Control': 'no-store'},
+                            background=BackgroundTask(enrichment.start_background, store)
+                            if run.enrichment_run_id else None)
 
     @app.get("/auth/callback")
     def callback(

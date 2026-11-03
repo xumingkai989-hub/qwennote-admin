@@ -22,6 +22,8 @@
 - 设置中心默认每日 03:00 快速同步（`sync_mode_default=quick`），每周日 03:30 全盘同步（`full_sync_enabled=true`、`full_sync_weekday=6`、`full_sync_time=03:30`）；两类下次时间均可见。同步共用一把锁，撞锁消耗本次调度槽位，每周全盘按自然周最多领取一次。
 - CLI：`python -m scripts.sync_once --mode quick|full`；省略参数时读取 `sync_mode_default`（默认 `quick`）。每次结果与 `sync_runs` 都记录实际模式；首次快速请求退化全盘时记录为 `full`。 结果显示「检查 N 条 · 新增 X · 更新 Y · 跳过 Z」；检查只统计窗口内去重记录。
 
+- AI 打标与热词判断在落库后独立执行，同步不等模型。列表和详情每两秒自动补齐；关闭后重进从数据库恢复状态，终态停止轮询。后台任务由十分钟 tick 兜底，失败可见，管理员可重试。
+
 ### 阅读
 
 - 列表按上海日期分组，每页 20 条，按笔记创建时间倒序。
@@ -207,6 +209,7 @@ JS 层验证同步按钮、搜索、复制和菜单等交互；浏览器层验�
 - [段落缺发言人容错（28，提交记录）](https://github.com/xumingkai989-hub/qwennote-admin/commit/ec52c267ce5228cb8b84db6921b84601aa990f20)
 - [同步模式与实测（29）](docs/sync-modes-29.md)
 - [同步性能内核（33）](docs/sync-performance-33.md)
+- [AI 增强解耦与页面自动补齐（34）](docs/enrichment-34.md)
 - [同步按钮主次与进行中状态（30，提交记录）](https://github.com/xumingkai989-hub/qwennote-admin/commit/4b12f5d346f99713022be25bf7051e7792acb25b)
 
 ## 许可证

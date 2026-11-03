@@ -33,6 +33,8 @@ def scheduled_time(job, settings, now, last):
     Daily jobs do not replay older days, or repeat after a same-day time edit.
     """
     now = local_time(now)
+    if job == 'enrichment':
+        return last + timedelta(minutes=10) if last else now
     if job == 'sync' and not settings.sync_enabled:
         return None
     if job == 'tag' and not settings.tag_enabled:
@@ -68,7 +70,7 @@ def next_runs(store, settings, now):
     now = local_time(now)
     state = read_state(store)
     result = {}
-    for job in ('sync', 'full_sync', 'tag', 'retention'):
+    for job in ('sync', 'full_sync', 'tag', 'retention', 'enrichment'):
         due = scheduled_time(job, settings, now, state.get(job))
         if due is not None:
             due = max(due, now)
@@ -125,6 +127,8 @@ def _sync(store, preferences):
                       full=preferences.sync_mode_default == 'full')
     if result.status != 'success':
         raise RuntimeError('sync_failed')
+    from app.enrichment import start_background
+    start_background(store)
 
 
 def _tag(store, preferences):
@@ -134,19 +138,23 @@ def _tag(store, preferences):
         raise RuntimeError('tag_maintenance_failed')
 
 
-def tick(store, *, now=None, sync_job=None, full_sync_job=None, tag_job=None, retention_job=None):
+def tick(store, *, now=None, sync_job=None, full_sync_job=None, tag_job=None, retention_job=None, enrichment_job=None):
     now = local_time(now if now is not None else datetime.now(SHANGHAI))
     result = {'executed': [], 'failed': [], 'skipped': []}
     try:
         with tick_lock(store):
             preferences = store.get_settings()
             state = read_state(store)
+            from app.enrichment import has_work, process_pending
             for job, callback in (
                 ('sync', sync_job or _sync),
                 ('full_sync', full_sync_job or sync_job or _sync), ('tag', tag_job or _tag),
                 ('retention', retention_job or
                  (lambda store, settings: retain_recordings(store, settings.retention_days, now))),
+                ('enrichment', enrichment_job or (lambda store, settings: process_pending(store))),
             ):
+                if job == 'enrichment' and not has_work(store):
+                    continue
                 due = scheduled_time(job, preferences, now, state.get(job))
                 if due is None or due > now:
                     continue

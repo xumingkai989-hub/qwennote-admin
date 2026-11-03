@@ -225,7 +225,9 @@ def test_sync_judges_only_new_or_changed_content(populated, store, monkeypatch):
     assert run_sync(source, store, backfill_days=90, full=True).status == 'success' and calls == []
     source.body = '内容变化'
     assert run_sync(source, store, backfill_days=90, full=True).status == 'success'
-    assert calls == [{'recording_ids': ['hotword']}] and store.hotword_decisions('hotword') == []
+    assert calls == [] and store.hotword_decisions('hotword') == []
+    from app.enrichment import record_state
+    assert record_state(store, 'hotword')['hotword'] == 'pending'
 
 
 def test_cli_requires_database_and_all_flag(monkeypatch):

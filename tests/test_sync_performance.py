@@ -145,7 +145,7 @@ def test_duplicates_are_deduped_before_workers_and_full_retry_is_idempotent(prep
         assert conn.execute('SELECT count(*) FROM recordings').fetchone()[0] == 10
 
 
-def test_duration_includes_enrichment_and_is_persisted(prepared, monkeypatch):
+def test_duration_excludes_enrichment_and_is_persisted(prepared, monkeypatch):
     elapsed = [0.0]
     events = []
     monkeypatch.setattr('app.sync.time.perf_counter', lambda: elapsed[0])
@@ -162,9 +162,11 @@ def test_duration_includes_enrichment_and_is_persisted(prepared, monkeypatch):
     monkeypatch.setattr('app.hotword_judge.run_judgments', judge)
     monkeypatch.setattr('app.tag.run_tags', tags)
     result = run_sync(ConcurrentSource(1), prepared)
-    assert events == ['judge', 'tags']
-    assert result.duration_ms == prepared.latest_sync().duration_ms == 3000
-    assert result.result()['duration_ms'] == 3000
+    assert events == []
+    assert result.duration_ms == prepared.latest_sync().duration_ms == 1
+    assert result.result()['duration_ms'] == 1
+    from app.enrichment import status
+    assert status(prepared, result.enrichment_run_id)['status'] == 'pending'
 
 
 def test_duration_migration_preserves_old_rows_and_is_idempotent(store):

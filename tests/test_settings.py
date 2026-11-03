@@ -280,7 +280,8 @@ def test_tag_switch_stops_sync_auto_tags(client, store, monkeypatch):
     store.save_settings(AutomationSettings())
     source.recordings = [replace(source.recordings[0], title='新标题')]
     assert run_sync(source, store, backfill_days=1).status == 'success'
-    assert calls[0]['recording_ids'] == ['sync-new']
+    from app.enrichment import record_state
+    assert not calls and record_state(store, 'sync-new')['tag'] == 'pending'
 
 
 def test_manual_sync_uses_saved_backfill_when_auto_sync_disabled(client, store):
@@ -299,7 +300,7 @@ def test_tick_defaults_execute_existing_sync_pipeline(client, store, settings, m
     monkeypatch.setattr('scripts.deployment_runtime.deployment_settings', lambda: settings)
     monkeypatch.setattr('app.minutes.FixtureMinutesSource', lambda _: source)
     store.save_settings(replace(AutomationSettings(), sync_interval_hours=1, tag_enabled=False, backfill_days=1))
-    assert scheduler.tick(store, now=now)['executed'] == ['sync']
+    assert scheduler.tick(store, now=now)['executed'] == ['sync', 'enrichment']
     assert store.get_recording('actual-sync') is not None
     assert scheduler.tick(SQLiteStore(store.db_path), now=now)['executed'] == []
     with store._connect() as conn:

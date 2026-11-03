@@ -14,15 +14,24 @@
   const saveWords = document.getElementById('save-hotwords');
   const dismiss = document.getElementById('dismiss-hotwords');
   const wordStatus = document.getElementById('hotword-status');
-  const baseline = JSON.parse(document.getElementById('edit-source').textContent);
-  const blocks = JSON.parse(document.getElementById('edit-blocks').textContent);
-  const originalHTML = content.innerHTML;
+  let baseline = JSON.parse(document.getElementById('edit-source').textContent);
+  let blocks = JSON.parse(document.getElementById('edit-blocks').textContent);
+  let originalHTML = content.innerHTML;
   const originalBlocks = new WeakMap();
   Array.from(content.children).forEach((node, index) => {
     originalBlocks.set(node, {html: node.outerHTML, source: blocks[index]});
   });
   let editing = false;
   let dirty = false;
+  document.addEventListener('enrichment:content', event => {
+    if (editing) return;
+    baseline = event.detail.source;
+    blocks = event.detail.blocks;
+    originalHTML = content.innerHTML;
+    Array.from(content.children).forEach((node, index) => {
+      originalBlocks.set(node, {html: node.outerHTML, source: blocks[index]});
+    });
+  });
   content.addEventListener('input', () => { dirty = true; });
 
   // Convert only changed blocks. Untouched blocks retain their original Markdown.
@@ -108,6 +117,7 @@
       node.setAttribute('role', active ? 'group' : 'button');
       node.setAttribute('tabindex', active ? '-1' : '0');
     });
+    if (!active) document.dispatchEvent(new Event('enrichment:edit-end'));
   }
   content.addEventListener('paste', event => {
     if (!editing) return;

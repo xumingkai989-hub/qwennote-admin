@@ -36,7 +36,11 @@
       <span>{{ (recording.duration_min ~ ' 分钟') if recording.duration_min is not none else '时长未知' }}</span>
     </div>
   </header>
-  {% if hotword_trace.pending %}<p class="hotword-pending">本条的用词尚未经过热词判断</p>{% endif %}
+  <div id="enrichment-hotword">
+  {% set state = enrichment_states.get(recording.recording_id, {}) if enrichment_states is defined else {} %}
+  {% if state.get('hotword') in ('pending','running') %}<p class="hotword-pending">热词分析中…</p>
+  {% elif state.get('hotword') == 'failed' %}<p class="enrichment-failed">热词分析失败 · {{ state.get('hotword_error') }}{% if can_edit and state.get('hotword_retryable') %}<button type="button" class="text-button" data-enrichment-retry="{{ recording.recording_id }}">重试</button>{% endif %}</p>
+  {% elif hotword_trace.pending %}<p class="hotword-pending">本条的用词尚未经过热词判断</p>{% endif %}
   {% if hotword_trace.count %}
   <details id="hotword-trace" class="hotword-trace">
     <summary>热词已应用 {{ hotword_trace.count }} 处</summary>
@@ -55,6 +59,7 @@
     {% endfor %}</ul>
   </details>
   {% endif %}
+  </div>
   <nav class="detail-view-switch" aria-label="录音内容视图">
     <div class="segmented-control">
       {% for name, label, available in [('summary', '总结', recording.has_summary), ('transcript', '转写原文', recording.has_transcript)] %}
@@ -137,6 +142,7 @@
   {% endif %}
   </div>
   <div id="transcript-toast" class="transcript-toast" role="status" aria-live="polite" hidden></div>
+  {% include 'enrichment_boot.html' %}
   <script src="{{ url_for('static', path='detail.js') }}?v=20261030-13" defer></script>
-  {% if can_edit %}<script src="{{ url_for('static', path='recording-edit.js') }}?v=20261030-12" defer></script>{% endif %}
+  {% if can_edit %}<script src="{{ url_for('static', path='recording-edit.js') }}?v=20261103-34" defer></script>{% endif %}
 {% endblock %}

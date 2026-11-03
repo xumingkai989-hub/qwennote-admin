@@ -124,9 +124,12 @@ def test_missing_key_sync_succeeds_one_warning(tagged_store, monkeypatch, caplog
                                {'new': RecordingDetail('new', '', '', False, False)})
     result = run_sync(source, tagged_store, backfill_days=1)
     assert result.status == 'success' and result.inserted == 1
-    assert len(caplog.records) == 1 and '跳过' in caplog.text
+    assert len(caplog.records) == 0
+    from app.enrichment import process_pending, record_state
+    process_pending(tagged_store)
+    assert record_state(tagged_store, 'new')['tag_error'] == '未配置模型'
     assert rows(tagged_store) == []
-    assert rows(tagged_store, 'tag_runs')[0]['attempted'] == 0
+    assert rows(tagged_store, 'tag_runs') == []
 
 
 def test_input_truncation_and_env(monkeypatch, tagged_store):
@@ -191,11 +194,14 @@ def test_sync_only_new_or_model_input_changed(tagged_store, monkeypatch):
     original_run = tag.run_tags
     results = []
     def fake(store, **kwargs):
+        kwargs.pop('settings', None)
         result = original_run(store, settings=tag.TagSettings('private-test-key'),
                               transport=httpx.MockTransport(lambda _: response()), **kwargs)
         results.append(result)
         return result
     monkeypatch.setattr(tag, 'run_tags', fake)
+    monkeypatch.setattr('app.enrichment.resolve_model', lambda _: tag.TagSettings('private-test-key'))
+    from app.enrichment import process_pending
     meta = RecordingMeta('new', '标题', datetime.now(SHANGHAI), 30)
     detail = RecordingDetail('new', '总结', '转写', True, True)
     source = FakeMinutesSource([meta], {'new': detail})
@@ -203,10 +209,12 @@ def test_sync_only_new_or_model_input_changed(tagged_store, monkeypatch):
         if field:
             source.recordings[0] = replace(source.recordings[0], **{field: value})
         assert run_sync(source, tagged_store, backfill_days=1, full=True).status == 'success'
+        process_pending(tagged_store)
     for field in ['summary_md', 'transcript_md']:
         source.details['new'] = replace(source.details['new'], **{field: '更正内容'})
         run_sync(source, tagged_store, backfill_days=1, full=True)
-    assert [result['attempted'] for result in results] == [1, 0, 0, 1, 1, 1]
+        process_pending(tagged_store)
+    assert [result['attempted'] for result in results] == [1, 1, 1, 1]
 
 
 def test_cascade_migration_and_stale_response_guard(tagged_store):
