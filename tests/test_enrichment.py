@@ -79,6 +79,36 @@ def test_existing_swallowed_model_failures_are_not_success(queued, monkeypatch):
     assert e.status(store, run.enrichment_run_id)['status'] == 'running'
 
 
+def test_empty_hotword_decisions_finish_task_without_retry(queued, monkeypatch):
+    store, _, run = queued
+    configured(monkeypatch)
+    monkeypatch.setattr('app.tag.run_tags', lambda *a, **kw: {'error': None, 'failed': 0, 'succeeded': 1})
+    monkeypatch.setattr('app.hotword_judge.run_judgments', lambda *a, **kw: [
+        {'request_failed': False, 'saved': False}])
+
+    assert e.process_pending(store) == 2
+
+    result = e.status(store, run.enrichment_run_id)
+    assert (result['status'], result['done'], result['failed']) == ('done', 2, 0)
+    hotword = next(t for t in tasks(store) if t['kind'] == 'hotword')
+    assert (hotword['status'], hotword['attempts'], hotword['last_error']) == ('done', 0, None)
+    assert e.process_pending(store) == 0
+
+
+@pytest.mark.parametrize('result', [
+    [],
+    [{'request_failed': False, 'saved': False}] * 2,
+    [{'request_failed': True, 'saved': False}],
+    [{'request_failed': True, 'saved': True}],
+])
+def test_hotword_request_failure_or_wrong_result_count_still_raises(queued, monkeypatch, result):
+    store, _, _ = queued
+    configured(monkeypatch)
+    monkeypatch.setattr('app.hotword_judge.run_judgments', lambda *a, **kw: result)
+    with pytest.raises(RuntimeError, match='^hotword_failed$'):
+        e._execute(store, {'kind': 'hotword', 'recording_id': 'enhance'})
+
+
 def test_three_failures_are_safe_and_retry_resets_budget(queued, monkeypatch):
     store, _, run = queued
     def fail(*_):

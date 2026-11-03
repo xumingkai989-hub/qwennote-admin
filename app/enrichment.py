@@ -146,7 +146,8 @@ def _execute(store, task):
     else:
         from app.hotword_judge import run_judgments
         result = run_judgments(store, recording_ids=[task['recording_id']], force=True, settings=settings)
-        if len(result) != 1 or result[0]['request_failed'] or not result[0]['saved']:
+        # A successful judgment may have no replacements to save.
+        if len(result) != 1 or result[0]['request_failed']:
             raise RuntimeError('hotword_failed')
     return None
 
