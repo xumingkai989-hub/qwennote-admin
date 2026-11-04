@@ -853,12 +853,35 @@ class SQLiteStore:
             if current is None or tuple(value or '' for value in current) != (
                     recording.title, recording.summary_md, recording.transcript_md):
                 raise ValueError('Recording changed during tagging')
+            from app.tag_categories import categories, fallback_category, mark_classified, nearest_category
+            from app.tag_vocabulary import log_change, resolve, refresh_usage
+            names = []
+            choices = [row['name'] for row in categories(conn)]
+            for item in tags:
+                # String callers predate categories and are reconciled by daily maintenance.
+                if isinstance(item, str):
+                    names.append(item)
+                    continue
+                name = item['name']
+                existing = resolve(conn, name)
+                if existing is not None:
+                    name = existing['name']
+                else:
+                    category = nearest_category(item.get('category', ''), choices, fallback_category(conn))
+                    tag_id = conn.execute(
+                        "INSERT INTO tags (name, category, status, source, created_at, updated_at) "
+                        "VALUES (?, ?, 'active', 'model', ?, ?)", (name, category, created_at, created_at)).lastrowid
+                    mark_classified(conn, tag_id, 'model')
+                    log_change(conn, 'add', **{'from': None, 'to': name, 'reason': 'model'})
+                if name not in names:
+                    names.append(name)
             conn.execute('DELETE FROM recording_tags WHERE recording_id = ?', (recording.recording_id,))
             conn.executemany(
                 'INSERT INTO recording_tags (recording_id, tag, position, model, created_at) VALUES (?, ?, ?, ?, ?)',
                 [(recording.recording_id, tag, position, model, created_at)
-                 for position, tag in enumerate(tags, 1)],
+                 for position, tag in enumerate(names, 1)],
             )
+            refresh_usage(conn)
 
     def start_tag_run(self, started_at):
         with self._connect() as conn:

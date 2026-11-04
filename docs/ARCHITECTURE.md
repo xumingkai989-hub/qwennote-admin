@@ -42,6 +42,7 @@
 | `sync.py` | quick/full 编排、水位与退化、跳过完整记录、批次计数及增强任务入队 | main、scheduler_tick、scripts/sync_once.py |
 | `tag.py` | 模型打标、重试、并发/用量控制与 CLI | sync、tag_maintenance、models 的后备配置 |
 | `tag_maintenance.py` | 词表归一、语义检查提案、维护运行记录与 CLI | scheduler_tick、命令行 |
+| `tag_categories.py` | 一级分类数据管理、AI 分类映射与可重跑历史回填。 |
 | `tag_vocabulary.py` | 词表迁移、别名归一、事务合并及提案处理 | store、assistant、tag、tag_maintenance、tagging |
 | `tagging.py` | 根据活动词表及反馈指令构建打标 system prompt | tag |
 

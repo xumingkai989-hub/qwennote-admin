@@ -67,6 +67,8 @@ def migrate(conn):
         conn.execute('DROP TABLE tag_semantic_checks')
         conn.execute('ALTER TABLE tags RENAME TO tags_before_deactivation')
         conn.execute(statements[0])
+        if 'category' in {row[1] for row in conn.execute('PRAGMA table_info(tags_before_deactivation)')}:
+            conn.execute("ALTER TABLE tags ADD COLUMN category TEXT NOT NULL DEFAULT '其他'")
         conn.execute('INSERT INTO tags SELECT * FROM tags_before_deactivation')
         conn.execute('DROP TABLE tags_before_deactivation')
         conn.execute(statements[1])
@@ -82,6 +84,8 @@ def migrate(conn):
             conn.execute("INSERT INTO tags (name, status, source, created_at, updated_at) VALUES (?, 'active', 'seed', ?, ?)",
                          (name, stamp, stamp))
             log_change(conn, 'add', **{'from': None, 'to': name, 'reason': 'seed'})
+    from app.tag_categories import migrate as migrate_categories
+    migrate_categories(conn)
 
 
 def refresh_usage(conn):
@@ -118,9 +122,10 @@ def merge_tags(conn, source, target, *, reason, proposal_id=None):
     if source['status'] != 'active' or target['status'] != 'active':
         raise ValueError('Merge endpoints must be active')
     rewrite_recordings(conn, source['name'], target['name'])
-    conn.execute("UPDATE tags SET status = 'merged', merged_into = ?, usage_count = 0, updated_at = ? WHERE id = ?",
-                 (target['id'], now(), source['id']))
-    conn.execute('UPDATE tags SET merged_into = ? WHERE merged_into = ?', (target['id'], source['id']))
+    conn.execute("UPDATE tags SET status = 'merged', merged_into = ?, category = ?, usage_count = 0, updated_at = ? WHERE id = ?",
+                 (target['id'], target['category'], now(), source['id']))
+    conn.execute('UPDATE tags SET merged_into = ?, category = ? WHERE merged_into = ?',
+                 (target['id'], target['category'], source['id']))
     conn.execute('UPDATE tag_aliases SET tag_id = ? WHERE tag_id = ?', (target['id'], source['id']))
     conn.execute('INSERT INTO tag_aliases (alias, tag_id) VALUES (?, ?) ON CONFLICT(alias) DO UPDATE SET tag_id = excluded.tag_id',
                  (normalize_tag(source['name']), target['id']))

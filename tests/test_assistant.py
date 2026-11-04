@@ -15,7 +15,9 @@ from test_login import login
 from test_tag_maintenance import add_recording, rows
 
 PATHS = ['/assistant/instructions', '/assistant/tags/merge', '/assistant/tags/deactivate',
-         '/assistant/proposals/1/accept', '/assistant/proposals/1/reject']
+         '/assistant/proposals/1/accept', '/assistant/proposals/1/reject',
+         '/assistant/tags/category', '/assistant/categories/add',
+         '/assistant/categories/rename', '/assistant/categories/toggle']
 
 
 def csrf(client):

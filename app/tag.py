@@ -46,17 +46,29 @@ def model_input(recording):
 def parse_tags(text, vocabulary=VOCABULARY):
     data = json.loads(text)
     if (not isinstance(data, dict) or set(data) != {'tags'} or
-            not isinstance(data['tags'], list) or not data['tags'] or
-            any(not isinstance(tag, str) or not tag.strip() for tag in data['tags'])):
+            not isinstance(data['tags'], list) or not data['tags']):
         raise ValueError('Invalid tags JSON')
-    tags = list(dict.fromkeys(tag.strip() for tag in data['tags']))[:5]
+    tags, seen = [], set()
+    for item in data['tags']:
+        if isinstance(item, str):  # Older model responses remain readable.
+            item = {'name': item, 'category': ''}
+        if (not isinstance(item, dict) or set(item) - {'name', 'category'} or
+                not isinstance(item.get('name'), str) or not item['name'].strip() or
+                not isinstance(item.get('category', ''), str)):
+            raise ValueError('Invalid tag entry')
+        name = item['name'].strip()
+        if name not in seen:
+            tags.append({'name': name, 'category': item.get('category', '').strip()})
+            seen.add(name)
+    tags = tags[:5]
     if not vocabulary:
-        label = tags[0].removeprefix('其他:')[:6].strip()
+        label = tags[0]['name'].removeprefix('其他:')[:6].strip()
         if not label:
             raise ValueError('Empty fallback label')
-        return ['其他:' + label]
+        return [{'name': '其他:' + label, 'category': tags[0]['category']}]
     other_count = 0
-    for tag in tags:
+    for item in tags:
+        tag = item['name']
         if tag in vocabulary:
             continue
         other_count += tag.startswith('其他:')
@@ -109,17 +121,25 @@ async def extract(client, settings, recording, usage, *, system=SYSTEM, vocabula
 
 async def tag_batch(store, candidates, settings, run, transport):
     vocabulary, system = load_tagging_context(store)
+    from app.tag_categories import categories, fallback_category, map_tag_categories
+    with store._connect() as conn:
+        choices = [row['name'] for row in categories(conn)]
+        fallback = fallback_category(conn)
     semaphore = asyncio.Semaphore(2)
     async with httpx.AsyncClient(transport=transport, timeout=ITEM_TIMEOUT,
                                 follow_redirects=False, trust_env=False) as client:
+        async def classified_tags(recording):
+            tags = await extract(client, settings, recording, run, system=system, vocabulary=vocabulary)
+            return await map_tag_categories(client, settings, tags, choices, fallback)
+
         async def one(recording):
             async with semaphore:
                 run['attempted'] += 1
                 tags, error = [], None
                 try:
-                    tags = await asyncio.wait_for(
-                        extract(client, settings, recording, run, system=system, vocabulary=vocabulary), ITEM_TIMEOUT)
+                    tags = await asyncio.wait_for(classified_tags(recording), ITEM_TIMEOUT)
                 except TimeoutError:
+                    tags = []
                     error = 'timeout_30s'
                 except TagError as exc:
                     error = str(exc)

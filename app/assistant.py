@@ -5,8 +5,9 @@ import secrets
 
 from fastapi import Request
 from starlette.concurrency import run_in_threadpool
-from fastapi.responses import RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 
+from app.tag_categories import categories, edit_category
 from app.minutes import SHANGHAI
 from app.session import SESSION_MAX_AGE
 from app.sync import SyncInProgress
@@ -23,6 +24,14 @@ def change_label(row):
         return f'合并 {source} → {target}'
     if action == 'deactivate':
         return f'停用 {source}'
+    if action == 'category':
+        return f"{detail.get('tag', '')}：{source} → {target}"
+    if action == 'category-add':
+        return f'新增分类 {target}'
+    if action == 'category-rename':
+        return f'分类改名 {source} → {target}'
+    if action == 'category-toggle':
+        return f"{'启用' if detail.get('enabled') else '停用'}分类 {source}"
     if action == 'instructions':
         return '更新反馈指令'
     if action == 'run':
@@ -43,6 +52,9 @@ def install_assistant(app, *, settings, templates, sessions, authorize, valid_cs
             conn.execute('BEGIN')
             config = conn.execute('SELECT * FROM assistant_config WHERE id = 1').fetchone()
             tags = conn.execute("SELECT * FROM tags WHERE status = 'active' ORDER BY usage_count DESC, id").fetchall()
+            category_list = categories(conn)
+            groups = [{**category, 'tags': [tag for tag in tags if tag['category'] == category['name']]}
+                      for category in category_list]
             proposals = conn.execute("SELECT * FROM tag_merge_proposals WHERE status = 'pending' ORDER BY id").fetchall()
             changes = [{'time': datetime.fromisoformat(row['at']).astimezone(SHANGHAI).strftime('%m-%d %H:%M'),
                         'label': change_label(row)} for row in conn.execute(
@@ -52,7 +64,7 @@ def install_assistant(app, *, settings, templates, sessions, authorize, valid_cs
             token = csrf.encode(session_binding(request) + ':' + secrets.token_urlsafe(32))
         response = templates.TemplateResponse(request=request, name='assistant.html', context={
             'title': 'AI 助手配置', 'instructions': config['instructions'] if instructions is None else instructions,
-            'tags': tags, 'proposals': proposals, 'changes': changes, 'csrf_token': token, 'error': error,
+            'tags': tags, 'categories': category_list, 'category_groups': groups, 'proposals': proposals, 'changes': changes, 'csrf_token': token, 'error': error,
             'saved_at': datetime.fromisoformat(config['updated_at']).astimezone(SHANGHAI).strftime('%H:%M') if saved else '',
         }, status_code=status, headers={'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer'})
         response.set_cookie('admin_csrf', token, max_age=SESSION_MAX_AGE, httponly=True,
@@ -83,7 +95,9 @@ def install_assistant(app, *, settings, templates, sessions, authorize, valid_cs
             else:
                 with store.tag_lock(), store._connect() as conn:
                     conn.execute('BEGIN IMMEDIATE')
-                    if action == 'instructions':
+                    if action.startswith('category-') or action == 'tag-category':
+                        edit_category(conn, action, value)
+                    elif action == 'instructions':
                         conn.execute('UPDATE assistant_config SET instructions = ?, updated_at = ? WHERE id = 1',
                                      (instructions, now()))
                         log_change(conn, 'instructions')
@@ -104,10 +118,17 @@ def install_assistant(app, *, settings, templates, sessions, authorize, valid_cs
         try:
             await run_in_threadpool(apply)
         except ValueError:
+            if action.startswith('category-') or action == 'tag-category':
+                message = '请选择有效标签和分类；分类名称须为 1–40 字且不能重复。'
+                if request.headers.get('accept') == 'application/json':
+                    return JSONResponse({'error': message}, status_code=400)
+                return render(request, error=message, status=400)
             return render(request, error='标签或提案已变更，请刷新后重试，并选择不同的启用标签。', status=400)
         except SyncInProgress:
             return render(request, instructions=instructions if action == 'instructions' else None,
                           error='标签任务正在运行，请稍后重试。', status=409)
+        if action == 'tag-category' and request.headers.get('accept') == 'application/json':
+            return JSONResponse({'saved': True}, headers={'Cache-Control': 'no-store'})
         return RedirectResponse('/assistant?saved=1' if action == 'instructions' else '/assistant',
                                 status_code=303, headers={'Cache-Control': 'no-store'})
 
@@ -130,3 +151,19 @@ def install_assistant(app, *, settings, templates, sessions, authorize, valid_cs
     @app.post('/assistant/proposals/{proposal_id}/reject')
     async def reject(request: Request, proposal_id: int):
         return await mutate(request, 'reject', proposal_id)
+
+    @app.post('/assistant/tags/category')
+    async def tag_category(request: Request):
+        return await mutate(request, 'tag-category')
+
+    @app.post('/assistant/categories/add')
+    async def category_add(request: Request):
+        return await mutate(request, 'category-add')
+
+    @app.post('/assistant/categories/rename')
+    async def category_rename(request: Request):
+        return await mutate(request, 'category-rename')
+
+    @app.post('/assistant/categories/toggle')
+    async def category_toggle(request: Request):
+        return await mutate(request, 'category-toggle')

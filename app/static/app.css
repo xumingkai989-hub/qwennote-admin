@@ -569,3 +569,18 @@ p.assistant-note { margin: 12px 0 0; }
 .enrichment-hotword { font-size: 12px; color: var(--muted, #64748b); }
 [data-enrichment-retries]:not(:empty) { padding: 0 18px 12px; }
 #enrichment-message:empty { display: none; }
+
+/* Assistant vocabulary categories; recording tag presentation is unchanged. */
+.tag-category { margin-top: 16px; border-top: 1px solid var(--separator); padding-top: 12px; }
+.category-heading { display: flex; align-items: flex-start; flex-wrap: wrap; gap: 8px; }
+.category-toggle { min-width: 32px; padding: 5px 8px; }
+.category-edit { min-width: 0; max-width: 100%; }
+.category-edit summary { cursor: pointer; font-weight: 600; padding: 6px 0; overflow-wrap: anywhere; }
+.category-count { padding-block: 6px; color: var(--secondary); }
+.category-status { margin-left: auto; }
+.category-status button { font-size: 12px; }
+.category-rename, .category-add { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.category-rename input, .category-add input { min-width: 0; max-width: 100%; }
+.tag-category-form select { max-width: 180px; }
+.category-save-status { display: block; font-size: 12px; margin-top: 4px; }
+.category-body[hidden] { display: none; }

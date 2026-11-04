@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 def reconcile(conn):
     """All deterministic mutations run in one SQLite write transaction."""
     result = dict(added=0, merged=0, proposed=0, checked=0, deferred=0, failed=0)
+    from app.tag_categories import fallback_category
     original_ids = {row[0] for row in conn.execute('SELECT id FROM tags')}
     names = [row[0] for row in conn.execute('SELECT DISTINCT tag FROM recording_tags ORDER BY tag')]
     for name in names:
@@ -28,8 +29,8 @@ def reconcile(conn):
                 rewrite_recordings(conn, name, resolve(conn, name)['name'])
             continue
         stamp = now()
-        conn.execute("INSERT INTO tags (name, status, source, created_at, updated_at) VALUES (?, 'active', 'model', ?, ?)",
-                     (name, stamp, stamp))
+        conn.execute("INSERT INTO tags (name, category, status, source, created_at, updated_at) VALUES (?, ?, 'active', 'model', ?, ?)",
+                     (name, fallback_category(conn), stamp, stamp))
         # Previously approved semantic aliases stay approved, including variants.
         target = conn.execute('SELECT t.* FROM tag_aliases a JOIN tags t ON t.id = a.tag_id WHERE a.alias = ?',
                               (normalize_tag(name),)).fetchone()
