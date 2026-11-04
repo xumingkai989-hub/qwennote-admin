@@ -84,7 +84,7 @@ for (const colorScheme of ['light', 'dark']) {
 test('assistant form validates codepoints, clears saved feedback and confirms merges', () => withBrowser(async browser => {
   const page = await browser.newPage({viewport:{width:1440,height:1100},colorScheme:'light'});
   await page.goto(url('assistant'));
-  assert.equal(await page.locator('h2').count(),4);
+  assert.equal(await page.locator('h2:visible').count(),4);
   assert.equal(await page.locator('#instructions').getAttribute('rows'),'8');
   await page.screenshot({path:path.join(directory,'1440-assistant.png'),fullPage:true});
   const input = page.locator('#instructions');

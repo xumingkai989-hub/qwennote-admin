@@ -238,7 +238,9 @@ def test_home_tags_after_status_overflow_and_escaping(client, store):
     run(store, lambda _: response(['AI Tutor', '模考系统', '<script>x</script>', '导师中心', '述职']))
     html = client.get('/').text
     assert html.index('已转录</span>') < html.index('class="recording-tags"') < html.index('class="card-created"')
-    assert html.count('class="tag-pill"') == 4 and '>+2</span>' in html
+    assert html.count('class="tag-pill"') == 2
+    assert html.count('class="tag-pill desktop-only"') == 2 and '>+2</span>' in html
+    assert 'class="tag-pill mobile-only"' in html and '>+3</span>' in html
     assert 'title="AI Tutor · 模考系统 · &lt;script&gt;x&lt;/script&gt; · 导师中心 · 述职"' in html
     assert '<script>x</script>' not in html
 

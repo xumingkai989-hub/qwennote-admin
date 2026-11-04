@@ -77,7 +77,7 @@ test('home and padded detail cards share the same frame without content overflow
             const selectors = name === 'summary' ? '.markdown-body p, .markdown-body pre, .summary-table, .markdown-body table, .markdown-body blockquote, .markdown-body ul, .markdown-body ol, .markdown-body li' : '.transcript-body, .transcript-paragraph, .speaker-name';
             const overflow = [...document.querySelectorAll(selectors)].filter(e => {
               const rect = e.getBoundingClientRect();
-              return e.scrollWidth > e.clientWidth + 1 || rect.left < left - 1 || rect.right > right + 1;
+              return (!(innerWidth<720 && e.classList.contains('speaker-name')) && e.scrollWidth > e.clientWidth + 1) || rect.left < left - 1 || rect.right > right + 1;
             }).map(e => e.tagName + '.' + e.className);
             return {scrollWidth: document.documentElement.scrollWidth, overflow,
               clipping: [card, ...card.querySelectorAll('blockquote, ul, ol')].some(e => ['hidden', 'clip'].includes(getComputedStyle(e).overflowX))};

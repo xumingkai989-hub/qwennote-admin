@@ -540,3 +540,26 @@ def test_home_status_palette_and_dark_contrast(
         return sum(v * weight for v, weight in zip(linear, (.2126, .7152, .0722)))
 
     assert (luminance(dark_text) + .05) / (luminance(dark_bg) + .05) >= 4.5
+
+
+@pytest.mark.parametrize(('status', 'inserted', 'updated', 'expected'), [
+    ('success', 3, 1, '21:40 快速同步 · 新增 3 条'),
+    ('success', 0, 1, '21:40 快速同步 · 更新 1 条'),
+    ('success', 0, 0, '21:40 快速同步 · 无变化'),
+    ('failed', 0, 0, '21:40 同步失败 · 查看详情'),
+])
+def test_mobile_sync_summary_priority_and_desktop_details(list_client, store, status, inserted, updated, expected):
+    started = '2026-10-30T21:40:00+08:00'
+    store.finish_sync(SyncRun(
+        id=store.start_sync(started), started_at=started, finished_at=started,
+        status=status, mode='quick', fetched=8, inserted=inserted, updated=updated,
+        skipped=4, duration_ms=1360, error='示例错误' if status == 'failed' else None,
+    ))
+    html = list_client.get('/').text
+    mobile = re.search(r'<div id="mobile-sync-result".*?</div>', html).group()
+    assert expected in mobile
+    assert '检查' not in mobile and '毫秒' not in mobile
+    assert '检查 8 条' in html and '耗时 1360 毫秒' in html
+    if status == 'failed':
+        assert 'aria-controls="sync-error"' in mobile and 'aria-expanded="false"' in mobile
+        assert '示例错误' in html

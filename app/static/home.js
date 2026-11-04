@@ -14,6 +14,7 @@
     if (label) label.textContent = '正在扫描…';
     errorMessage.textContent = '';
     feedback.textContent = full ? '正在全量扫描，可能需要几分钟' : '正在快速同步';
+    window.mobileDensity?.syncPending(full);
     let result;
     try {
       const response = await fetch(full ? '/sync?full=1' : '/sync', {method: 'POST', credentials: 'same-origin'});
@@ -24,10 +25,12 @@
       activeButton.classList.remove('is-syncing');
       activeButton.classList.add('is-complete');
       feedback.textContent = resultText(result);
+      window.mobileDensity?.syncResult(result);
       await window.enrichment.refreshList();
       if (result.enrichment_run_id) window.enrichment.watch([result.enrichment_run_id]);
     } catch (error) {
       errorMessage.textContent = error.message || '同步请求失败，请重试';
+      window.mobileDensity?.syncResult({...result, status: 'failed'});
       feedback.textContent = result && Number.isInteger(result.duration_ms) ? resultText(result) : '同步失败';
     } finally {
       activeButton.classList.remove('is-syncing', 'is-complete');

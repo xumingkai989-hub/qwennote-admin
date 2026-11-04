@@ -20,8 +20,8 @@ test('home timeline, cards and controls fit desktop/mobile and both color scheme
           const groups = [...document.querySelectorAll('.date-group')];
           return {
             viewport: innerWidth, scrollWidth: document.documentElement.scrollWidth,
-            button: box('#sync-button'), fullButton: box('#full-sync-button'), frame: box('main'), list: box('.timeline'), card: box('.timeline-card'),
-            heading: box('.home-heading h1'), feedback: box('#sync-feedback'),
+            button: box('#sync-button'), fullButton: box(innerWidth<720?'.sync-actions > .more-button':'#full-sync-button'), frame: box('main'), list: box('.timeline'), card: box('.timeline-card'),
+            heading: box('.home-heading h1'), feedback: box(innerWidth<720?'#mobile-sync-result':'#sync-feedback'),
             syncStyles: ['#sync-button', '#full-sync-button', '#sync-feedback'].map(selector => {
               const style = getComputedStyle(document.querySelector(selector));
               return {background: style.backgroundColor, color: style.color, radius: style.borderRadius,
@@ -76,7 +76,7 @@ test('home timeline, cards and controls fit desktop/mobile and both color scheme
         for (const status of measurements.statuses) {
           assert.deepEqual([status.background, status.color], palette[status.label]);
           assert.equal(status.fontSize, '12px'); assert.equal(status.padding, '3px 8px'); assert.equal(status.radius, '999px');
-          assert.equal(status.x, status.footerX); assert.equal(status.timeRight, status.footerRight);
+          if(width>=720) assert.equal(status.x, status.footerX); assert.equal(status.timeRight, status.footerRight);
           assert.ok(status.right < status.timeX); assert.equal(status.centerY, status.timeCenterY);
         }
 
@@ -124,7 +124,9 @@ test('home timeline, cards and controls fit desktop/mobile and both color scheme
         await page.evaluate(() => {
           window.fetch = () => new Promise(resolve => {window.resolveSync = resolve;});
         });
+        if(width<720) await page.locator('.sync-actions > .more-button').click();
         await page.locator('#full-sync-button').click();
+        if(width<720) await page.locator('.sync-actions > .more-button').click();
         assert.equal(await page.locator('#full-sync-button').isDisabled(), true);
         assert.equal(await page.locator('#sync-button').isDisabled(), true);
         assert.equal(await page.locator('#full-sync-button .sync-label').textContent(), '正在扫描…');

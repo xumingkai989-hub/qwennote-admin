@@ -18,7 +18,7 @@ async function audit(page, name, rows) {
   const result = await page.evaluate(() => {
     const elements = [...document.querySelectorAll('button,a[href],input:not([type="hidden"]):not(:disabled),select,textarea,summary,[role="button"]')].filter(e => {
       const r=e.getBoundingClientRect(), s=getComputedStyle(e);
-      return e.checkVisibility() && r.width && r.height && s.visibility !== 'hidden' && !e.closest('[inert]') && !e.closest('dialog:not([open])');
+      return (!document.querySelector('dialog[open]') || e.closest('dialog[open]')) && e.checkVisibility() && r.width && r.height && s.visibility !== 'hidden' && !e.closest('[inert]') && !e.closest('dialog:not([open])');
     });
     const targets = elements.map((e,i)=>{
       const r=e.getBoundingClientRect();
@@ -28,7 +28,7 @@ async function audit(page, name, rows) {
     for(let i=0;i<elements.length;i++) for(let j=i+1;j<elements.length;j++) {
       if(elements[i].contains(elements[j]) || elements[j].contains(elements[i])) continue;
       // Popup menus overlay the document by design; measure neighbors within the same layer.
-      const layer=e=>e.closest('[role="menu"],dialog,.sidebar') || document.body;
+      const layer=e=>e.closest('[role="menu"],dialog,.sidebar,.settings-actions') || document.body;
       if(layer(elements[i])!==layer(elements[j])) continue;
       const a=targets[i],b=targets[j];
       const dx=Math.max(0,a.x-b.x-b.width,b.x-a.x-a.width);
@@ -69,6 +69,7 @@ test('mobile visible controls: 44px hit boxes, 8px spacing and 16px input type',
         }
       }
       if(name==='hotwords') {
+        await page.locator('main .more-button').first().click();
         await page.locator('details summary').first().click();
         await page.evaluate(()=>scrollTo(0,0));
         await audit(page,`${width}/hotwords/edit`,rows);

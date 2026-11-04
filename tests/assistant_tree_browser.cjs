@@ -105,8 +105,9 @@ for(const color of ['light','dark']) for(const width of [1440,390,320]) test(`${
   }));
   assert.equal(metrics.scroll,width);assert.equal(metrics.title,'15px');assert.equal(metrics.weight,'600');assert.equal(metrics.gap,8);
   for(const b of metrics.pencil) assert.deepEqual(b,width < 720 ? {w:44,h:44} : {w:24,h:24});
-  for(const row of metrics.rows){assert.equal(row.padding,'28px');assert.equal(row.font,'14px');
+  for(const row of metrics.rows){assert.equal(row.padding,width<720?'20px':'28px');assert.equal(row.font,'14px');
     if(width===1440) assert.equal(row.height,44);
+    else if(width<720) {assert.ok(row.height<=60);assert.equal(row.actions.width,0);}
     else {assert.ok(row.actions.top>=row.name.bottom);assert.equal(row.actions.left,row.name.left);}
   }
   if(output && color==='light' && width!==320){
@@ -119,3 +120,27 @@ for(const color of ['light','dark']) for(const width of [1440,390,320]) test(`${
   assert.equal(await p.evaluate(()=>document.documentElement.scrollWidth),width);
   await editor(p).press('Escape');
 },width,color));
+
+test('mobile sheet changes category through existing route and persists after reload',()=>open(async p=>{
+ const row=p.locator('.tag-row').filter({has:p.locator('.tag-name',{hasText:/^AI Tutor$/})});
+ await row.locator(':scope > .more-button').click();
+ await p.locator('dialog[open]').getByRole('button',{name:'修改分类',exact:true}).click();
+ await p.locator('dialog[open] .sheet-choices').getByRole('button',{name:'公司管理',exact:true}).click();
+ await p.waitForFunction(()=>document.querySelector('#category-body-2 .tag-name')?.textContent==='AI Tutor');
+ await p.reload();assert.equal(await p.locator('#category-body-2 .tag-name').first().textContent(),'AI Tutor');
+ // Restore the shared fixture for the following test.
+ await row.locator(':scope > .more-button').click();await p.locator('dialog[open]').getByRole('button',{name:'修改分类',exact:true}).click();
+ await p.locator('dialog[open] .sheet-choices').getByRole('button',{name:'产品',exact:true}).click();
+ await p.waitForFunction(()=>document.querySelector('#category-body-1 .tag-name')?.textContent==='AI Tutor');
+},390));
+test('mobile category failure stays visible and merge confirmation can be cancelled',()=>open(async p=>{
+ await p.route('**/tags/category',r=>r.fulfill({status:403,contentType:'application/json',body:'{"saved":false}'}));
+ const row=p.locator('.tag-row').first();await row.locator(':scope > .more-button').click();const sheet=p.locator('dialog[open]');
+ await sheet.getByRole('button',{name:'修改分类',exact:true}).click();await sheet.locator('.sheet-choices').getByRole('button',{name:'公司管理',exact:true}).click();
+ await p.waitForFunction(()=>document.querySelector('dialog[open] .sheet-status').textContent.includes('保存失败'));
+ assert.equal(await sheet.locator('.sheet-choices [aria-pressed="true"]').innerText(),'产品');
+ await sheet.getByRole('button',{name:'返回操作'}).click();await sheet.getByRole('button',{name:'合并到…',exact:true}).click();await sheet.locator('.merge-form select').selectOption({index:1});
+ const dismiss=p.waitForEvent('dialog').then(d=>d.dismiss());await sheet.getByRole('button',{name:'确认合并'}).click();await dismiss;assert.equal(await sheet.isVisible(),true);
+ // Resizing while in the merge panel must also restore the original desktop form.
+ await p.setViewportSize({width:1440,height:1000});await p.waitForFunction(()=>document.querySelector('.tag-row > .tag-actions .merge-form')?.checkVisibility());
+},390));

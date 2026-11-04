@@ -109,8 +109,9 @@
           <span class="transcript-count">{{ segments | length }} 段</span>
           <div class="transcript-tools">
             {{ edit_controls() }}
+            <button id="transcript-search-toggle" class="mobile-only text-button" type="button" aria-label="搜索本场" aria-expanded="false" aria-controls="transcript-search"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></svg></button>
             <input id="transcript-search" type="search" placeholder="搜索本场" aria-label="搜索本场" aria-controls="transcript-segments" autocomplete="off">
-            <button id="copy-transcript" type="button" class="text-button">复制全文</button>
+            <button id="copy-transcript" type="button" class="text-button" aria-label="复制全文"><span class="desktop-only">复制全文</span><span class="mobile-only"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="8" y="8" width="12" height="13" rx="2"/><path d="M16 8V3H3v13h5"/></svg></span></button>
           </div>
         </div>
       {% elif can_edit %}<div class="summary-toolbar"><span></span><div class="transcript-tools">{{ edit_controls() }}</div></div>{% endif %}

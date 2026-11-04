@@ -2,6 +2,6 @@
 <span class="{% if recording.tags or state.get('tag') %}recording-tags{% endif %}" title="{{ recording.tags | join(' · ') }}" data-enrichment-tags="">
 {% if state.get('tag') in ('pending','running') %}<span class="tag-pill enrichment-pending">标签生成中…</span>
 {% elif state.get('tag') == 'failed' %}<span class="tag-pill enrichment-failed">{{ state.get('tag_error') or '标签生成失败' }}</span>
-{% else %}{% for tag in recording.tags[:3] %}<span class="tag-pill">{{ tag }}</span>{% endfor %}{% if recording.tags | length > 3 %}<span class="tag-pill" title="{{ recording.tags | join(' · ') }}">+{{ recording.tags | length - 3 }}</span>{% endif %}{% endif %}
+{% else %}{% for tag in recording.tags[:3] %}<span class="tag-pill{% if loop.index == 3 %} desktop-only{% endif %}">{{ tag }}</span>{% endfor %}{% if recording.tags | length > 3 %}<span class="tag-pill desktop-only" title="{{ recording.tags | join(' · ') }}">+{{ recording.tags | length - 3 }}</span>{% endif %}{% if recording.tags | length > 2 %}<span class="tag-pill mobile-only" title="{{ recording.tags | join(' · ') }}">+{{ recording.tags | length - 2 }}</span>{% endif %}{% endif %}
 </span>
 <span class="enrichment-hotword" data-enrichment-hotword="">{% if state.get('hotword') in ('pending','running') %}热词分析中…{% elif state.get('hotword') == 'failed' %}{{ state.get('hotword_error') or '热词分析失败' }}{% elif state.get('hotword') == 'done' %}{% set count = enrichment_counts.get(recording.recording_id, 0) if enrichment_counts is defined else 0 %}{% if count %}热词已应用 {{ count }} 处{% endif %}{% endif %}</span>

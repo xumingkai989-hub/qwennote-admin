@@ -20,10 +20,11 @@
     </div>
   </div>
   {% include "sync_result.html" %}
+  <div id="mobile-sync-result" class="mobile-only sync-result" role="status" aria-live="polite">{% if sync_run and sync_run.finished_at %}{% set clock = sync_run.started_at[11:16] %}{% if sync_run.status == 'failed' %}<button type="button" class="text-button" aria-expanded="false" aria-controls="sync-error">{{ clock }} 同步失败 · 查看详情</button>{% else %}{{ clock }} {{ '全盘同步' if sync_run.mode == 'full' else '快速同步' }} · {% if sync_run.inserted %}新增 {{ sync_run.inserted }} 条{% elif sync_run.updated %}更新 {{ sync_run.updated }} 条{% else %}无变化{% endif %}{% endif %}{% endif %}</div>
   <p id="sync-error" role="alert">{{ sync_run.error if sync_run and sync_run.status == 'failed' and sync_run.error else '' }}</p>
   <form class="search-form" action="/search" method="get" role="search">
       <input type="search" name="q" aria-label="搜索录音" placeholder="搜索标题、总结、转写" value="{{ search_query | default('') }}">
-      <button type="submit">搜索</button>
+      <button type="submit" aria-label="搜索录音"><span class="desktop-only">搜索</span><span class="mobile-only"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></svg></span></button>
   </form>
   {% if search_query %}
   <section class="recording-grid" aria-label="录音列表">
@@ -87,5 +88,5 @@
   </nav>
   <p class="time-note">时间为笔记创建时间</p>
   {% include 'enrichment_boot.html' %}
-  <script src="{{ url_for('static', path='home.js') }}?v=20261103-34" defer></script>
+  <script src="{{ url_for('static', path='home.js') }}?v=20261104-41" defer></script>
 {% endblock %}

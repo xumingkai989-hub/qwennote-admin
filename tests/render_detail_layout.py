@@ -58,13 +58,13 @@ def render(output):
             for name, url in [('settings', '/settings'), ('models', '/models'), ('hotwords', '/hotwords'), ('admin', '/admin'), ('search', '/search?q=项目'), ('home', '/'), ('summary', '/recordings/layout-0?view=summary'), ('transcript', '/recordings/layout-0?view=transcript')]:
                 response = client.get(url)
                 assert response.status_code == 200
-                html = response.text.replace('http://testserver/static/', 'static/')
+                html = response.text.replace('http://testserver/static/', 'static/').replace('src="/static/', 'src="static/')
                 html = re.sub(r'name="csrf_token" value="[^"]*"', 'name="csrf_token" value="layout-fixture"', html)
                 (output / f'{name}.html').write_text(html)
             for recording in store.read_recordings(limit=None).items:
                 store.replace_tags(recording, ['AI Tutor', '中台与数据看板', '模考系统', '导师中心', '述职'],
                                    'fixture-model', '2026-10-30T12:00:00+08:00')
-            html = client.get('/').text.replace('http://testserver/static/', 'static/')
+            html = client.get('/').text.replace('http://testserver/static/', 'static/').replace('src="/static/', 'src="static/')
             html = re.sub(r'name="csrf_token" value="[^"]*"', 'name="csrf_token" value="layout-fixture"', html)
             (output / 'home-tags.html').write_text(html)
 
@@ -73,7 +73,7 @@ def render(output):
                 conn.execute("INSERT INTO tags (name,status,source,usage_count,created_at,updated_at) VALUES ('AI教学','active','model',2,'2026-10-30T06:22:00+00:00','2026-10-30T06:22:00+00:00')")
                 conn.execute("INSERT INTO tag_merge_proposals (from_tag,to_tag,reason,status,created_at) VALUES ('AI教学','AI Tutor','model','pending','2026-10-30T06:22:00+00:00')")
                 conn.execute("UPDATE tags SET usage_count = 8 WHERE name IN ('AI Tutor','中台与数据看板','模考系统')")
-            html = client.get('/assistant').text.replace('http://testserver/static/', 'static/')
+            html = client.get('/assistant').text.replace('http://testserver/static/', 'static/').replace('src="/static/', 'src="static/')
             html = re.sub(r'name="csrf_token" value="[^"]*"', 'name="csrf_token" value="layout-fixture"', html)
             (output / 'assistant.html').write_text(html)
 

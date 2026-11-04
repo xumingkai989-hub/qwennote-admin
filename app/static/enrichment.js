@@ -51,11 +51,18 @@
       const labels = record.tag === 'done' ? record.tags.slice(0, 3) : [
         record.tag === 'failed' ? (record.tag_error || '标签生成失败') : '标签生成中…'];
       if (record.tag === 'done' && record.tags.length > 3) labels.push('+' + (record.tags.length - 3));
-      for (const text of labels) {
+      for (const [index, text] of labels.entries()) {
         const chip = document.createElement('span');
         chip.className = 'tag-pill' + (['pending', 'running'].includes(record.tag) ? ' enrichment-pending' : '');
+        if (record.tag === 'done' && index >= 2) chip.className += ' desktop-only';
         chip.textContent = text;
         if (text.startsWith('+')) chip.title = tags.title;
+        tags.append(chip);
+      }
+      if (record.tag === 'done' && record.tags.length > 2) {
+        const chip = document.createElement('span');
+        chip.className = 'tag-pill mobile-only';
+        chip.textContent = '+' + (record.tags.length - 2); chip.title = tags.title;
         tags.append(chip);
       }
     }
