@@ -16,7 +16,7 @@ async function withBrowser(run) {
 }
 async function audit(page, name, rows) {
   const result = await page.evaluate(() => {
-    const elements = [...document.querySelectorAll('button,a[href],input:not([type="hidden"]),select,textarea,summary,[role="button"]')].filter(e => {
+    const elements = [...document.querySelectorAll('button,a[href],input:not([type="hidden"]):not(:disabled),select,textarea,summary,[role="button"]')].filter(e => {
       const r=e.getBoundingClientRect(), s=getComputedStyle(e);
       return e.checkVisibility() && r.width && r.height && s.visibility !== 'hidden' && !e.closest('[inert]') && !e.closest('dialog:not([open])');
     });
@@ -61,6 +61,7 @@ test('mobile visible controls: 44px hit boxes, 8px spacing and 16px input type',
         await page.evaluate(()=>scrollTo(0,0));
         await audit(page,`${width}/${name}/edit`,rows);
         if(name==='summary') {
+          assert.deepEqual(await page.locator('.summary-checkbox').evaluate(e=>({width:e.getBoundingClientRect().width,height:e.getBoundingClientRect().height,disabled:e.disabled})),{width:16,height:16,disabled:true});
           await page.locator('#cancel-edit').click();
           await page.locator('.markdown-body').evaluate(e=>e.insertAdjacentHTML('beforeend','<p><a href="#first">一</a><a href="#second">二</a></p>'));
           await page.evaluate(()=>scrollTo(0,0));
