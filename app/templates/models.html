@@ -2,7 +2,7 @@
 {% macro csrf_field() %}<input type="hidden" name="csrf_token" value="{{ csrf_token }}">{% endmacro %}
 {% block main_attributes %} class="models-page"{% endblock %}
 {% block content %}
-<div class="list-heading"><h1>模型中心</h1></div>
+<div class="list-heading">{% include "mobile_back.html" %}<h1>模型中心</h1></div>
 <section class="model-current" aria-labelledby="claude-heading">
   <div class="model-section-heading"><h2 id="claude-heading">Claude Code</h2><span class="model-badge">只读</span></div>
   <p>{% if claude %}模型：{{ claude.model }} · 端点：{{ claude.endpoint }}{% else %}未配置{% endif %}</p>

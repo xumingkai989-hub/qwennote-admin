@@ -64,7 +64,7 @@ for (const colorScheme of ['light', 'dark']) {
     assert.equal(await opener.getAttribute('aria-expanded'), 'false');
     assert.equal(await page.locator('#page-content').evaluate(e => e.inert), false);
     await opener.click();
-    await page.locator('.navigation-link').last().focus();
+    await page.locator('.mobile-logout button').focus();
     await page.keyboard.press('Tab');
     assert.equal(await page.locator('.sidebar-brand').evaluate(e => e === document.activeElement), true);
     await page.keyboard.press('Escape');

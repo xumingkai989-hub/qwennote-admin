@@ -602,3 +602,74 @@ p.assistant-note { margin: 12px 0 0; }
   .merge-form select { width: 0; flex: 1; }
   .tag-actions { gap: 4px; }
 }
+
+/* Mobile shell: one sticky bar; desktop navigation and typography are unchanged. */
+.mobile-back, .mobile-logout { display: none; }
+:root {
+  --safe-area-top: env(safe-area-inset-top, 0px);
+  --safe-area-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-area-left: env(safe-area-inset-left, 0px);
+  --safe-area-right: env(safe-area-inset-right, 0px);
+}
+body { padding-bottom: var(--safe-area-bottom); }
+@media (max-width: 719.98px) {
+  body:has(.detail-layout, .assistant-layout, .settings-page, .models-page) .mobile-navigation,
+  .home-layout > .topbar { display: none; }
+  .mobile-navigation {
+    height: auto;
+    min-height: calc(56px + var(--safe-area-top));
+    padding: var(--safe-area-top) max(12px, var(--safe-area-right)) 0 max(12px, var(--safe-area-left));
+  }
+  .mobile-avatar {
+    display: flex; align-items: center; justify-content: center;
+    width: 32px; height: 32px; flex: 0 0 32px; margin-left: auto;
+    border-radius: 50%; background: var(--control); color: var(--text); font-size: 15px;
+  }
+  .has-navigation .detail-header,
+  .assistant-layout > .assistant-heading,
+  .settings-page > .list-heading,
+  .models-page > .list-heading {
+    position: sticky; top: 0; z-index: 10;
+    min-height: calc(56px + var(--safe-area-top));
+    padding-top: var(--safe-area-top); padding-bottom: 0;
+    background: var(--background); border-bottom: 1px solid var(--separator);
+  }
+  .assistant-layout > .assistant-heading,
+  .settings-page > .list-heading,
+  .models-page > .list-heading {
+    display: flex; align-items: center; justify-content: flex-start; gap: 8px; margin-bottom: 24px;
+  }
+  .assistant-heading h1, .settings-page > .list-heading h1, .models-page > .list-heading h1 {
+    font-size: 17px; line-height: 24px; letter-spacing: normal;
+  }
+  .mobile-back { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 44px; font-size: 24px; }
+  main { padding-left: max(var(--gutter), var(--safe-area-left)); padding-right: max(var(--gutter), var(--safe-area-right)); }
+  .sidebar {
+    display: flex; flex-direction: column; overflow-y: auto;
+    padding-top: calc(16px + var(--safe-area-top));
+    padding-bottom: calc(16px + var(--safe-area-bottom));
+    padding-left: max(10px, var(--safe-area-left));
+  }
+  .sidebar-heading { gap: 8px; }
+  .navigation-link { margin-bottom: 8px; }
+  .mobile-logout { display: block; margin-top: auto; padding-top: 16px; border-top: 1px solid var(--separator); }
+  .mobile-logout button { width: 100%; text-align: left; }
+
+  /* Size the actual hit box, including compact controls and text links. */
+  :is(button, a[href], input:not([type="hidden"]), select, textarea, summary, [role="button"]) {
+    min-width: 44px !important; min-height: 44px !important;
+  }
+  a:where([href]) { display: inline-flex; align-items: center; }
+  .markdown-body a { margin: 4px; }
+  /* Only input controls need 16px to avoid Safari focus zoom. Buttons keep their type scale. */
+  input, select, textarea, [contenteditable="true"], .category-input-size { font-size: 16px !important; }
+  .category-edit-btn { flex-basis: 44px; width: 44px; height: 44px; }
+  .category-title, .tag-actions, .model-actions, .segmented-control, .inline-edit-controls { gap: 8px; }
+  .inline-edit-controls { flex-basis: 96px; width: 96px; }
+  .tag-row { row-gap: 8px; padding-block: 8px; }
+  .tag-row select { height: 44px; }
+  .assistant-table-scroll { max-width: 100%; overflow-x: auto; }
+  .export-menu > :not([hidden]) + :not([hidden]) { margin-top: 8px; }
+  .settings-row input[role="switch"]::after { top: 10px; }
+  .transcript-toast { bottom: calc(24px + var(--safe-area-bottom)); }
+}

@@ -23,7 +23,7 @@ from test_login import login
 def render(output):
     output.mkdir(parents=True, exist_ok=True)
     (output / 'static').mkdir(exist_ok=True)
-    for name in ['app.css', 'detail.js', 'recording-edit.js', 'home.js', 'navigation.js', 'assistant.js']:
+    for name in [p.name for p in (ROOT / 'app/static').iterdir() if p.suffix in {'.css', '.js'}]:
         (output / 'static' / name).write_bytes((ROOT / 'app/static' / name).read_bytes())
     with tempfile.TemporaryDirectory() as temp:
         settings = Settings(
@@ -52,7 +52,10 @@ def render(output):
                     RecordingMeta(key, '项目例会：页面布局与长文本阅读验收' if i == 0 else f'项目讨论 {i}', datetime(2026, 10, 30-i//3, 12-i, tzinfo=SHANGHAI), 30),
                     RecordingDetail(key, summary if has_summary else '', transcript if has_transcript else '', has_transcript, has_summary), '2026-10-30T12:00:00+08:00',
                 )
-            for name, url in [('home', '/'), ('summary', '/recordings/layout-0?view=summary'), ('transcript', '/recordings/layout-0?view=transcript')]:
+            store.add_hotword('示例热词', '布局检查')
+            with store._connect() as conn:
+                conn.execute("INSERT INTO models (name,provider,base_url,model_id,api_key_enc,key_last4,created_at,updated_at) VALUES ('示例模型','deepseek','https://fixture.invalid','fixture','synthetic-placeholder','demo','now','now')")
+            for name, url in [('settings', '/settings'), ('models', '/models'), ('hotwords', '/hotwords'), ('admin', '/admin'), ('search', '/search?q=项目'), ('home', '/'), ('summary', '/recordings/layout-0?view=summary'), ('transcript', '/recordings/layout-0?view=transcript')]:
                 response = client.get(url)
                 assert response.status_code == 200
                 html = response.text.replace('http://testserver/static/', 'static/')

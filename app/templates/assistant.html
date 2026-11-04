@@ -2,7 +2,7 @@
 {% macro csrf_field() %}<input type="hidden" name="csrf_token" value="{{ csrf_token }}">{% endmacro %}
 {% block main_attributes %} class="assistant-layout"{% endblock %}
 {% block content %}
-<header class="assistant-heading"><h1>AI 助手配置</h1></header>
+<header class="assistant-heading">{% include "mobile_back.html" %}<h1>AI 助手配置</h1></header>
 <p id="assistant-error" class="assistant-error" role="alert">{{ error }}</p>
 <section class="assistant-section" aria-labelledby="instructions-heading">
   <h2 id="instructions-heading">反馈指令</h2>

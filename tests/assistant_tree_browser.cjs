@@ -104,7 +104,7 @@ for(const color of ['light','dark']) for(const width of [1440,390,320]) test(`${
     gap:document.querySelector('.category-tags').getBoundingClientRect().top-document.querySelector('.category-title').getBoundingClientRect().bottom
   }));
   assert.equal(metrics.scroll,width);assert.equal(metrics.title,'15px');assert.equal(metrics.weight,'600');assert.equal(metrics.gap,8);
-  for(const b of metrics.pencil) assert.deepEqual(b,{w:24,h:24});
+  for(const b of metrics.pencil) assert.deepEqual(b,width < 720 ? {w:44,h:44} : {w:24,h:24});
   for(const row of metrics.rows){assert.equal(row.padding,'28px');assert.equal(row.font,'14px');
     if(width===1440) assert.equal(row.height,44);
     else {assert.ok(row.actions.top>=row.name.bottom);assert.equal(row.actions.left,row.name.left);}

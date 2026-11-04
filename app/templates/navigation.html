@@ -1,6 +1,7 @@
 <div class="mobile-navigation">
   <button id="navigation-open" class="navigation-button" type="button" aria-label="打开导航" aria-controls="sidebar" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
   <a class="brand" href="/">QwenNote</a>
+  <span class="mobile-avatar" aria-label="{{ navigation_user.name }}" title="{{ navigation_user.name }}">{{ navigation_user.name[:1] }}</span>
 </div>
 <div id="navigation-overlay" hidden></div>
 <aside id="sidebar" class="sidebar" aria-label="主导航">
@@ -19,4 +20,5 @@
     {% endif %}
     {% endfor %}
   </nav>
+  <form class="mobile-logout" action="/auth/logout" method="post"><button class="text-button" type="submit">退出登录</button></form>
 </aside>

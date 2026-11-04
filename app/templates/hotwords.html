@@ -7,7 +7,7 @@
 {% endmacro %}
 {% block main_attributes %} class="assistant-layout hotwords-layout"{% endblock %}
 {% block content %}
-<header class="assistant-heading"><h1>热词中心</h1></header>
+<header class="assistant-heading">{% include "mobile_back.html" %}<h1>热词中心</h1></header>
 <div class="hotword-upstream" data-csrf="{{ csrf_token }}">
   <span id="qwen-usage">千问热词：{% if upstream_plan.currentCount is not none %}已用 {{ upstream_plan.currentCount }} / {{ upstream_plan.maxCount }}{% else %}配额未读取{% endif %}</span>
   <button type="button" id="qwen-import" class="secondary">从千问导入</button>
