@@ -159,8 +159,7 @@ JavaScript 交互测试只使用 Node 内置测试框架，不需要浏览器：
 node --test tests/home_interactions.cjs tests/detail_interactions.cjs
 ```
 
-浏览器层使用仓库已有的布局 / 交互脚本，检查桌面、390px 手机和明暗模式。
-它依赖环境已有的 Playwright 与 Chrome，不是 Python 全量测试的一部分，也不新增项目依赖。
+浏览器层使用仓库已有的布局 / 交互脚本，检查桌面、390px 手机和明暗模式。它依赖环境已有的 Playwright 与 Chrome，不是 Python 全量测试的一部分，也不新增项目依赖。
 例如生成脱敏页面后执行布局回归（先将 `PLAYWRIGHT_MODULE`、`CHROME_PATH` 指向本机已有安装）：
 
 ```sh
