@@ -3,7 +3,7 @@
 {% block main_attributes %} class="assistant-layout"{% endblock %}
 {% block content %}
 <header class="assistant-heading"><h1>AI 助手配置</h1></header>
-{% if error %}<p class="assistant-error" role="alert">{{ error }}</p>{% endif %}
+<p id="assistant-error" class="assistant-error" role="alert">{{ error }}</p>
 <section class="assistant-section" aria-labelledby="instructions-heading">
   <h2 id="instructions-heading">反馈指令</h2>
   <form id="instructions-form" method="post" action="/assistant/instructions">
@@ -16,42 +16,43 @@
 </section>
 <section class="assistant-section" aria-labelledby="tags-heading">
   <h2 id="tags-heading">标签词表</h2>
-  <p class="assistant-note">点击箭头折叠分类，点击分类名修改名称。标签选择分类后立即保存。停用分类仍可参与打标。</p>
+  <p class="assistant-note">点击铅笔重命名一级分类；标签选择分类后立即保存。</p>
   {% if not tags %}<p class="assistant-note">词表为空，下次打标会全部落到「其他」</p>{% endif %}
   {% for group in category_groups %}
   <section class="tag-category" data-category-id="{{ group.id }}">
-    <div class="category-heading">
-      <button type="button" class="category-toggle secondary" aria-expanded="true" aria-controls="category-body-{{ group.id }}" aria-label="折叠或展开 {{ group.name }}">▾</button>
-      <details class="category-edit"><summary>{{ group.name }}</summary>
-        <form method="post" action="/assistant/categories/rename" class="category-rename">
-          {{ csrf_field() }}<input type="hidden" name="category_id" value="{{ group.id }}">
-          <input name="name" value="{{ group.name }}" required maxlength="40" aria-label="分类名称 {{ group.name }}"><button type="submit">保存名称</button>
-        </form>
-      </details>
+    <h3 class="category-title" id="category-title-{{ group.id }}">
+      <span class="category-name">{{ group.name }}</span>
+      <form method="post" action="/assistant/categories/rename" class="category-rename" hidden>
+        {{ csrf_field() }}<input type="hidden" name="category_id" value="{{ group.id }}">
+        <span class="category-input-size" aria-hidden="true"></span>
+        <input name="name" value="{{ group.name }}" required maxlength="40" aria-label="分类名称 {{ group.name }}" autocomplete="off">
+      </form>
+      <button type="button" class="category-edit-btn" aria-label="重命名 {{ group.name }}">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m16 3 5 5L8 21H3v-5L16 3Z"/><path d="m14 5 5 5"/></svg>
+      </button>
       <span class="category-count">（{{ group.tags | length }}）</span>
       {% if not group.enabled %}<span class="assistant-note">已停用</span>{% endif %}
       <form method="post" action="/assistant/categories/toggle" class="category-status">{{ csrf_field() }}<input type="hidden" name="category_id" value="{{ group.id }}"><button type="submit" class="secondary">{{ '停用分类' if group.enabled else '启用分类' }}</button></form>
-    </div>
-    <div id="category-body-{{ group.id }}" class="category-body">
-    <div class="assistant-table-scroll"><table class="assistant-table"><thead><tr><th scope="col">标签名</th><th scope="col">使用次数</th><th scope="col">一级分类</th><th scope="col">操作</th></tr></thead><tbody>
+    </h3>
+    <ul id="category-body-{{ group.id }}" class="category-tags" aria-labelledby="category-title-{{ group.id }}">
     {% for tag in group.tags %}
-      <tr><th scope="row">{{ tag.name }}</th><td>{{ tag.usage_count }} 条</td><td>
+      <li class="tag-row" data-tag-id="{{ tag.id }}" data-usage-count="{{ tag.usage_count }}">
+        <span class="tag-name">{{ tag.name }}</span><span class="tag-usage">{{ tag.usage_count }} 条</span>
         <form method="post" action="/assistant/tags/category" class="tag-category-form">
           {{ csrf_field() }}<input type="hidden" name="tag_id" value="{{ tag.id }}">
           <select name="category_id" aria-label="{{ tag.name }} 的一级分类" data-saved-value="{{ group.id }}">{% for category in categories %}<option value="{{ category.id }}"{% if category.id == group.id %} selected{% endif %}>{{ category.name }}{{ '（已停用）' if not category.enabled else '' }}</option>{% endfor %}</select>
           <noscript><button type="submit">保存分类</button></noscript><span class="category-save-status" role="status"></span>
         </form>
-      </td><td><div class="tag-actions">
+      <div class="tag-actions">
         <form method="post" action="/assistant/tags/merge" class="merge-form" data-source="{{ tag.name }}">
           {{ csrf_field() }}<input type="hidden" name="from" value="{{ tag.id }}">
           <select name="to" aria-label="将 {{ tag.name }} 合并到" required><option value="" selected disabled>合并到…</option>{% for target in tags %}{% if target.id != tag.id %}<option value="{{ target.id }}">{{ target.name }}</option>{% endif %}{% endfor %}</select>
           <button class="secondary" type="submit"{% if tags | length < 2 %} disabled{% endif %}>确认合并</button>
         </form>
         <form method="post" action="/assistant/tags/deactivate">{{ csrf_field() }}<input type="hidden" name="tag_id" value="{{ tag.id }}"><button class="deactivate-button secondary" type="submit" aria-label="停用 {{ tag.name }}">停用</button></form>
-      </div></td></tr>
+      </div></li>
     {% endfor %}
-    </tbody></table></div>
-    </div>
+    </ul>
   </section>
   {% endfor %}
   <form method="post" action="/assistant/categories/add" class="category-add">
@@ -71,5 +72,5 @@
   <h2 id="changes-heading">最近变更</h2>
   <ul class="change-list">{% for change in changes %}<li>{{ change.time }} · {{ change.label }}</li>{% else %}<li class="assistant-note">暂无变更</li>{% endfor %}</ul>
 </section>
-<script src="{{ url_for('static', path='assistant.js') }}?v=20261104-37" defer></script>
+<script src="{{ url_for('static', path='assistant.js') }}?v=20261104-38" defer></script>
 {% endblock %}

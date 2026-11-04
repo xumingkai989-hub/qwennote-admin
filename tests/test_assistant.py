@@ -194,7 +194,7 @@ def test_active_tags_sorted_and_escaped(client, store):
         refresh_usage(conn)
         conn.execute("UPDATE tags SET name = '<script>bad</script>' WHERE id = 3")
     page = client.get('/assistant').text
-    assert page.index('<th scope="row">模考系统') < page.index('<th scope="row">AI Tutor')
+    assert page.index('<span class="tag-name">模考系统') < page.index('<span class="tag-name">AI Tutor')
     assert '<script>bad</script>' not in page
     assert '&lt;script&gt;bad&lt;/script&gt;' in page
 
@@ -225,3 +225,31 @@ def test_08_schema_migration_preserves_ids_merges_aliases_and_checks(store):
         conn.execute("UPDATE tags SET status = 'deactivated' WHERE id = 3")
         with pytest.raises(sqlite3.IntegrityError):
             conn.execute("UPDATE tags SET status = 'invented' WHERE id = 4")
+
+
+def test_vocabulary_tree_has_pencil_only_editors_and_no_repeated_headers(client):
+    login(client)
+    page = client.get('/assistant').text
+    assert 'category-toggle' not in page and '▾' not in page
+    assert '<details' not in page and '<summary' not in page
+    assert '<table' not in page and '<thead' not in page
+    assert '>标签名<' not in page and '>使用次数<' not in page
+    assert '点击铅笔重命名一级分类；标签选择分类后立即保存。' in page
+    assert page.count('class="category-title"') == 7
+    assert page.count('class="category-edit-btn"') == 7
+    assert page.count('class="category-rename" hidden') == 7
+    assert '<span class="category-name">产品</span>' in page
+    assert 'aria-label="重命名 产品"' in page
+    assert re.search(r'</h3>\s*<ul[^>]*class="category-tags"', page)
+    assert page.count('class="tag-row"') == 11
+
+
+def test_inline_rename_contract_follows_redirect_with_current_name_and_changes(client):
+    login(client)
+    response = client.post('/assistant/categories/rename',
+                           data={'csrf_token': csrf(client), 'category_id': 1, 'name': '产品规划'},
+                           follow_redirects=True)
+    assert response.status_code == 200
+    assert '<span class="category-name">产品规划</span>' in response.text
+    assert '分类改名 产品 → 产品规划' in response.text
+    assert 'value="1">产品规划</option>' in response.text

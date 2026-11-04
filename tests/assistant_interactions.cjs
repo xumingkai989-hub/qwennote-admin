@@ -13,34 +13,32 @@ function harness(response = {ok:true, json:async()=>({saved:true})}) {
   const ids = Object.fromEntries(['instructions', 'instructions-save', 'instructions-error', 'instructions-count',
     'instructions-saved', 'instructions-form'].map(id=>[id, el()]));
   const groups = [1,2].map(id=> {
-    const count = el(), toggle = el({attrs:{'aria-controls':`category-body-${id}`,'aria-expanded':'true'}});
-    const rows = [];
-    const tbody = {appendChild(row){groups.forEach(g=>{const i=g.rows.indexOf(row);if(i>=0)g.rows.splice(i,1);});rows.push(row);}};
-    const group = {rows,toggle,count, querySelector:s=>s === '.category-toggle'?toggle:count, querySelectorAll:()=>rows};
-    const body = el({querySelector:()=>tbody,closest:()=>group});
+    const count = el(), rows = [];
+    const group = {rows,count, querySelector:()=>count, querySelectorAll:()=>rows};
+    const body = el({children:rows, insertBefore(row, following){
+      groups.forEach(g=>{const i=g.rows.indexOf(row);if(i>=0)g.rows.splice(i,1);});
+      rows.splice(following ? rows.indexOf(following) : rows.length,0,row);
+    }});
     ids[`category-body-${id}`]=body; group.body=body;
     return group;
   });
-  const select = el({value:'1',dataset:{savedValue:'1'}}), status=el(), row={};
+  const select = el({value:'1',dataset:{savedValue:'1'}}), status=el(), row={dataset:{tagId:'1', usageCount:'16'}};
   const form={action:'/assistant/tags/category', querySelector:s=>s==='select'?select:status, closest:()=>row};
   groups[0].rows.push(row);
   const calls=[];
   vm.runInNewContext(script, {document:{getElementById:id=>ids[id], querySelectorAll:s=>({
-    '.category-toggle':groups.map(g=>g.toggle), '.tag-category-form':[form], '.tag-category':groups, '.merge-form':[]
+    '.tag-category-form':[form], '.tag-category':groups, '.merge-form':[]
   })[s] || []}, window:{}, URLSearchParams,
   FormData: class {constructor(){assert.equal(select.disabled,undefined);} *[Symbol.iterator](){yield ['category_id',select.value];yield ['csrf_token','signed'];}},
   fetch:async(url,options)=>{calls.push({url,options}); if(response instanceof Error)throw response;return response;}});
   return {ids,groups,select,status,calls,change:async()=>{select.value='2';await select.listeners.change();}};
 }
-test('categories start expanded and independently collapse/reopen with accessible state',()=>{
-  const h=harness(), g=h.groups[0];
-  assert.equal(g.body.hidden,false);
-  g.toggle.listeners.click();assert.equal(g.body.hidden,true);assert.equal(g.toggle.attrs['aria-expanded'],'false');
-  assert.equal(h.groups[1].body.hidden,false);
-  g.toggle.listeners.click();assert.equal(g.body.hidden,false);assert.equal(g.toggle.attrs['aria-expanded'],'true');
+test('categories remain expanded without collapse handlers',()=>{
+  const h=harness();
+  h.groups.forEach(g=>{assert.equal(g.body.hidden,false);assert.deepEqual(g.body.listeners,{});});
 });
 test('category selection saves immediately with CSRF then moves row and updates both counts',async()=>{
-  const h=harness(); h.groups[1].body.hidden=true;
+  const h=harness();
   await h.change();
   assert.equal(h.calls.length,1);assert.equal(h.calls[0].options.body.get('csrf_token'),'signed');
   assert.equal(h.calls[0].options.body.get('category_id'),'2');assert.equal(h.calls[0].options.method,'POST');
@@ -56,3 +54,11 @@ for(const [name,response] of [['network',new Error('offline')],['csrf',{ok:false
     assert.equal(h.groups[1].rows.length,0);assert.match(h.status.textContent,/保存失败/);
   });
 }
+
+test('moving a tag preserves descending usage and id order in its destination', async()=>{
+  const h=harness();
+  const high={dataset:{tagId:'2',usageCount:'20'}}, tie={dataset:{tagId:'3',usageCount:'16'}}, low={dataset:{tagId:'4',usageCount:'1'}};
+  h.groups[1].rows.push(high,tie,low);
+  await h.change();
+  assert.deepEqual(h.groups[1].rows.map(row=>row.dataset.tagId),['2','1','3','4']);
+});

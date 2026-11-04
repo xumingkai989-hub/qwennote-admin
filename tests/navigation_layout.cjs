@@ -121,23 +121,18 @@ test('assistant form validates codepoints, clears saved feedback and confirms me
   }
 }));
 
-test('category groups collapse/reopen and selection saves then moves the row', () => withBrowser(async browser => {
+test('category groups stay expanded and selection saves then moves the row', () => withBrowser(async browser => {
   const page = await browser.newPage({viewport:{width:1440,height:1000}});
   await page.route('https://category-fixture.invalid/**', route => route.fulfill({status:200, contentType:'application/json', body:'{"saved":true}', headers:{'access-control-allow-origin':'null','access-control-allow-credentials':'true'}}));
   await page.goto(url('assistant'));
-  const toggles = page.locator('.category-toggle');
-  assert.equal(await toggles.count(),7);
-  await toggles.first().click();
-  assert.equal(await toggles.first().getAttribute('aria-expanded'),'false');
-  assert.equal(await page.locator('#category-body-1').isVisible(),false);
-  await toggles.first().click();
-  assert.equal(await page.locator('#category-body-1').isVisible(),true);
+  assert.equal(await page.locator('.category-toggle').count(),0);
+  assert.equal(await page.locator('.category-tags').count(),7);
   // Supply a same-test fake transport; the backend persistence is covered by real SQLite HTTP tests.
   await page.evaluate(() => {window.fetch = async () => ({ok:true,json:async()=>({saved:true})});});
   const form = page.locator('.tag-category-form').first();
-  const name = await form.locator('xpath=ancestor::tr/th').innerText();
+  const name = await form.locator('xpath=ancestor::li').locator('.tag-name').innerText();
   await form.locator('select').selectOption('1');
-  await page.waitForFunction(() => document.querySelector('#category-body-1 tbody tr') !== null);
+  await page.waitForFunction(() => document.querySelector('#category-body-1 .tag-row') !== null);
   assert.match(await page.locator('#category-body-1').innerText(),new RegExp(name));
   assert.equal(await page.locator('#category-body-1 .category-save-status').innerText(),'已保存');
   for (const width of [1440,390,320]) {

@@ -375,17 +375,7 @@ mark { background: var(--mark); color: var(--text); border-radius: 2px; }
 p.assistant-note { margin: 12px 0 0; }
 .assistant-error { color: var(--danger); font-size: 14px; }
 .assistant-error:empty { display: none; }
-.assistant-table-scroll { overflow-x: auto; }
-.assistant-table { width: 100%; border-collapse: collapse; font-size: 14px; }
-.assistant-table th, .assistant-table td { padding: 12px 10px; text-align: left; border-bottom: 1px solid var(--separator); }
-.assistant-table th { font-weight: 500; }
-.assistant-table thead th { color: var(--secondary); font-size: 13px; white-space: nowrap; }
-.assistant-table th:first-child { padding-left: 0; min-width: 130px; }
-.assistant-table tbody tr:last-child > * { border-bottom: 0; }
-.tag-actions, .merge-form, .proposal-actions { display: flex; align-items: center; gap: 8px; }
-.tag-actions { flex-wrap: wrap; }
-.tag-actions button { padding-inline: 10px; white-space: nowrap; font-size: 13px; }
-.merge-form select { width: 144px; min-height: 44px; padding: 8px; border: 1px solid var(--separator); border-radius: 8px; background: var(--surface); color: var(--text); font: inherit; }
+.proposal-actions { display: flex; align-items: center; gap: 8px; }
 .deactivate-button { color: var(--danger); }
 .proposal-list, .change-list { padding: 0; margin: 0; list-style: none; }
 .proposal-list li { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--separator); }
@@ -571,16 +561,44 @@ p.assistant-note { margin: 12px 0 0; }
 #enrichment-message:empty { display: none; }
 
 /* Assistant vocabulary categories; recording tag presentation is unchanged. */
-.tag-category { margin-top: 16px; border-top: 1px solid var(--separator); padding-top: 12px; }
-.category-heading { display: flex; align-items: flex-start; flex-wrap: wrap; gap: 8px; }
-.category-toggle { min-width: 32px; padding: 5px 8px; }
-.category-edit { min-width: 0; max-width: 100%; }
-.category-edit summary { cursor: pointer; font-weight: 600; padding: 6px 0; overflow-wrap: anywhere; }
-.category-count { padding-block: 6px; color: var(--secondary); }
+/* The vocabulary is always expanded; only its pencil opens the inline editor. */
+.assistant-layout { --secondary-label: var(--secondary); }
+.tag-category { margin-top: 28px; }
+.category-title { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; margin: 0 0 8px; font-size: 15px; font-weight: 600; }
+.category-name { min-width: 0; overflow-wrap: anywhere; }
+.category-edit-btn { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 24px; width: 24px; min-width: 24px; height: 24px; min-height: 24px; padding: 4px; border-radius: 4px; color: var(--text); background: transparent; opacity: .55; }
+.category-edit-btn:hover, .category-edit-btn:focus-visible { opacity: 1; }
+.category-edit-btn svg { width: 16px; height: 16px; }
+.category-count { color: var(--secondary-label); font-size: 13px; font-weight: 400; }
 .category-status { margin-left: auto; }
-.category-status button { font-size: 12px; }
-.category-rename, .category-add { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
-.category-rename input, .category-add input { min-width: 0; max-width: 100%; }
-.tag-category-form select { max-width: 180px; }
-.category-save-status { display: block; font-size: 12px; margin-top: 4px; }
-.category-body[hidden] { display: none; }
+.category-status button { min-height: 28px; padding: 4px 0 4px 8px; font-size: 12px; font-weight: 400; }
+.category-rename { display: grid; min-width: 0; max-width: 100%; }
+.category-rename[hidden] { display: none; }
+.category-rename input[name="name"], .category-input-size { grid-area: 1 / 1; padding: 2px 6px; min-height: 28px; font: inherit; border: 1px solid var(--separator); }
+.category-rename input[name="name"] { width: 0; min-width: 100%; border-radius: 4px; }
+.category-input-size { visibility: hidden; white-space: pre-wrap; overflow-wrap: anywhere; min-width: 3em; }
+.category-add { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 28px; }
+.category-add input { min-width: 0; max-width: 100%; }
+.category-tags { padding: 0; margin: 0; list-style: none; }
+.tag-row { display: grid; grid-template-columns: minmax(0, 1fr) 56px 140px auto; align-items: center; gap: 0 12px; min-height: 44px; padding-left: 28px; border-bottom: 1px solid var(--separator); font-size: 14px; font-weight: 400; }
+.tag-row:last-child { border-bottom: 0; }
+.tag-name { min-width: 0; overflow-wrap: anywhere; }
+.tag-usage { width: 56px; text-align: right; color: var(--secondary-label); font-variant-numeric: tabular-nums; }
+.tag-category-form { min-width: 0; }
+.tag-row select { width: 100%; min-width: 0; max-width: 100%; height: 32px; padding: 4px 8px; border: 1px solid var(--separator); border-radius: 6px; background: var(--surface); color: var(--text); font: inherit; font-size: 13px; }
+.category-save-status { display: block; font-size: 12px; }
+.category-save-status:empty { display: none; }
+.tag-actions, .merge-form { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.merge-form select { width: 120px; }
+.tag-actions button { min-height: 32px; padding: 4px 6px; white-space: nowrap; font-size: 13px; }
+@media (max-width: 1100px) {
+  .tag-row { grid-template-columns: minmax(0, 1fr) 56px minmax(0, 110px); column-gap: 8px; padding-block: 6px; }
+  .tag-actions { grid-column: 1 / -1; flex-wrap: wrap; }
+}
+@media (max-width: 399px) {
+  .tag-row { grid-template-columns: minmax(0, 1fr) 44px minmax(0, 94px); }
+  .tag-usage { width: 44px; }
+  .merge-form { flex: 1; }
+  .merge-form select { width: 0; flex: 1; }
+  .tag-actions { gap: 4px; }
+}

@@ -142,10 +142,10 @@ def test_grouped_page_immediate_save_and_dynamic_prompt(client, store):
     assert result.json() == {'saved': True}
     page = client.get('/assistant').text
     product = page.split('id="category-body-1"')[1].split('</section>')[0]
-    assert '<th scope="row">AI Tutor</th>' in product
+    assert '<span class="tag-name">AI Tutor</span>' in product
     other = page.split('id="category-body-7"')[1].split('</section>')[0]
-    assert '<th scope="row">AI Tutor</th>' not in other
-    assert page.count('class="category-toggle secondary" aria-expanded="true"') == 7
+    assert '<span class="tag-name">AI Tutor</span>' not in other
+    assert page.count('class="category-edit-btn"') == 7
     assert '产品: AI Tutor' in load_tagging_context(store)[1]
     assert '"category":"一级分类"' in load_tagging_context(store)[1]
 
