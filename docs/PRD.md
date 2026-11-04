@@ -42,7 +42,7 @@ API Key 创建、列出和撤销使用服务器 CLI，不提供网页签发入�
 | F3 | 幂等与同步互斥 | 相同输入二次同步新增/更新均为 0；重复 ID 只处理一次；同库并发返回 409 且不增批次 | P0 |
 | F4 | 列表与总结/转写阅读 | 每页最多 20 条，日期分组且倒序；详情仅渲染当前视图；缺内容有明确提示；未知 ID 返回 404 | P0 |
 | F5 | 管理员就地编辑、撤回与编辑历史 | 当前：最多 200,000 字/字段，保存覆盖与更新时间、撤回恢复同步内容；待定：逐版本历史及作者查询，当前无此表/接口 | P1 |
-| F6 | AI 自动打标 | 新增或正文/标题变化后尝试打标，最多 5 个去重标签；无模型凭据跳过；打标失败不使录音同步失败 | P1 |
+| F6 | AI 自动打标 | 新增或正文/标题变化后由后台尝试打标，最多 5 个去重标签；无模型配置时增强任务直接标记失败、不重试；打标失败不使录音同步失败 | P1 |
 | F7 | 词表每日迭代与助手配置 | 规范化重复可合并；语义相似仅生成提案；管理员可接受/拒绝、手动合并/停用；反馈指令超过 2,000 字拒绝 | P1 |
 | F8 | 标准热词维护 | 标准词唯一，新增校验为 1–20 字且无句式标点；可编辑/停用/删除；历史长句标记待整理 | P1 |
 | F9 | 模型判断后按位置校正与撤销 | 仅接受真实且可唯一定位的短片段；失败保留原文；详情展示轨迹；撤销指定 decision_id 后该处恢复，其他位置不受影响 | P0 |
@@ -53,6 +53,8 @@ API Key 创建、列出和撤销使用服务器 CLI，不提供网页签发入�
 | F14 | 设置中心与定时任务 | 保存启停、每日同步模式、日时刻/小时间隔、补拉及保留天数、每周全盘开关/星期/时间；非法值拒绝；tick 读新值；按上海时区自然周比较 full_sync 最近领取时刻，每周最多领取一次，失败或撞锁也消耗槽位，修改星期/时间不重复领取 | P1 |
 | F15 | 模型中心 | 可增模型、测试、切换默认、启停/删除；默认模型不可直接停用/删除；Key 仅显示尾四位，数据库存密文 | P1 |
 | F16 | 同步模式与水位 | 快速同步只处理水位回退 10 分钟后的窗口内容，完整记录跳过；水位缺失、异常或查询失败退化全盘；无新内容且窗口内没有待补全记录时不发起详情请求；全盘同步忽略水位、逐条拉取补拉范围内详情 | P0 |
+| F17 | 同步与 AI 增强解耦 | 同步只负责落库并立即返回，不等待打标与热词判断；标签/热词由后台任务补齐；任务持久化，服务重启后自动续跑；某条失败不影响录音可用性；页面对未完成项显示「生成中」并在完成后自动替换，无需刷新；失败可单条重试 | P0 |
+| F18 | 标签词表两级分类 | 标签归属某个一级分类；列表与详情页只显示标签名，不显示分类；AI 助手配置按一级分类分组展示，一级标题可内联重命名（点铅笔），二级标签缩进显示；新标签打标时由模型给出分类，未知分类归入「其他」；分类可停用、可新增 | P1 |
 
 F14 的同步策略默认值如下；星期按 0=周一、6=周日保存，时间均为上海时区。
 
@@ -108,11 +110,14 @@ Markdown 禁用原始 HTML，模板自动转义；API 审计、标签变更和�
 | --- | --- | --- |
 | `users` | subject PK、union_id、open_id、is_active | 飞书别名交叉匹配白名单；owner_open_id 不作为录音可见性过滤 |
 | `recordings` | recording_id PK、created_at、summary_md、transcript_md、search_text | 同步原文主表，含内容状态、时长和 media_type |
-| `sync_runs` | id PK、started_at、status、fetched、inserted、updated、skipped、mode、refreshed_token | 一次获准同步一行；mode 为实际 quick/full（含退化），skipped 统计窗口内已完整而跳过详情的记录；成功批次提供水位 |
+| `sync_runs` | id PK、started_at、status、fetched、inserted、updated、skipped、mode、duration_ms、refreshed_token | 一次获准同步一行；mode 为实际 quick/full（含退化），skipped 统计窗口内已完整而跳过详情的记录；duration_ms 为同步耗时（毫秒），不含后台 AI 增强；成功批次提供水位 |
+| `enrichment_tasks` | id PK、recording_id、kind(tag/hotword)、status、attempts、last_error、claim_token | 唯一约束 `(recording_id, kind)`；后台增强任务队列，支持租约与超时重置 |
+| `enrichment_runs` | id PK、sync_run_id、status、total、done、failed | 一次同步触发的增强批次统计 |
 | `recording_overrides` | (recording_id, field) PK、content_md、updated_at | 逻辑关联录音，每字段仅保留最新人工覆盖，无 FK |
 | `recording_tags` | (recording_id, tag) PK、position、model | FK → recordings，删除级联；tag 按名称逻辑关联 tags |
 | `tag_runs` | id PK、attempted、succeeded、failed、input_tokens、output_tokens | 打标运行与 token 用量统计 |
-| `tags` | id PK、name UNIQUE、status、merged_into、usage_count | merged_into 自引用 FK，表示合并去向 |
+| `tags` | id PK、name UNIQUE、status、merged_into、usage_count、category | merged_into 自引用 FK，表示合并去向；新增 category 列，默认「其他」 |
+| `tag_categories` | id PK、name UNIQUE、position、enabled | 一级分类；`tags.category` 逻辑关联其名称 |
 | `tag_aliases` | alias PK、tag_id | FK → tags，保存规范化别名 |
 | `tag_merge_proposals` | id PK、from_tag、to_tag、reason、status | 按标签名逻辑关联，提案对唯一 |
 | `tag_semantic_checks` | tag_id PK、checked_at | FK → tags，避免重复语义检查 |
@@ -161,6 +166,7 @@ Markdown 禁用原始 HTML，模板自动转义；API 审计、标签变更和�
 
 - 千问 MCP 是外部依赖，工具字段、分页、限流和 OAuth 授权可能变化；当前续期/重试不能保证一直可用。
 - 快速同步不会发现上游对老会议的修改（如重新生成总结）；窗口内已完整记录也跳过详情，需等每周全盘或手动全盘同步。
+- 后台增强失败时标签可能长期缺失，页面会显示失败与重试入口；模型未配置时直接标记失败、不重试，不影响录音阅读与导出。
 - 若上游列表降序维护失败，且异常未在早停前被发现，早停可能提前结束，本次结果可能不完整；下次全盘可在补拉范围内补齐。
 - 热词采用保守策略：短上下文、唯一位置、长度与 JSON 校验都通过才替换；宁可保留原文，仍可能漏判或误判。
 - 千问当前只接入读取与新增热词工具，上游热词不可删；本地删除或改词不等于撤回旧推送，配额按返回值且最多接受 200。
@@ -174,10 +180,14 @@ Markdown 禁用原始 HTML，模板自动转义；API 审计、标签变更和�
 
 ### 已完成
 
-F1–F4、F6–F16 的上述当前验收行为，以及 F5 的就地编辑、最新覆盖与撤回已有实现和回归测试。
+F1–F4、F6–F18 的上述当前验收行为，以及 F5 的就地编辑、最新覆盖与撤回已有实现和回归测试。
 具备单机 release 发布、数据库日备份、代码回滚和分层测试工具。
 10-30 已完成快速/全盘同步、水位回退 10 分钟、列表早停、跳过完整记录、每周全盘调度、批次 mode/skipped、段落缺发言人容错，以及同步按钮主次/全盘进行中/「上次」摘要。
 已采用 MIT 许可证；部署域名使用 `<domain>` 占位符，实例 ID 和域名由环境变量传入。
+
+- 同步性能：分页修复、并发拉取、去除冗余调用。
+- AI 增强异步化与页面自动补齐。
+- 标签一级分类与树形列表。
 
 ### 进行中
 

@@ -212,6 +212,7 @@ JS 层验证同步按钮、搜索、复制和菜单等交互；浏览器层验�
 - [AI 增强解耦与页面自动补齐（34）](docs/enrichment-34.md)
 - [增强模型兜底与 SQLite 兼容（35）](docs/enrichment-35.md)
 - [标签词表两级分类（37）](docs/tag-categories-37.md)
+- [标签树形列表（38）](docs/tag-tree-38.md)
 - [同步按钮主次与进行中状态（30，提交记录）](https://github.com/xumingkai989-hub/qwennote-admin/commit/4b12f5d346f99713022be25bf7051e7792acb25b)
 
 ## 许可证

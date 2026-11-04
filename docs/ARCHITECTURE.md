@@ -18,7 +18,7 @@
 | `feishu.py` | OAuth 换身份、联系人搜索与安全错误封装 | main、admin、store |
 | `home_presentation.py` | 列表日期分组、摘要展示数据 | main |
 | `hotword_admin.py` | 标准词管理与上游预览/推送路由 | admin |
-| `hotword_judge.py` | 提取上下文、调用模型、校验位置并持久化判断，支持补判 CLI | sync、命令行 |
+| `hotword_judge.py` | 提取上下文、调用模型、校验位置并持久化判断，支持补判 CLI | enrichment、命令行 |
 | `hotword_migration.py` | 标准词结构迁移、位置决策及历史触发器 | store |
 | `hotword_upstream.py` | 千问热词工具适配、配额快照、推送计划和结果记录 | hotword_admin（延迟导入）、store 迁移 |
 | `hotwords.py` | 标准词/短片段校验、按决策替换及轨迹展示辅助 | store、hotword_judge、recording_edit、hotword_admin |
@@ -38,11 +38,11 @@
 | `settings_admin.py` | 自动化设置页面、保存与下次运行展示 | admin |
 | `store.py` | SQLite 迁移、查询、事务、文件锁及业务持久化 | 路由、同步、AI、调度与 CLI |
 | `summary.py` | 安全 Markdown 渲染、只读待办和文档样式修饰 | recording_content、main |
-| `enrichment.py` | 持久化增强队列、原子领取、失败重试与批次状态；后台线程及调度共用两条并发槽位 | sync、main、admin、scheduler_tick |
+| `enrichment.py` | 持久化任务队列、原子领取与租约、后台执行、失败重试及批次状态；后台线程及调度共用两条并发槽位 | sync、main、admin、scheduler_tick |
 | `sync.py` | quick/full 编排、水位与退化、跳过完整记录、批次计数及增强任务入队 | main、scheduler_tick、scripts/sync_once.py |
-| `tag.py` | 模型打标、重试、并发/用量控制与 CLI | sync、tag_maintenance、models 的后备配置 |
+| `tag.py` | 模型打标、重试、并发/用量控制与 CLI | enrichment、tag_maintenance、models 的后备配置 |
 | `tag_maintenance.py` | 词表归一、语义检查提案、维护运行记录与 CLI | scheduler_tick、命令行 |
-| `tag_categories.py` | 一级分类数据管理、AI 分类映射与可重跑历史回填。 |
+| `tag_categories.py` | 一级分类数据管理、AI 分类映射与可重跑历史回填 | store、assistant、tag、命令行 |
 | `tag_vocabulary.py` | 词表迁移、别名归一、事务合并及提案处理 | store、assistant、tag、tag_maintenance、tagging |
 | `tagging.py` | 根据活动词表及反馈指令构建打标 system prompt | tag |
 
@@ -134,7 +134,7 @@ sequenceDiagram
 - 每条录音独立提交，详情或入库错误跳过该条并将批次标失败，列表错误停止后续拉取，不撤销已提交内容。
 - 转写段落缺少/空 speakerName 使用「未标注发言人」；内容、时间或发言人类型无效只跳过该段，避免一段缺字段导致整条详情失败，结构损坏仍报错。
 - 进程退出释放 flock；下一次获锁会把遗留 running 批次标 failed。锁文件不能在进程运行时删除或替换。
-- 热词/打标异常只写安全日志，不能反向把成功同步改成失败；手动请求仍需等待这些可选步骤结束才返回。
+- 同步返回后由后台线程消费 enrichment 队列；AI 增强发生在 `sync.lock` 释放之后，手动请求不等待热词判断或打标。异常记录为任务失败或待重试，不能反向把成功同步改成失败。
 - 热词读取原文的有限上下文，按字段及偏移记录决策；人工覆盖在展示时优先，不再套用自动校正。
 
 ## 4. 调度模型
@@ -145,7 +145,8 @@ sequenceDiagram
 每周配置为 full_sync_enabled（默认 true）、full_sync_weekday（0=周一，默认 6=周日）、full_sync_time（默认 03:30），独立于每日 sync 开关。
 `tag` 定时分支执行词表维护，不是全库重新打标；录音自动打标在同步后的增强阶段执行。
 
-外层 scheduler.lock 防并发 tick，任务按 sync、full_sync、tag、retention 顺序尝试，独立失败不阻止后续任务；full_sync 强制使用 full 模式，与 sync 和手动同步共用 sync.lock。
+外层 scheduler.lock 防并发 tick，任务按 sync、full_sync、tag、retention、enrichment 顺序尝试，独立失败不阻止后续任务；full_sync 强制使用 full 模式，与 sync 和手动同步共用 sync.lock。
+tick 每 10 分钟兜底扫描 pending 增强任务，并将租约超时的 running 任务重置为 pending，处理进程被杀后的残留，服务重启后自动续跑。
 执行外部操作前先提交 scheduler_state 的领取时刻，避免重启后重放副作用；普通失败/崩溃会消耗本周期。
 同步锁冲突同样消耗本次槽位，不回退领取状态；每日/间隔任务等下一周期，每周全盘等下一周配置日，或人工触发同步。
 full_sync 用上海时区周一为周起点比较 last_run_at：本自然周已领取则本周不再运行，失败、撞锁或改星期/时间均不例外，即每周最多一次；手动全盘不领取该调度槽位。
@@ -160,8 +161,9 @@ full_sync 用上海时区周一为周起点比较 last_run_at：本自然周已�
 | 类别 | 表 |
 | --- | --- |
 | 身份与同步 | users、recordings、sync_runs |
+| 异步增强 | enrichment_tasks、enrichment_runs、enrichment_run_tasks（批次与复用任务的关联） |
 | 人工编辑 | recording_overrides（每字段最新一条，无版本历史） |
-| 标签 | recording_tags、tag_runs、tags、tag_aliases、tag_merge_proposals、tag_semantic_checks、tag_change_log、assistant_config |
+| 标签 | recording_tags、tag_runs、tags、tag_categories、tag_aliases、tag_merge_proposals、tag_semantic_checks、tag_change_log、assistant_config |
 | 热词 | hotwords、recording_hotword_decisions、recording_hotword_checks、recording_hotword_decision_history、recording_hotword_check_history |
 | 旧决策归档 | recording_hotword_legacy_decisions（仅旧结构升级时存在） |
 | 上游推送 | hotword_upstream_sync、hotword_upstream_errors、hotword_upstream_runs、hotword_upstream_state |
@@ -170,6 +172,7 @@ full_sync 用上海时区周一为周起点比较 last_run_at：本自然周已�
 | 搜索 | recordings_fts；SQLite 自动维护 recordings_fts_config/data/docsize/idx 影子表 |
 
 SQLite 开启 WAL、连接启用 foreign_keys；结构迁移与历史字段回填由 migrate 幂等执行，不使用 ORM。
+`tag_categories` 保存一级分类的名称、顺序与启用状态；`tags.category` 默认「其他」，按名称逻辑关联分类，无数据库外键。分类重命名时同步更新标签归属，列表与详情仅展示标签名。
 sync_runs.mode 保存实际执行模式 quick/full，快速请求退化时写 full；skipped 统计 quick 窗口内因总结与转写已完整而未拉详情的记录，不含窗口以前的记录。
 fetched 是窗口内去重后检查数，inserted/updated 是实际入库变更数；mode 与 skipped 的旧行默认分别为 quick、0。水位查询只选成功批次的 started_at，失败批次不推进水位。
 `recordings_created_at_idx(created_at DESC, recording_id DESC)` 对应稳定列表排序。

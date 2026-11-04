@@ -120,11 +120,11 @@ class DocumentationTests(unittest.TestCase):
         self.assertTrue(all(count == 1 for count in Counter(listed).values()))
         self.assertIn('过程记录，非面向使用者的说明', records)
 
-    def test_prd_has_sixteen_unique_requirement_rows(self):
+    def test_prd_has_eighteen_unique_requirement_rows(self):
         requirements = section((ROOT / 'docs/PRD.md').read_text(), '4. 功能需求')
         rows = re.findall(r'^\| (F\d+) \| (.+) \| (.+) \| (P[012]) \|$',
                           requirements, re.MULTILINE)
-        self.assertEqual([row[0] for row in rows], [f'F{i}' for i in range(1, 17)])
+        self.assertEqual([row[0] for row in rows], [f'F{i}' for i in range(1, 19)])
 
     def test_readme_documents_sync_modes_and_watermark(self):
         text = README.read_text()
@@ -132,9 +132,9 @@ class DocumentationTests(unittest.TestCase):
             with self.subTest(term=term):
                 self.assertIn(term, text)
 
-    def test_prd_documents_sync_modes_and_watermark(self):
+    def test_prd_documents_sync_modes_watermark_and_enrichment(self):
         text = (ROOT / 'docs/PRD.md').read_text()
-        for term in ('快速同步', '全盘同步', '水位'):
+        for term in ('快速同步', '全盘同步', '水位', '异步', '一级分类'):
             with self.subTest(term=term):
                 self.assertIn(term, text)
 
