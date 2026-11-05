@@ -378,6 +378,21 @@ class SQLiteStore:
                            conn.execute('SELECT key, value FROM settings') if row['key'] in values})
         return AutomationSettings(**values)
 
+    def get_setting(self, key, *, conn=None):
+        if conn is None:
+            with self._connect() as conn:
+                return self.get_setting(key, conn=conn)
+        row = conn.execute('SELECT value FROM settings WHERE key=?', (key,)).fetchone()
+        return json.loads(row['value']) if row else None
+
+    def set_setting(self, key, value, *, conn=None):
+        if conn is None:
+            with self._connect() as conn:
+                return self.set_setting(key, value, conn=conn)
+        conn.execute('INSERT INTO settings (key, value) VALUES (?, ?) '
+                     'ON CONFLICT(key) DO UPDATE SET value=excluded.value',
+                     (key, json.dumps(value)))
+
     def save_settings(self, values):
         from app.automation import AutomationSettings
         # Validate the entire snapshot before opening a write transaction.

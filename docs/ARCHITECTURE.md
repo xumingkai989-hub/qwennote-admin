@@ -40,6 +40,7 @@
 | `summary.py` | 安全 Markdown 渲染、只读待办和文档样式修饰 | recording_content、main |
 | `enrichment.py` | 持久化任务队列、原子领取与租约、后台执行、失败重试及批次状态；后台线程及调度共用两条并发槽位 | sync、main、admin、scheduler_tick |
 | `sync.py` | quick/full 编排、水位与退化、跳过完整记录、批次计数及增强任务入队 | main、scheduler_tick、scripts/sync_once.py |
+| `login_sync.py` | 登录同步的全局一小时事务占位、后台快速同步及锁与批次状态查询 | main |
 | `tag.py` | 模型打标、重试、并发/用量控制与 CLI | enrichment、tag_maintenance、models 的后备配置 |
 | `tag_maintenance.py` | 词表归一、语义检查提案、维护运行记录与 CLI | scheduler_tick、命令行 |
 | `tag_categories.py` | 一级分类数据管理、AI 分类映射与可重跑历史回填 | store、assistant、tag、命令行 |

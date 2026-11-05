@@ -20,7 +20,7 @@
     </div>
   </div>
   {% include "sync_result.html" %}
-  <div id="mobile-sync-result" class="mobile-only sync-result" role="status" aria-live="polite">{% if sync_run and sync_run.finished_at %}{% set clock = sync_run.started_at[11:16] %}{% if sync_run.status == 'failed' %}<button type="button" class="text-button" aria-expanded="false" aria-controls="sync-error">{{ clock }} 同步失败 · 查看详情</button>{% else %}{{ clock }} {{ '全盘同步' if sync_run.mode == 'full' else '快速同步' }} · {% if sync_run.inserted %}新增 {{ sync_run.inserted }} 条{% elif sync_run.updated %}更新 {{ sync_run.updated }} 条{% else %}无变化{% endif %}{% endif %}{% endif %}</div>
+  <div id="mobile-sync-result" class="mobile-only sync-result" role="status" aria-live="polite">{% if sync_running %}正在同步…{% elif sync_run and sync_run.finished_at %}{% set clock = sync_run.started_at[11:16] %}{% if sync_run.status == 'failed' %}<button type="button" class="text-button" aria-expanded="false" aria-controls="sync-error">{{ clock }} 同步失败 · 查看详情</button>{% else %}{{ clock }} {{ '全盘同步' if sync_run.mode == 'full' else '快速同步' }} · {% if sync_run.inserted %}新增 {{ sync_run.inserted }} 条{% elif sync_run.updated %}更新 {{ sync_run.updated }} 条{% else %}无变化{% endif %}{% endif %}{% endif %}</div>
   <p id="sync-error" role="alert">{{ sync_run.error if sync_run and sync_run.status == 'failed' and sync_run.error else '' }}</p>
   <form class="search-form" action="/search" method="get" role="search">
       <input type="search" name="q" aria-label="搜索录音" placeholder="搜索标题、总结、转写" value="{{ search_query | default('') }}">
@@ -87,6 +87,7 @@
     {% if next_url %}<a href="{{ next_url }}" rel="next">下一页</a>{% else %}<span aria-disabled="true">下一页</span>{% endif %}
   </nav>
   <p class="time-note">时间为笔记创建时间</p>
+  {% if sync_running %}<script src="{{ url_for('static', path='login-sync.js') }}?v=20261105-42" defer></script>{% endif %}
   {% include 'enrichment_boot.html' %}
   <script src="{{ url_for('static', path='home.js') }}?v=20261104-41" defer></script>
 {% endblock %}

@@ -90,3 +90,13 @@ def controlled_enrichment_dispatch(monkeypatch):
     # Unit tests own worker timing; integration tests explicitly start/join it.
     from types import SimpleNamespace
     monkeypatch.setattr('app.enrichment.start_background', lambda store: SimpleNamespace(join=lambda: None))
+
+
+@pytest.fixture(autouse=True)
+def controlled_login_sync_dispatch(monkeypatch):
+    # Keep existing login tests isolated from background data mutations. Dedicated
+    # login-sync tests explicitly run the captured target or restore a real thread.
+    from unittest.mock import Mock
+    thread = Mock()
+    monkeypatch.setattr('app.login_sync.Thread', thread)
+    return thread

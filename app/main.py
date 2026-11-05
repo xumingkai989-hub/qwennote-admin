@@ -17,6 +17,7 @@ from app.admin import install_admin
 from app.config import Settings
 from app.feishu import FeishuAuth, FeishuAuthError, HttpFeishuAuth
 from app.home_presentation import date_groups
+from app.login_sync import maybe_trigger_login_sync, sync_status
 from app.minutes import FixtureMinutesSource, HttpMinutesSource, MinutesSource, SHANGHAI
 from app.public_api import install_public_api
 from app.recording_content import (apply_recording_hotwords, download_disposition, export_markdown, render_summary,
@@ -199,6 +200,18 @@ def create_app(
             set_cookie(response, EDIT_COOKIE, context['enrichment_csrf'], SESSION_MAX_AGE)
         return response
 
+    @app.get('/api/sync/status')
+    def current_sync_status(request: Request, store: Annotated[Store, Depends(get_store)]):
+        subject = sessions.decode(request.cookies.get('session'))
+        if not subject:
+            return JSONResponse({'detail': '请先登录'}, status_code=401,
+                                headers={'Cache-Control': 'no-store'})
+        user = store.get_user(subject)
+        if not user or not user.is_active:
+            return JSONResponse({'detail': '无访问权限'}, status_code=403,
+                                headers={'Cache-Control': 'no-store'})
+        return JSONResponse(sync_status(store), headers={'Cache-Control': 'no-store'})
+
     @app.get('/api/enrichment/status')
     def enrichment_status(request: Request, run: int):
         subject = sessions.decode(request.cookies.get('session'))
@@ -235,6 +248,7 @@ def create_app(
         response = templates.TemplateResponse(request=request, name='home.html', context={
             **analysis,
             'title': f'搜索「{query}」', 'user': user, 'sync_run': store.latest_sync(),
+            'sync_running': sync_status(store)['running'],
             'search_query': query, 'filters': filters, 'recordings': recordings,
             'snippets': {item.recording_id: search_snippets(item, query) for item in recordings.items},
             'detail_query': '?' + urlencode({**params, 'page': recordings.page}),
@@ -265,6 +279,7 @@ def create_app(
             response = templates.TemplateResponse(request=request, name="home.html", context={
                 **analysis,
                 "user": user, "sync_run": store.latest_sync(),
+                'sync_running': sync_status(store)['running'],
                 'filters': filters, 'recordings': recordings,
                 'date_groups': date_groups(recordings.items, store),
                 'detail_query': ('?' + urlencode({**filters['params'], 'page': recordings.page}))
@@ -413,6 +428,11 @@ def create_app(
         store.update_profile(identity)
         response = RedirectResponse("/", status_code=302)
         set_cookie(response, "session", sessions.encode(user.subject), SESSION_MAX_AGE)
+        try:
+            maybe_trigger_login_sync(store, app.state.minutes_source,
+                                     backfill_days=settings.backfill_days)
+        except Exception:
+            logger.warning('登录后同步触发失败；不影响登录')
         return finish_callback(response)
 
     return app
