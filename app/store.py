@@ -225,6 +225,16 @@ class SQLiteStore:
                     key TEXT PRIMARY KEY NOT NULL,
                     value TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS board_reports (
+                    day TEXT NOT NULL,
+                    scope TEXT NOT NULL CHECK(scope IN ('day','week')),
+                    stats_json TEXT NOT NULL,
+                    analysis_md TEXT,
+                    model TEXT,
+                    generated_at TEXT NOT NULL,
+                    error TEXT,
+                    PRIMARY KEY (day, scope)
+                );
                 CREATE TABLE IF NOT EXISTS scheduler_state (
                     job TEXT PRIMARY KEY,
                     last_run_at TEXT

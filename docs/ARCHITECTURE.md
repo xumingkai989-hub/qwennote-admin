@@ -14,6 +14,8 @@
 | `apikeys.py` | API Key 创建/列表/撤销 CLI，明文仅创建时输出 | 管理员命令行 |
 | `assistant.py` | 助手反馈、词表合并/停用、提案处理页面 | admin |
 | `automation.py` | 自动化设置数据类、每日同步模式和每周全盘配置、默认值及表单校验 | store、settings_admin |
+| `board.py` | 上海时区总量、日明细、周分布统计与 day/week JSON CLI | 命令行、board_analysis |
+| `board_analysis.py` | 有界会议输入、模型回顾、脱敏重试与复合键存档 | board CLI |
 | `config.py` | 读取进程环境、校验身份配置与会话密钥 | main、admin、feishu、部署适配器 |
 | `feishu.py` | OAuth 换身份、联系人搜索与安全错误封装 | main、admin、store |
 | `home_presentation.py` | 列表日期分组、摘要展示数据 | main |

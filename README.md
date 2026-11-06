@@ -48,6 +48,7 @@
 ### 导出
 
 - Markdown 可导出总结、转写或全部，也可复制完整文档。
+- 看板统计与日/周分析 CLI：`python -m app.board --day 2026-11-06`，只读预览加 `--print`；[使用与数据约定](docs/board-t1-t2.md)。
 
 ### 检索
 
@@ -64,8 +65,7 @@
 
 ## 技术栈与取舍
 
-Python 3.11、FastAPI、SQLite、Jinja2 服务端渲染；少量原生 JavaScript 处理交互，无前端构建。
-FastAPI 负责路由与依赖注入，SQLite 提供事务、WAL 和 FTS5；单机部署只需维护一个数据文件。
+Python 3.11、FastAPI、SQLite、Jinja2 服务端渲染；少量原生 JavaScript 处理交互，无前端构建。FastAPI 负责路由与依赖注入，SQLite 提供事务、WAL 和 FTS5；单机部署只需维护一个数据文件。
 服务端渲染让登录、权限与模板共用 Python 逻辑，当前页面无需 React 的客户端状态体系。
 当前按千条级录音判断容量，已有 1,000 条合成数据搜索基准；尚无必须使用 Postgres 的并发写入证据。
 单条长转写的规模与性能验收边界见 [PRD](docs/PRD.md)，模块关系见 [架构说明](docs/ARCHITECTURE.md)。
@@ -212,7 +212,7 @@ JS 层验证同步按钮、搜索、复制和菜单等交互；浏览器层验�
 - [增强模型兜底与 SQLite 兼容（35）](docs/enrichment-35.md)
 - [标签词表两级分类（37）](docs/tag-categories-37.md)
 - [标签树形列表（38）](docs/tag-tree-38.md)
-- [移动端导航与触摸目标（40）](docs/mobile-40.md)、[页面密度与控件收纳（41）](docs/mobile-41.md)、[登录快速同步（42）](docs/login-sync-42.md)
+- [移动端导航与触摸目标（40）](docs/mobile-40.md)、[页面密度与控件收纳（41）](docs/mobile-41.md)、[登录快速同步（42）](docs/login-sync-42.md)、[看板统计与分析（T1+T2）](docs/board-t1-t2.md)
 - [同步按钮主次与进行中状态（30，提交记录）](https://github.com/xumingkai989-hub/qwennote-admin/commit/4b12f5d346f99713022be25bf7051e7792acb25b)
 
 ## 许可证
