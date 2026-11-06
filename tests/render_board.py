@@ -76,7 +76,7 @@ def render(output):
                 archive(store, day)
             save('data')
             add(store, 'tiny', minutes=1, title='LongUnbrokenTitle' * 30, tags=('LongTag' * 40,))
-            add(store, 'long', minutes=3000, title='长时间会议')
+            add(store, 'long', minutes=3000, title='长时间会议：' + 'LongUnbrokenTitle' * 30)
             save('stress')
 
 

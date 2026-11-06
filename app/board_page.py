@@ -1,6 +1,6 @@
 """Board presentation and forms using the existing session/CSRF policy."""
 import secrets
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from urllib.parse import urlencode
 
 from fastapi import Request
@@ -29,6 +29,39 @@ def shares(items, total):
             rounded[i] += 1
     return [{**item, 'percent': rounded[i], 'bar_percent': raw[i]}
             for i, item in enumerate(items)]
+
+
+def week_chart(weekly, monday, cutoff, today):
+    """Pad the presentation to seven slots; statistics still stop at cutoff."""
+    days = {item['day']: item for item in weekly['by_day']}
+    maximum = max((item['minutes'] for key, item in days.items()
+                   if key <= min(cutoff, today).isoformat()), default=0)
+    rows = []
+    for offset in range(7):
+        day = monday + timedelta(days=offset)
+        item = days.get(day.isoformat(), {'count': 0, 'minutes': 0})
+        future = day > min(cutoff, today)
+        rows.append({**item, 'day': day.isoformat(), 'is_today': day == today,
+                     'future': future, 'bar_percent':
+                     100 * item['minutes'] / maximum if maximum and not future else 0})
+    return rows
+
+
+def donut_chart(items):
+    """Top five known positive durations plus Other; unknowns never get arcs."""
+    known = sorted((item for item in items if (item['minutes'] or 0) > 0),
+                   key=lambda item: (-item['minutes'], item['recording_id']))
+    sectors = [{**item, 'color': i + 1} for i, item in enumerate(known[:5])]
+    if len(known) > 5:
+        sectors.append({'title': '其他', 'minutes': sum(item['minutes'] for item in known[5:]),
+                        'color': 6, 'recording_id': None})
+    sectors = shares(sectors, sum(item['minutes'] for item in known))
+    offset = 0
+    for i, item in enumerate(sectors):
+        item.update(key=f'sector-{i}', offset=offset)
+        offset += item['bar_percent']
+    uncharted = [item for item in items if not item['minutes']]
+    return {'sectors': sectors, 'uncharted': uncharted}
 
 
 def parse_day(value):
@@ -70,7 +103,9 @@ def install_board(app, *, settings, templates, sessions, authorize, valid_csrf,
             'title': '看板', 'day': day, 'today': today, 'monday': monday,
             'totals': board.totals(store), 'daily': daily, 'weekly': weekly,
             'items': shares(daily['items'], daily['minutes']),
-            'week_days': shares(weekly['by_day'], weekly['minutes']),
+            'week_days': week_chart(weekly, monday, day, today),
+            'week_end': monday + timedelta(days=7),
+            'chart': donut_chart(daily['items']),
             'unknown_count': sum(item['minutes'] is None for item in daily['items']),
             'day_report': board.load_report(store, day),
             'week_report': board.load_report(store, monday, 'week'),

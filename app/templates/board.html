@@ -10,9 +10,6 @@
 </form>
 {% endif %}
 {% endmacro %}
-{% macro bar(item) %}
-<span class="board-bar" aria-hidden="true"><span class="board-bar-fill{% if item.bar_percent > 0 %} has-duration{% endif %}" style="width: {{ item.bar_percent }}%"></span></span>
-{% endmacro %}
 {% macro analysis(report, scope) %}
 <div class="board-analysis">
   {% if report and report.analysis_md %}
@@ -27,38 +24,87 @@
 {% endif %}
 <header class="list-heading board-heading"><h1>看板</h1>{{ generate_button('both', '重新生成') }}</header>
 <div class="board-cards" aria-label="会议统计">
-  <section class="board-card" data-stat="total"><h2>总会议</h2><p>{{ duration(totals.minutes) }}</p></section>
-  <section class="board-card" data-stat="day"><h2>{{ '今日' if day == today else '当日' }}</h2><p>{{ daily.count }} 场 <span>·</span> {{ duration(daily.minutes) }}</p></section>
-  <section class="board-card" data-stat="week"><h2>本周</h2><p>{{ weekly.count }} 场 <span>·</span> {{ duration(weekly.minutes) }}</p></section>
+  {% for key, label, stats in [('total', '总会议', totals), ('day', '今日' if day == today else '当日', daily), ('week', '本周', weekly)] %}
+  <section class="board-card" data-stat="{{ key }}">
+    <h2>{{ label }}</h2>
+    <p><span class="board-stat-value">{{ '%.1f' | format(stats.minutes / 60) }}</span> <span class="board-stat-unit">小时</span></p>
+    <span class="board-stat-count">{{ stats.count }} 场会议</span>
+  </section>
+  {% endfor %}
 </div>
+<section class="board-section" aria-labelledby="board-week-title">
+  <h2 id="board-week-title">本周 · {{ monday.month }}月{{ monday.day }}日 — {{ week_end.month }}月{{ week_end.day }}日</h2>
+  <div class="board-panel board-week-chart" aria-label="本周每天会议时长">
+    {% for item in week_days %}
+    <div class="board-week-row{% if item.is_today %} is-today{% endif %}{% if item.future %} is-future{% endif %}" data-day="{{ item.day }}"{% if item.is_today %} aria-current="date"{% endif %}>
+      <time class="board-weekday" datetime="{{ item.day }}">周{{ weekdays[loop.index0] }} {{ item.day[5:] }}{% if item.is_today %}<span class="board-today-label">今天</span>{% endif %}</time>
+      <span class="board-bar" aria-hidden="true"><span class="board-bar-fill" style="width: {{ '%g' | format(item.bar_percent) }}%"></span></span>
+      <span class="board-week-numbers">{% if item.count and not item.future %}{{ item.count }} 场 · {{ '%.1f' | format(item.minutes / 60) }} 小时{% else %}—{% endif %}</span>
+    </div>
+    {% endfor %}
+    {% if not weekly.count %}<p class="board-empty">本周没有会议</p>{% endif %}
+  </div>
+</section>
 <section class="board-section" aria-labelledby="board-day-title">
-  <h2 id="board-day-title">{{ '今天' if day == today else '当日' }} · {{ day.month }}月{{ day.day }}日 周{{ weekdays[day.weekday()] }}</h2>
+  <div class="board-section-heading">
+    <h2 id="board-day-title">{{ '今天' if day == today else '当日' }} · {{ day.month }}月{{ day.day }}日 周{{ weekdays[day.weekday()] }}</h2>
+    <span class="board-note">{{ daily.count }} 场 · {{ '%.1f' | format(daily.minutes / 60) }} 小时</span>
+  </div>
   <div class="board-panel">
+    {% if items %}
+    <div class="board-donut-layout">
+      <div class="board-donut">
+        <svg viewBox="0 0 120 120" width="120" height="120" role="img" aria-labelledby="board-donut-title">
+          <title id="board-donut-title">{{ '今日' if day == today else '当日' }} {{ daily.count }} 场会议，共 {{ '%.1f' | format(daily.minutes / 60) }} 小时</title>
+          <circle class="board-donut-track" cx="60" cy="60" r="50" />
+          {% for item in chart.sectors %}
+          <circle class="board-donut-sector" data-chart-key="{{ item.key }}" cx="60" cy="60" r="50" pathLength="100" stroke-dasharray="{{ item.bar_percent }} 100" stroke-dashoffset="{{ -item.offset }}" transform="rotate(-90 60 60)" style="--chart-color: var(--chart-{{ item.color }})">
+            <title>{{ item.title or '未命名会议' }} · {{ duration(item.minutes) }} · {{ item.percent }}%</title>
+          </circle>
+          {% endfor %}
+        </svg>
+        <div class="board-donut-center" aria-hidden="true"><strong>{{ '%.1f' | format(daily.minutes / 60) }}</strong><span>小时</span></div>
+      </div>
+      <ul class="board-legend" aria-label="会议时长占比">
+        {% for item in chart.sectors %}
+        <li class="board-legend-row" data-chart-key="{{ item.key }}" style="--chart-color: var(--chart-{{ item.color }})">
+          <span class="board-legend-swatch" aria-hidden="true"></span>
+          {% if item.recording_id %}<a class="board-legend-title" href="{{ url_for('recording_detail', recording_id=item.recording_id) }}" title="{{ item.title or '未命名会议' }}">{{ item.title or '未命名会议' }}</a>{% else %}<span class="board-legend-title">其他</span>{% endif %}
+          <span class="board-legend-duration">{{ duration(item.minutes) }}</span>
+          <span class="board-legend-percent">{{ item.percent }}%</span>
+        </li>
+        {% endfor %}
+        {% for item in chart.uncharted %}
+        <li class="board-legend-row is-uncharted">
+          <span class="board-legend-swatch" aria-hidden="true"></span>
+          <a class="board-legend-title" href="{{ url_for('recording_detail', recording_id=item.recording_id) }}" title="{{ item.title or '未命名会议' }}">{{ item.title or '未命名会议' }}</a>
+          <span class="board-legend-duration">{{ duration(item.minutes) }}</span><span class="board-legend-percent">—</span>
+        </li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% if not chart.sectors %}<p class="board-note">暂无可计算占比的时长</p>{% endif %}
+    <h3 class="board-details-heading">会议明细</h3>
+    {% endif %}
     {% for item in items %}
     <div class="board-meeting" data-recording-id="{{ item.recording_id }}">
       <time class="board-time">{{ item.created_at }}</time>
       <a class="board-title" href="{{ url_for('recording_detail', recording_id=item.recording_id) }}">{{ item.title or '未命名会议' }}</a>
-      <span class="board-tags">{% for tag in item.tags %}<span>{{ tag }}</span>{% else %}<span>未分类</span>{% endfor %}</span>
       <span class="board-duration">{{ duration(item.minutes) }}</span>
-      <span class="board-share"><span class="board-percent">{{ '—' if item.minutes is none else item.percent|string + '%' }}</span>{{ bar(item) }}</span>
+      <span class="board-tags">{% for tag in item.tags %}<span>{{ tag }}</span>{% else %}<span>未分类</span>{% endfor %}</span>
+      <span class="board-percent">{{ '—' if item.minutes is none else item.percent|string + '%' }}</span>
     </div>
     {% else %}<p class="board-empty">{{ '今天没有会议' if day == today else '当天没有会议' }}</p>{% endfor %}
     {% if unknown_count %}<p class="board-note board-footnote">{{ unknown_count }} 场时长未知，未计入占比</p>{% endif %}
-    {{ analysis(day_report, 'day') }}
   </div>
 </section>
-<section class="board-section" aria-labelledby="board-week-title">
-  <h2 id="board-week-title">本周 · {{ monday.month }}月{{ monday.day }}日 — {{ day.month }}月{{ day.day }}日</h2>
-  <div class="board-panel">
-    {% for item in week_days %}
-    <div class="board-week-row" data-day="{{ item.day }}">
-      <span class="board-weekday">周{{ weekdays[loop.index0] }}</span>
-      <span class="board-week-numbers">{{ item.count }} 场 · {{ duration(item.minutes) }}</span>
-      <span class="board-share"><span class="board-percent">{{ item.percent }}%</span>{{ bar(item) }}</span>
-    </div>
-    {% else %}<p class="board-empty">本周没有会议</p>{% endfor %}
-    {{ analysis(week_report, 'week') }}
-  </div>
+<section class="board-section" aria-labelledby="board-day-analysis-title">
+  <h2 id="board-day-analysis-title">{{ '今日' if day == today else '当日' }}分析</h2>
+  {{ analysis(day_report, 'day') }}
+</section>
+<section class="board-section" aria-labelledby="board-week-analysis-title">
+  <h2 id="board-week-analysis-title">本周分析</h2>
+  {{ analysis(week_report, 'week') }}
 </section>
 <section class="board-section" aria-labelledby="board-history-title">
   <div class="board-history-heading"><h2 id="board-history-title">历史</h2>{% if day != today %}<a href="/board">回到今天</a>{% endif %}</div>

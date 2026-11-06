@@ -67,13 +67,13 @@ def test_live_totals_details_archive_and_shanghai_default(board_client, store, m
     assert ctx['totals'] == board.totals(store)
     assert ctx['daily'] == board.day_stats(store, '2026-11-06')
     assert ctx['weekly'] == board.week_stats(store, '2026-11-02', '2026-11-06')
-    assert '3.5 小时' in response.text and '3 场 <span>·</span> 1.3 小时' in response.text
+    assert 'board-stat-value">3.5</span>' in response.text and '3 场 · 1.3 小时' in response.text
     assert [i['recording_id'] for i in ctx['items']] == ['early', 'late', 'unknown']
     assert len(re.findall('class="board-meeting"', response.text)) == 3
     assert sum(i['percent'] for i in ctx['items']) == 100
     assert '1 场时长未知，未计入占比' in response.text and '时长未知' in response.text
     assert response.text.count(GOOD) == 2
-    assert '11月2日 — 11月6日' in response.text
+    assert '11月2日 — 11月9日' in response.text
     with store._connect() as conn:
         conn.execute("UPDATE recordings SET duration_min=100 WHERE recording_id='late'")
     assert board_client.get('/board').context['daily']['minutes'] == 146
@@ -201,5 +201,106 @@ def test_model_failure_keeps_page_available(board_client, store, monkeypatch):
     response = board_client.post('/board/generate', data={'csrf_token': token(board_client), 'day': '2026-11-06'})
     assert response.status_code == 303
     html = board_client.get(response.headers['location']).text
-    assert '分析未生成' in html and '1 场 <span>·</span> 30 分钟' in html
+    assert '分析未生成' in html and '1 场 · 0.5 小时' in html
     assert 'private failure' not in html
+
+
+def test_week_chart_seven_aligned_days_future_and_maximum(board_client, store):
+    add(store, 'mon', '2026-11-02T10:00:00+08:00', 300)
+    add(store, 'tue', '2026-11-03T10:00:00+08:00', 150)
+    add(store, 'fri', minutes=60)
+    add(store, 'future', '2026-11-07T10:00:00+08:00', 999)
+    response = board_client.get('/board')
+    rows = response.context['week_days']
+    assert [r['day'] for r in rows] == [f'2026-11-0{i}' for i in range(2, 9)]
+    assert [r['bar_percent'] for r in rows] == [100, 50, 0, 0, 20, 0, 0]
+    assert rows[4]['is_today'] and all(r['future'] for r in rows[5:])
+    html_rows = re.findall(r'<div class="board-week-row.*?</div>', response.text, re.S)
+    assert len(html_rows) == 7
+    for row, width in zip(html_rows, [100, 50, 0, 0, 20, 0, 0]):
+        assert f'style="width: {width}%"' in row
+    assert 'is-today' in html_rows[4] and '今天' in html_rows[4]
+    assert all('>—</span>' in row for row in html_rows[5:])
+    assert '1 场 · 5.0 小时' in html_rows[0]
+
+
+@pytest.mark.parametrize('selected,start,end', [('2026-11-02', '2026-11-02', '2026-11-08'),
+                                               ('2026-11-01', '2026-10-26', '2026-11-01'),
+                                               ('2025-01-01', '2024-12-30', '2025-01-05')])
+def test_empty_week_slots_across_boundaries(board_client, selected, start, end):
+    response = board_client.get('/board', params={'day': selected})
+    rows = response.context['week_days']
+    assert len(rows) == 7 and rows[0]['day'] == start and rows[-1]['day'] == end
+    assert all(row['bar_percent'] == 0 and row['count'] == 0 for row in rows)
+    assert response.text.count('class="board-bar-fill" style="width: 0%"') == 7
+
+
+@pytest.mark.parametrize('values', [[30], [1, 1, 1], [4, 3, 2, 1, 1], [10, 9, 8, 7, 6, 5],
+                                  [1] * 12, [2000, 1, 1, 1, 1, 1, 1]])
+def test_donut_sector_counts_totals_and_other(board_client, store, values):
+    for i, minutes in enumerate(values):
+        add(store, f'meeting-{i}', minutes=minutes, title=f'会议 {i}')
+    response = board_client.get('/board')
+    sectors = response.context['chart']['sectors']
+    assert len(sectors) == min(len(values), 6)
+    assert response.text.count('class="board-donut-sector"') == len(sectors)
+    assert sum(item['percent'] for item in sectors) == 100
+    assert sum(item['bar_percent'] for item in sectors) == pytest.approx(100)
+    assert sum(item['minutes'] for item in sectors) == sum(values)
+    assert sectors[-1]['offset'] + sectors[-1]['bar_percent'] == pytest.approx(100)
+    assert len({item['color'] for item in sectors}) == len(sectors)
+    if len(values) > 5:
+        assert sectors[-1]['title'] == '其他' and sectors[-1]['color'] == 6
+        assert sectors[-1]['minutes'] == sum(sorted(values, reverse=True)[5:])
+    assert '<svg viewBox="0 0 120 120" width="120" height="120" role="img"' in response.text
+
+
+def test_unknown_and_zero_never_enter_donut_but_remain_in_legend(board_client, store):
+    add(store, 'known', minutes=10, title='已知会议')
+    add(store, 'unknown', minutes=None, title='未知会议')
+    add(store, 'zero', minutes=0, title='零分钟会议')
+    html = board_client.get('/board').text
+    svg = re.search(r'<svg viewBox="0 0 120 120".*?</svg>', html, re.S)[0]
+    legend = re.search(r'<ul class="board-legend".*?</ul>', html, re.S)[0]
+    assert svg.count('class="board-donut-sector"') == 1
+    assert '未知会议' not in svg and '零分钟会议' not in svg
+    assert '未知会议' in legend and '时长未知' in legend and '零分钟会议' in legend
+    assert legend.count('is-uncharted') == 2
+    assert html.count('class="board-meeting"') == 3
+
+
+def test_all_unknown_has_empty_ring_and_no_nan(board_client, store):
+    add(store, minutes=None)
+    html = board_client.get('/board').text
+    assert 'class="board-donut-sector"' not in html
+    assert '暂无可计算占比的时长' in html
+    assert 'NaN' not in html and '今日 1 场会议，共 0.0 小时' in html
+
+
+def test_donut_sort_is_stable_and_does_not_change_detail_order(board_client, store):
+    for i, minutes in enumerate([1, 30, 20, 10, 5, 30]):
+        add(store, f'id-{i}', f'2026-11-06T{9+i:02d}:00:00+08:00', minutes)
+    ctx = board_client.get('/board').context
+    assert [i['recording_id'] for i in ctx['items']] == [f'id-{i}' for i in range(6)]
+    assert [i['recording_id'] for i in ctx['chart']['sectors']] == ['id-1', 'id-5', 'id-2', 'id-3', 'id-4', None]
+
+
+def test_chart_theme_pairs_and_distinct_chromatic_hues():
+    from pathlib import Path
+    css = (Path(__file__).resolve().parents[1] / 'app/static/app.css').read_text()
+    values = re.findall(r'--chart-(\d): oklch\(([\d.]+) ([\d.]+) (\d+)\)', css)
+    assert len(values) == 12
+    for light, dark in zip(values[:6], values[6:]):
+        assert light[0] == dark[0] and light[2:] == dark[2:]
+        assert float(dark[1]) - float(light[1]) == pytest.approx(.08)
+    # The sixth supplied token is intentionally achromatic Other, not a sixth hue.
+    hues = sorted(int(value[3]) for value in values[:5])
+    assert all((hues[(i + 1) % 5] - hue) % 360 >= 30 for i, hue in enumerate(hues))
+
+
+def test_future_query_cannot_shrink_visible_bars(board_client, store):
+    add(store, 'mon', '2026-11-02T10:00:00+08:00', 60)
+    add(store, 'future', '2026-11-07T10:00:00+08:00', 300)
+    rows = board_client.get('/board?day=2026-11-08').context['week_days']
+    assert rows[0]['bar_percent'] == 100
+    assert rows[5]['future'] and rows[5]['bar_percent'] == 0

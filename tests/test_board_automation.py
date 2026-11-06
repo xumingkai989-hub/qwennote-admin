@@ -181,7 +181,7 @@ def test_regenerate_error_still_updates_numbers_and_shows_notice(board_client, s
     assert response.status_code == 302
     page = board_client.get(response.headers['location'])
     assert page.status_code == 200
-    assert '1 场 <span>·</span> 45 分钟' in page.text
+    assert '1 场 · 0.8 小时' in page.text
     assert '数字已更新，部分分析未生成' in page.text
     assert 'private-key' not in page.text
     assert all(row['error'] == 'analysis_failed' for row in reports(store))
