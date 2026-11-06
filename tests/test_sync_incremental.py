@@ -23,7 +23,7 @@ class WindowSource(FakeMinutesSource):
         super().__init__()
         self.windows = []
 
-    def sync_range(self, start, end, *, early_stop=False):
+    def sync_range(self, start, end, *, early_stop=False, complete_ids=None):
         self.windows.append((start, end, early_stop))
         return self.recordings
 
@@ -106,6 +106,8 @@ def test_incomplete_old_record_is_refetched_and_updated(incremental, missing):
     run_sync(source, store)
     source.detail_calls.clear()
     source.details['late'] = replace(source.details['late'], **{missing: True})
+    with store._connect() as conn:
+        conn.execute('UPDATE backfill_state SET next_attempt_at=NULL')
     result = run_sync(source, store)
     assert source.detail_calls == ['late']
     assert (result.fetched, result.inserted, result.updated, result.skipped) == (2, 0, 1, 1)
@@ -259,7 +261,7 @@ def test_full_sync_shares_auth_and_origin_protection(client, store):
     assert store.latest_sync() is None
 
 
-def test_outside_watermark_even_incomplete_history_is_untouched(incremental):
+def test_outside_watermark_incomplete_history_respects_backoff(incremental):
     source, store = incremental
     old = add(source, 'old', has_summary=False)
     run_sync(source, store)
@@ -267,7 +269,7 @@ def test_outside_watermark_even_incomplete_history_is_untouched(incremental):
     source.detail_calls.clear()
     source.details['old'] = replace(source.details['old'], has_summary=True)
     result = run_sync(source, store)
-    assert result.mode == 'quick' and result.fetched == 0
+    assert result.mode == 'quick' and result.fetched == result.skipped == 1
     assert source.detail_calls == [] and recordings(store) == before
 
 
@@ -279,7 +281,7 @@ def test_new_records_at_exact_watermark_boundary(incremental):
                           ('future', -timedelta(seconds=1))]:
         add(source, ident, offset.total_seconds() / 86400)
     result = run_sync(source, store)
-    assert source.detail_calls == ['after', 'boundary']
+    assert source.detail_calls == ['after', 'boundary', 'before']  # Missing old ID survives the watermark.
     assert result.mode == store.latest_sync().mode == 'quick'
 
 

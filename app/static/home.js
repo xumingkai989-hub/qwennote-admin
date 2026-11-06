@@ -4,7 +4,7 @@
   const buttons = [button, fullButton].filter(Boolean);
   const errorMessage = document.getElementById('sync-error');
   const feedback = document.getElementById('sync-feedback');
-  const resultText = result => `${result.mode === 'full' ? '全盘同步' : '快速同步'} · 检查 ${result.fetched} 条 · 新增 ${result.inserted} · 更新 ${result.updated} · 跳过 ${result.skipped} · 耗时 ${result.duration_ms} 毫秒${result.detail_serialized ? ' · 限流后已降为串行' : ''}`;
+  const resultText = result => `${result.mode === 'full' ? '全盘同步' : '快速同步'} · 检查 ${result.fetched} 条 · 新增 ${result.inserted} · 更新 ${result.updated} · 跳过 ${result.skipped} · 耗时 ${result.duration_ms} 毫秒${result.note ? ' · ' + result.note : ''}${result.http_status ? '\n失败状态码：' + result.http_status : ''}${result.detail_serialized ? ' · 限流后已降为串行' : ''}`;
   const sync = async (activeButton, full) => {
     if (activeButton.disabled) return;
     buttons.forEach(item => {item.disabled = true;});
@@ -29,7 +29,7 @@
       await window.enrichment.refreshList();
       if (result.enrichment_run_id) window.enrichment.watch([result.enrichment_run_id]);
     } catch (error) {
-      errorMessage.textContent = error.message || '同步请求失败，请重试';
+      errorMessage.textContent = (error.message || '同步请求失败，请重试') + (result?.http_status ? '\n失败状态码：' + result.http_status : '');
       window.mobileDensity?.syncResult({...result, status: 'failed'});
       feedback.textContent = result && Number.isInteger(result.duration_ms) ? resultText(result) : '同步失败';
     } finally {

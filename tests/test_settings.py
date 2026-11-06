@@ -280,6 +280,8 @@ def test_tag_switch_stops_sync_auto_tags(client, store, monkeypatch):
     assert not calls
     store.save_settings(AutomationSettings())
     source.recordings = [replace(source.recordings[0], title='新标题')]
+    with store._connect() as conn:
+        conn.execute('UPDATE backfill_state SET next_attempt_at=NULL')
     assert run_sync(source, store, backfill_days=1).status == 'success'
     from app.enrichment import record_state
     assert not calls and record_state(store, 'sync-new')['tag'] == 'pending'
@@ -360,6 +362,7 @@ def test_tick_cli_requires_db_and_prints_safe_summary(client, store, monkeypatch
     monkeypatch.delenv('DB_PATH')
     assert main() == 1
     monkeypatch.setenv('DB_PATH', str(store.db_path))
-    store.save_settings(replace(AutomationSettings(), sync_enabled=False, tag_enabled=False))
+    store.save_settings(replace(AutomationSettings(), sync_enabled=False, tag_enabled=False,
+                                full_sync_enabled=False, board_enabled=False))
     assert main() == 0
     assert capsys.readouterr().out.strip() == '{"executed": [], "failed": [], "skipped": []}'

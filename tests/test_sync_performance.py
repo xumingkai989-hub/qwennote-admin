@@ -36,7 +36,7 @@ class ConcurrentSource:
             self.calls[rid] += 1
             self.peaks[rid] = self.active
         try:
-            if self.first_wave and int(rid) < 3:
+            if self.first_wave and int(rid) < 2:
                 self.first_wave.wait(timeout=3)
             REAL_SLEEP(0.005 * (3 - int(rid) % 3))  # Finish out of order.
             error = self.errors.get(rid)
@@ -57,9 +57,9 @@ def prepared(store, monkeypatch):
     return store
 
 
-def test_ten_records_overlap_with_three_workers_and_single_thread_writes(prepared, monkeypatch):
+def test_ten_records_overlap_with_two_workers_and_single_thread_writes(prepared, monkeypatch):
     source = ConcurrentSource()
-    source.first_wave = Barrier(3)
+    source.first_wave = Barrier(2)
     main_thread = get_ident()
     writes = []
     upsert = prepared.upsert_recording
@@ -73,7 +73,7 @@ def test_ten_records_overlap_with_three_workers_and_single_thread_writes(prepare
     monkeypatch.setattr(prepared, 'upsert_recording', write)
     run = run_sync(source, prepared)
     assert run.status == 'success' and run.inserted == run.fetched == 10
-    assert source.peak == 3 and len(writes) == 10
+    assert source.peak == 2 and len(writes) == 10
     for meta in source.records:
         saved = prepared.get_recording(meta.recording_id)
         assert saved.summary_md == f'summary-{meta.recording_id}'
@@ -107,19 +107,19 @@ def test_record_retries_twice_then_succeeds(prepared, monkeypatch, status):
     run = run_sync(source, prepared)
     assert run.status == 'success' and run.inserted == 1 and run.error is None
     assert attempts == ['0'] * 3
-    assert len(sleeps) == 2 and 1 <= sleeps[0] <= 1.25 and 3 <= sleeps[1] <= 3.25
+    assert sleeps == ([30, 60] if status == 429 else [2, 6])
 
 
-def test_three_throttled_failures_serialize_remaining_and_persist_report(prepared, monkeypatch, caplog):
+def test_two_throttled_failures_serialize_remaining_and_persist_report(prepared, monkeypatch, caplog):
     source = ConcurrentSource(10)
-    source.first_wave = Barrier(3)
-    source.errors = {str(i): MinutesRetryableError(429) for i in range(3)}
+    source.first_wave = Barrier(2)
+    source.errors = {str(i): MinutesRetryableError(429) for i in range(2)}
     monkeypatch.setattr('app.sync.time.sleep', lambda _: None)
     run = run_sync(source, prepared)
-    assert run.inserted == 7 and len(run.error.splitlines()) == 3
+    assert run.inserted == 8 and len(run.error.splitlines()) == 2
     assert run.detail_serialized == prepared.latest_sync().detail_serialized == 1
-    assert [source.calls[str(i)] for i in range(3)] == [3] * 3
-    assert all(source.peaks[str(i)] == 1 for i in range(3, 10))
+    assert [source.calls[str(i)] for i in range(2)] == [3] * 2
+    assert all(source.peaks[str(i)] == 1 for i in range(2, 10))
     assert '降为串行' in caplog.text
 
 

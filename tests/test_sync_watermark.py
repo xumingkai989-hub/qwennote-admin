@@ -42,7 +42,8 @@ def test_list_paging_stops_only_when_confirmed_descending(setup_source, monkeypa
                 'hasMore': index < 2, 'nextToken': str(index + 1)}
     monkeypatch.setattr(source, '_initialize', lambda: None)
     monkeypatch.setattr(source, '_call', call)
-    records = source.sync_range(start, NOW, early_stop=early_stop)
+    records = source.sync_range(start, NOW, early_stop=early_stop,
+                                complete_ids={f'{i}-{j}' for i in range(3) for j in range(3)})
     assert len(calls) == expected_pages
     assert all(start <= record.created_at <= NOW for record in records)
     assert len(records) == (2 if ordered else 3)

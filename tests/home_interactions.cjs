@@ -113,3 +113,13 @@ test('partial failure keeps duration and serial-fallback report visible', async 
   assert.equal(h.error.textContent, '3 条详情失败');
   assert.equal(h.reloads, 0);
 });
+
+
+test('failed sync shows numeric status counts in feedback and mobile error details', async () => {
+  const h = harness(async () => ({ok: true, json: async () => ({status: 'failed', mode: 'full', fetched: 16,
+    inserted: 0, updated: 0, skipped: 0, duration_ms: 9000, detail_serialized: 1, note: 'backfilled=0',
+    http_status: '429×16', error: '详情失败'})}), true);
+  await h.fullClick();
+  assert.match(h.feedback.textContent, /backfilled=0\n失败状态码：429×16/);
+  assert.equal(h.error.textContent, '详情失败\n失败状态码：429×16');
+});

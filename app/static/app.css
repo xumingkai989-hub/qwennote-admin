@@ -870,3 +870,8 @@ body { padding-bottom: var(--safe-area-bottom); }
   .board-donut-layout { flex-direction: column; gap: 20px; }
   .board-legend-row { grid-template-columns: 10px minmax(0, 1fr) 5.5em 4ch; gap: 8px; padding-inline: 0; }
 }
+
+/* Incomplete upstream recordings wait in the bounded sync queue. */
+.backfill-badge { display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 12px; color: var(--warning-text); background: var(--warning-bg); }
+.backfill-pending { color: var(--warning-text); font-size: .8125rem; margin: .5rem 0 0; }
+#sync-feedback { white-space: pre-line; }

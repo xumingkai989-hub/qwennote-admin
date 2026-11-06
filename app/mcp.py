@@ -173,11 +173,16 @@ class McpMinutesSource(HttpMinutesSource):
             except httpx.HTTPError as exc:
                 # Detail retries belong to the recording, not each RPC. Avoid
                 # multiplying the sync worker's 3 attempts into 9 upstream calls.
-                if (isinstance(exc, httpx.HTTPStatusError)
-                        and (exc.response.status_code == 429 or 500 <= exc.response.status_code < 600)
-                        and method == 'tools/call' and params
+                if (method == 'tools/call' and params
                         and params.get('name') in {'get_minutes_ai_summary', 'get_minutes_transcription'}):
-                    raise MinutesRetryableError(exc.response.status_code) from None
+                    if isinstance(exc, httpx.TimeoutException):
+                        raise MinutesRetryableError(None) from None
+                    if isinstance(exc, httpx.HTTPStatusError):
+                        code = exc.response.status_code
+                        if code == 429 or 500 <= code < 600:
+                            raise MinutesRetryableError(code) from None
+                        raise MinutesSourceError('千问 MCP 请求失败，请检查授权与网络', status_code=code) from None
+                    raise MinutesSourceError('千问 MCP 请求失败，请检查授权与网络') from None
                 retryable = (not isinstance(exc, httpx.HTTPStatusError)
                              or exc.response.status_code in (408, 429)
                              or exc.response.status_code >= 500)
@@ -189,7 +194,8 @@ class McpMinutesSource(HttpMinutesSource):
                     self._sleep(2 ** retries)
                     retries += 1
                     continue
-                raise MinutesSourceError('千问 MCP 请求失败，请检查授权与网络') from None
+                raise MinutesSourceError('千问 MCP 请求失败，请检查授权与网络',
+                    status_code=exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else None) from None
             except (ValueError, TypeError):
                 raise MinutesSourceError('千问 MCP 响应格式无效') from None
 
@@ -209,13 +215,13 @@ class McpMinutesSource(HttpMinutesSource):
             # Transcription uses nextToken too.
             arguments = {**arguments, 'nextToken': cursor}
 
-    def _range(self, start, end, *, early_stop=False):
+    def _range(self, start, end, *, early_stop=False, complete_ids=None):
         try:
             self._initialize()
             records = []
             seen = set()
             previous_created = None
-            descending = early_stop
+            descending = early_stop and complete_ids is not None
             for page in self._pages('list_my_minutes', {
                     'startTime': int(start.timestamp()*1000), 'endTime': int(end.timestamp()*1000),
                     'pageSize': 100}):
@@ -228,9 +234,12 @@ class McpMinutesSource(HttpMinutesSource):
                 previous_created = times[-1] if times else previous_created
                 for item in items:
                     created = datetime.fromtimestamp(item['gmtCreate']/1000, SHANGHAI)
-                    if not start <= created <= end:
-                        continue
                     uuid = _text(item['uuid'])
+                    if descending and created < start and uuid in complete_ids:
+                        return records
+                    if created > end or (created < start and not (
+                            early_stop and complete_ids is not None and uuid not in complete_ids)):
+                        continue
                     duration = item.get('durationMillis')
                     if not uuid or (duration is not None and (type(duration) not in (int, float) or duration < 0)):
                         raise ValueError()
@@ -239,16 +248,14 @@ class McpMinutesSource(HttpMinutesSource):
                             None if duration is None else int((duration+30000)//60000),
                             _optional_text(item.get('mediaType'))))
                         seen.add(uuid)
-                if descending and any(created < start for created in times):
-                    break
             return records
-        except TokenRefreshError:
+        except MinutesSourceError:
             raise
-        except (MinutesSourceError, KeyError, ValueError, TypeError, OverflowError, OSError):
+        except (KeyError, ValueError, TypeError, OverflowError, OSError):
             raise MinutesSourceError('千问录音列表拉取失败，请检查授权、网络或数据格式') from None
 
-    def sync_range(self, start, end, *, early_stop=False):
-        return self._range(start, end, early_stop=early_stop)
+    def sync_range(self, start, end, *, early_stop=False, complete_ids=None):
+        return self._range(start, end, early_stop=early_stop, complete_ids=complete_ids)
 
     def sync_window(self, days: int):
         if type(days) is not int or days < 1:
@@ -281,7 +288,10 @@ class McpMinutesSource(HttpMinutesSource):
                 transcript, has_transcript, has_summary, meta.media_type if meta else None)
         except (TokenRefreshError, MinutesRetryableError):
             raise
-        except (MinutesSourceError, KeyError, ValueError, TypeError):
+        except MinutesSourceError as error:
+            raise MinutesSourceError('千问录音详情拉取失败，请检查授权、网络或数据格式',
+                                     status_code=error.status_code) from None
+        except (KeyError, ValueError, TypeError):
             raise MinutesSourceError('千问录音详情拉取失败，请检查授权、网络或数据格式') from None
 
     def get_media_url(self, recording_id):

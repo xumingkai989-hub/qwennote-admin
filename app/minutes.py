@@ -44,11 +44,14 @@ class MinutesSource(Protocol):
 
 class MinutesSourceError(Exception):
     """A safe, credential-free source error; provider bodies are never surfaced."""
+    def __init__(self, message: str, *, status_code: int | None = None):
+        super().__init__(message)
+        self.status_code = status_code
 
 
 class MinutesRetryableError(MinutesSourceError):
     """HTTP status preserved without provider bodies, URLs or credentials."""
-    def __init__(self, status_code: int):
+    def __init__(self, status_code: int | None):
         super().__init__('千问服务暂不可用，请重试')
         self.status_code = status_code
 
@@ -191,7 +194,10 @@ class HttpMinutesSource:
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code == 429 or 500 <= exc.response.status_code < 600:
                 raise MinutesRetryableError(exc.response.status_code) from None
-            raise MinutesSourceError('千问 MCP 请求失败，请检查凭据与网络配置') from None
+            raise MinutesSourceError('千问 MCP 请求失败，请检查凭据与网络配置',
+                                     status_code=exc.response.status_code) from None
+        except httpx.TimeoutException:
+            raise MinutesRetryableError(None) from None
         except (httpx.HTTPError, ValueError, TypeError):
             raise MinutesSourceError('千问 MCP 请求失败，请检查凭据与网络配置') from None
 
@@ -284,7 +290,9 @@ class HttpMinutesSource:
                     records.append(RecordingMeta(recording_id, _text(item['title']), created_at,
                                                  None if duration is None else int((duration + 30000) // 60000)))
             return records
-        except (MinutesSourceError, KeyError, ValueError, TypeError, OverflowError, OSError):
+        except MinutesSourceError:
+            raise
+        except (KeyError, ValueError, TypeError, OverflowError, OSError):
             self._initialized = False
             self._session_id = None
             raise MinutesSourceError('千问录音列表拉取失败，请检查凭据、网络或数据格式') from None
@@ -312,7 +320,10 @@ class HttpMinutesSource:
                                    has_transcript, has_summary, meta.media_type if meta else None)
         except MinutesRetryableError:
             raise
-        except (MinutesSourceError, KeyError, ValueError, TypeError):
+        except MinutesSourceError as error:
+            raise MinutesSourceError('千问录音详情拉取失败，请检查授权、网络或数据格式',
+                                     status_code=error.status_code) from None
+        except (KeyError, ValueError, TypeError):
             self._initialized = False
             self._session_id = None
             raise MinutesSourceError('千问录音详情拉取失败，请检查凭据、网络或数据格式') from None

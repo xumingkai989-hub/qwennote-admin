@@ -68,7 +68,8 @@ def test_identical_sync_only_changes_synced_at(sync_client, settings):
     sync_client.post('/sync')
     before = rows(settings, 'recordings')
     result = sync_client.post('/sync').json()
-    assert (result['fetched'], result['inserted'], result['updated']) == (0, 0, 0)
+    assert (result['fetched'], result['inserted'], result['updated']) == (1, 0, 0)
+    assert result['skipped'] == 1  # Incomplete row is still in its initial backoff.
     after = rows(settings, 'recordings')
     for old, new in zip(before, after):
         assert new['synced_at'] >= old['synced_at']

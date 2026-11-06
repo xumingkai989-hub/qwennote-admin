@@ -4,7 +4,7 @@ import json
 import sqlite3
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Iterator, Protocol
 
@@ -199,6 +199,14 @@ class SQLiteStore:
                     skipped INTEGER NOT NULL DEFAULT 0,
                     error TEXT
                 );
+                CREATE TABLE IF NOT EXISTS backfill_state (
+                    recording_id TEXT PRIMARY KEY,
+                    attempts INTEGER NOT NULL DEFAULT 0,
+                    last_attempt_at TEXT,
+                    next_attempt_at TEXT,
+                    last_status TEXT,
+                    last_http_status INTEGER
+                );
                 CREATE TABLE IF NOT EXISTS api_keys (
                     id INTEGER PRIMARY KEY,
                     name TEXT NOT NULL,
@@ -330,6 +338,9 @@ class SQLiteStore:
                 conn.execute('ALTER TABLE sync_runs ADD COLUMN duration_ms INTEGER NOT NULL DEFAULT 0')
             if 'detail_serialized' not in {row['name'] for row in conn.execute('PRAGMA table_info(sync_runs)')}:
                 conn.execute('ALTER TABLE sync_runs ADD COLUMN detail_serialized INTEGER NOT NULL DEFAULT 0')
+            for column in ('note', 'http_status'):
+                if column not in {row['name'] for row in conn.execute('PRAGMA table_info(sync_runs)')}:
+                    conn.execute(f'ALTER TABLE sync_runs ADD COLUMN {column} TEXT')
             from app.enrichment import migrate as migrate_enrichment
             migrate_enrichment(conn)
             conn.execute('CREATE INDEX IF NOT EXISTS recordings_created_at_idx '
@@ -765,9 +776,49 @@ class SQLiteStore:
     def finish_sync(self, run: SyncRun) -> None:
         with self._connect() as conn:
             conn.execute(
-                "UPDATE sync_runs SET finished_at = ?, status = ?, fetched = ?, inserted = ?, updated = ?, skipped = ?, error = ?, refreshed_token = ?, mode = ?, duration_ms = ?, detail_serialized = ?, enrichment_run_id = ? WHERE id = ?",
-                (run.finished_at, run.status, run.fetched, run.inserted, run.updated, run.skipped, run.error, run.refreshed_token, run.mode, run.duration_ms, run.detail_serialized, run.enrichment_run_id, run.id),
+                "UPDATE sync_runs SET finished_at = ?, status = ?, fetched = ?, inserted = ?, updated = ?, skipped = ?, error = ?, refreshed_token = ?, mode = ?, duration_ms = ?, detail_serialized = ?, enrichment_run_id = ?, note = ?, http_status = ? WHERE id = ?",
+                (run.finished_at, run.status, run.fetched, run.inserted, run.updated, run.skipped, run.error, run.refreshed_token, run.mode, run.duration_ms, run.detail_serialized, run.enrichment_run_id, run.note, run.http_status, run.id),
             )
+
+    def complete_recording_ids(self) -> set[str]:
+        with self._connect() as conn:
+            return {row[0] for row in conn.execute(
+                'SELECT recording_id FROM recordings WHERE has_transcript=1 AND has_summary=1')}
+
+    def backfill_candidates(self, now: datetime, limit: int) -> list[RecordingMeta]:
+        with self._connect() as conn:
+            rows = conn.execute('''SELECT r.recording_id, r.title, r.created_at, r.duration_min, r.media_type
+                FROM recordings r LEFT JOIN backfill_state b ON b.recording_id=r.recording_id
+                WHERE (r.has_transcript=0 OR r.has_summary=0)
+                  AND (b.next_attempt_at IS NULL OR julianday(b.next_attempt_at)<=julianday(?))
+                ORDER BY r.created_at DESC, r.recording_id DESC LIMIT ?''',
+                (now.isoformat(), limit)).fetchall()
+            return [RecordingMeta(r['recording_id'], r['title'], datetime.fromisoformat(r['created_at']),
+                                  r['duration_min'], r['media_type']) for r in rows]
+
+    def finish_backfill(self, recording_id: str, now: datetime, *, status: str,
+                        http_status: int | None = None) -> None:
+        if status not in {'ok', 'rate_limited', 'upstream_error', 'bad_response'}:
+            raise ValueError('Invalid backfill status')
+        if http_status is not None and (type(http_status) is not int or not 100 <= http_status <= 599):
+            raise ValueError('Invalid HTTP status')
+        with self._connect() as conn:
+            conn.execute('BEGIN IMMEDIATE')
+            if status == 'ok':
+                conn.execute('DELETE FROM backfill_state WHERE recording_id=?', (recording_id,))
+                return
+            row = conn.execute('SELECT attempts FROM backfill_state WHERE recording_id=?',
+                               (recording_id,)).fetchone()
+            attempts = (row[0] if row else 0) + 1
+            delay = (10, 60, 360, 1440)[min(attempts, 4) - 1]
+            conn.execute('''INSERT INTO backfill_state
+                (recording_id, attempts, last_attempt_at, next_attempt_at, last_status, last_http_status)
+                VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(recording_id) DO UPDATE SET
+                attempts=excluded.attempts, last_attempt_at=excluded.last_attempt_at,
+                next_attempt_at=excluded.next_attempt_at, last_status=excluded.last_status,
+                last_http_status=excluded.last_http_status''',
+                (recording_id, attempts, now.isoformat(), (now + timedelta(minutes=delay)).isoformat(),
+                 status, http_status))
 
     def latest_sync(self) -> SyncRun | None:
         with self._connect() as conn:

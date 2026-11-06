@@ -289,7 +289,8 @@ def test_expiry_margin_and_file_lock_across_managers(setup_source, age):
 
 
 @pytest.mark.parametrize('failure', [404, 403, 'timeout', 503])
-def test_single_detail_failure_does_not_stop_other_records(setup_source, store, failure):
+def test_single_detail_failure_does_not_stop_other_records(setup_source, store, failure, monkeypatch):
+    monkeypatch.setattr('app.sync.time.sleep', lambda _: None)
     source, server, _ = setup_source
     original = server.__call__
     def handler(request):
