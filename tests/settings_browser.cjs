@@ -19,14 +19,16 @@ test('settings save, validation, CSRF isolation and responsive screenshots', asy
       page.on('pageerror', error => errors.push(error.message));
       await page.route('**/*', route => new URL(route.request().url()).origin === base ? route.continue() : route.abort());
       await page.goto(base + '/settings');
-      assert.equal(await page.locator('legend').allTextContents().then(x=>x.join('/')), '同步/同步策略/标签/数据保留');
-      for (const key of ['sync_enabled','tag_enabled']) await page.locator('#' + key).check();
-      for (const [key,value] of Object.entries({sync_time:'03:00', sync_interval_hours:'0',backfill_days:'90',tag_time:'05:00',retention_days:'0'})) {
+      assert.equal(await page.locator('legend').allTextContents().then(x=>x.join('/')), '同步/同步策略/标签/看板/数据保留');
+      for (const key of ['sync_enabled','tag_enabled','board_enabled']) await page.locator('#' + key).check();
+      for (const [key,value] of Object.entries({sync_time:'03:00', sync_interval_hours:'0',backfill_days:'90',tag_time:'05:00',retention_days:'0',board_time:'22:00'})) {
         await page.locator('#' + key).fill(value);
       }
       await Promise.all([page.waitForURL('**/settings?saved=1'),page.getByRole('button',{name:'保存设置'}).click()]);
-      assert.match(await page.locator('.settings-status').innerText(), /已保存 · 下次同步 \d{2}-\d{2} \d{2}:\d{2}/);
+      assert.match(await page.locator('.settings-status').first().innerText(), /已保存 · 下次同步 \d{2}-\d{2} \d{2}:\d{2}/);
       assert.equal(await page.locator('#sync_time').inputValue(), '03:00');
+      assert.equal(await page.locator('#board_time').inputValue(), '22:00');
+      assert.match(await page.locator('.settings-status').nth(1).innerText(), /下次生成看板/);
       assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth > innerWidth),false);
       for (const input of await page.locator('.settings-row input').all()) {
         assert.ok(await input.getAttribute('aria-describedby'));
@@ -53,7 +55,7 @@ test('settings save, validation, CSRF isolation and responsive screenshots', asy
       await page.locator('#sync_enabled').uncheck();
       await Promise.all([page.waitForResponse(r=>r.request().method()==='POST' && r.url()===base+'/settings'),page.getByRole('button',{name:'保存设置'}).click()]);
       await page.waitForLoadState('networkidle');
-      assert.match(await page.locator('.settings-status').innerText(),/自动同步已关闭/);
+      assert.match(await page.locator('.settings-status').first().innerText(),/自动同步已关闭/);
       assert.deepEqual(errors,[]);
       await page.close();
     }

@@ -17,15 +17,18 @@ class AutomationSettings:
     full_sync_weekday: int = 6
     full_sync_time: str = '03:30'
 
+    board_enabled: bool = True
+    board_time: str = '22:00'
+
     def __post_init__(self):
         if self.sync_mode_default not in ('quick', 'full'):
             raise ValueError('每日模式须为 quick 或 full。')
         if type(self.full_sync_weekday) is not int or not 0 <= self.full_sync_weekday <= 6:
             raise ValueError('星期须为 0–6 的整数。')
-        for name in ('sync_enabled', 'tag_enabled', 'full_sync_enabled'):
+        for name in ('sync_enabled', 'tag_enabled', 'full_sync_enabled', 'board_enabled'):
             if type(getattr(self, name)) is not bool:
                 raise ValueError('启用状态必须为布尔值。')
-        for name in ('sync_time', 'tag_time', 'full_sync_time'):
+        for name in ('sync_time', 'tag_time', 'full_sync_time', 'board_time'):
             value = getattr(self, name)
             if not isinstance(value, str) or not re.fullmatch(r'(?:[01][0-9]|2[0-3]):[0-5][0-9]', value):
                 raise ValueError('时间须为 HH:MM（00:00–23:59）。')
@@ -48,10 +51,12 @@ def parse_settings_form(fields):
             raise ValueError('天数和间隔须为非负整数；补拉天数至少为 1。')
         return int(text)
 
-    for name in ('sync_enabled', 'tag_enabled', 'full_sync_enabled'):
+    for name in ('sync_enabled', 'tag_enabled', 'full_sync_enabled', 'board_enabled'):
         if name in fields and fields[name][0] != 'true':
             raise ValueError('启用状态无效。')
     return AutomationSettings(
+        board_enabled='board_enabled' in fields,
+        board_time=fields.get('board_time', ['22:00'])[0],
         sync_enabled='sync_enabled' in fields,
         sync_time=fields.get('sync_time', [''])[0],
         sync_interval_hours=integer('sync_interval_hours'),

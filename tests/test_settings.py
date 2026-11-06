@@ -27,7 +27,8 @@ def settings_form(client):
     return dict(csrf_token=token, sync_enabled='true', sync_time='03:00',
                 sync_interval_hours='0', backfill_days='90', tag_enabled='true',
                 tag_time='05:00', retention_days='0', sync_mode_default='quick',
-                full_sync_enabled='true', full_sync_weekday='6', full_sync_time='03:30')
+                full_sync_enabled='true', full_sync_weekday='6', full_sync_time='03:30',
+                board_enabled='true', board_time='22:00')
 
 
 def test_defaults_and_roundtrip_survive_restart(client, store):
@@ -38,7 +39,7 @@ def test_defaults_and_roundtrip_survive_restart(client, store):
     restarted.migrate()
     assert restarted.get_settings() == values
     with restarted._connect() as conn:
-        assert conn.execute('SELECT count(*) FROM settings').fetchone()[0] == 11
+        assert conn.execute('SELECT count(*) FROM settings').fetchone()[0] == 13
 
 
 @pytest.mark.parametrize('field,value', [
@@ -126,20 +127,20 @@ def test_settings_nav_and_descriptions(client):
     assert 'href="/settings" aria-label="设置中心"' in page
     for name in AutomationSettings().values():
         assert f'id="{name}"' in page
-    assert page.count('aria-describedby=') == 11
+    assert page.count('aria-describedby=') == 13
     assert all(f'<legend>{group}</legend>' in page for group in ('同步', '同步策略', '标签', '数据保留'))
 
 
 def actions():
     calls = []
     return calls, {name + '_job': lambda store, prefs, name=name: calls.append((name, prefs))
-                   for name in ('sync', 'full_sync', 'tag', 'retention')}
+                   for name in ('sync', 'full_sync', 'tag', 'retention', 'board')}
 
 
 @pytest.mark.parametrize('time,expected', [
     ('2026-10-30T02:50', []), ('2026-10-30T03:00', ['sync']),
     ('2026-10-30T03:10', ['sync']), ('2026-10-30T04:59', ['sync']),
-    ('2026-10-30T05:00', ['sync', 'tag']), ('2026-10-30T23:59', ['sync', 'tag']),
+    ('2026-10-30T05:00', ['sync', 'tag']), ('2026-10-30T23:59', ['sync', 'tag', 'board']),
 ])
 def test_tick_due_and_not_due(client, store, time, expected):
     calls, jobs = actions()
@@ -153,17 +154,17 @@ def test_daily_idempotence_restart_and_next_day(client, store):
     assert tick(store, now=at('2026-10-30T05:00'), **jobs)['executed'] == ['sync', 'tag']
     restarted = SQLiteStore(store.db_path)
     assert tick(restarted, now=at('2026-10-30T05:10'), **jobs)['executed'] == []
-    assert tick(restarted, now=at('2026-10-30T23:50'), **jobs)['executed'] == []
+    assert tick(restarted, now=at('2026-10-30T23:50'), **jobs)['executed'] == ['board']
     assert tick(restarted, now=at('2026-10-31T02:50'), **jobs)['executed'] == []
     assert tick(restarted, now=at('2026-10-31T03:00'), **jobs)['executed'] == ['sync']
     assert tick(restarted, now=at('2026-10-31T05:00'), **jobs)['executed'] == ['tag']
-    assert len(calls) == 4
+    assert len(calls) == 5
 
 
 @pytest.mark.parametrize('interval', [1, 2, 7, 25])
 def test_interval_across_days_and_same_hour(client, store, interval):
     from datetime import timedelta
-    store.save_settings(replace(AutomationSettings(), sync_interval_hours=interval, tag_enabled=False))
+    store.save_settings(replace(AutomationSettings(), sync_interval_hours=interval, tag_enabled=False, board_enabled=False))
     calls, jobs = actions()
     start = at('2026-10-30T23:10')
     assert tick(store, now=start, **jobs)['executed'] == ['sync']

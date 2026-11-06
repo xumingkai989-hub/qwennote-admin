@@ -2,7 +2,7 @@
 {% block main_attributes %} class="board-page"{% endblock %}
 {% macro generate_button(scope, label) %}
 {% if navigation_admin %}
-<form action="/board/generate" method="post" class="board-generate">
+<form action="{{ '/board/regenerate' if scope == 'both' else '/board/generate' }}" method="post" class="board-generate">
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
   <input type="hidden" name="day" value="{{ day.isoformat() }}">
   <input type="hidden" name="scope" value="{{ scope }}">
@@ -22,6 +22,9 @@
 </div>
 {% endmacro %}
 {% block content %}
+{% if (day_report and day_report.error) or (week_report and week_report.error) %}
+<p class="board-note" role="status">数字已更新，部分分析未生成，可稍后重新生成。</p>
+{% endif %}
 <header class="list-heading board-heading"><h1>看板</h1>{{ generate_button('both', '重新生成') }}</header>
 <div class="board-cards" aria-label="会议统计">
   <section class="board-card" data-stat="total"><h2>总会议</h2><p>{{ duration(totals.minutes) }}</p></section>

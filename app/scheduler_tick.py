@@ -37,6 +37,8 @@ def scheduled_time(job, settings, now, last):
         return last + timedelta(minutes=10) if last else now
     if job == 'sync' and not settings.sync_enabled:
         return None
+    if job == 'board' and not settings.board_enabled:
+        return None
     if job == 'tag' and not settings.tag_enabled:
         return None
     if job == 'retention' and not settings.retention_days:
@@ -58,7 +60,8 @@ def scheduled_time(job, settings, now, last):
         return (last.replace(minute=0, second=0, microsecond=0)
                 + timedelta(hours=settings.sync_interval_hours) if last else
                 now.replace(minute=0, second=0, microsecond=0))
-    text = {'sync': settings.sync_time, 'tag': settings.tag_time, 'retention': '00:00'}[job]
+    text = {'sync': settings.sync_time, 'tag': settings.tag_time, 'retention': '00:00',
+            'board': settings.board_time}[job]
     hour, minute = map(int, text.split(':'))
     due = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
     if last and last.date() >= now.date():
@@ -70,7 +73,7 @@ def next_runs(store, settings, now):
     now = local_time(now)
     state = read_state(store)
     result = {}
-    for job in ('sync', 'full_sync', 'tag', 'retention', 'enrichment'):
+    for job in ('sync', 'full_sync', 'tag', 'retention', 'enrichment', 'board'):
         due = scheduled_time(job, settings, now, state.get(job))
         if due is not None:
             due = max(due, now)
@@ -138,7 +141,36 @@ def _tag(store, preferences):
         raise RuntimeError('tag_maintenance_failed')
 
 
-def tick(store, *, now=None, sync_job=None, full_sync_job=None, tag_job=None, retention_job=None, enrichment_job=None):
+def board_is_current(store, now):
+    """A successful same-day snapshot newer than the last sync needs no model call."""
+    from app.board import load_report
+    report = load_report(store, now.date())
+    if not report or report['error']:
+        return False
+    try:
+        generated = local_time(datetime.fromisoformat(report['generated_at']))
+        if generated.date() != now.date() or generated > now:
+            return False
+        sync = store.latest_sync()
+        if sync is None:
+            return True
+        if not sync.finished_at:
+            return False
+        finished = local_time(datetime.fromisoformat(sync.finished_at))
+        return generated > finished
+    except (ValueError, TypeError):
+        return False
+
+
+def _board(store, day):
+    from app.board_analysis import generate
+    # generate takes the inclusive end date and stores weeks under Monday's key.
+    reports = [generate(store, scope=scope, day=day) for scope in ('day', 'week')]
+    if any(report['error'] for report in reports):
+        raise RuntimeError('board_analysis_failed')
+
+
+def tick(store, *, now=None, sync_job=None, full_sync_job=None, tag_job=None, retention_job=None, enrichment_job=None, board_job=None):
     now = local_time(now if now is not None else datetime.now(SHANGHAI))
     result = {'executed': [], 'failed': [], 'skipped': []}
     try:
@@ -151,6 +183,7 @@ def tick(store, *, now=None, sync_job=None, full_sync_job=None, tag_job=None, re
                 ('full_sync', full_sync_job or sync_job or _sync), ('tag', tag_job or _tag),
                 ('retention', retention_job or
                  (lambda store, settings: retain_recordings(store, settings.retention_days, now))),
+                ('board', board_job or (lambda store, settings: _board(store, now.date()))),
                 ('enrichment', enrichment_job or (lambda store, settings: process_pending(store))),
             ):
                 if job == 'enrichment' and not has_work(store):
@@ -164,6 +197,9 @@ def tick(store, *, now=None, sync_job=None, full_sync_job=None, tag_job=None, re
                     conn.execute('INSERT INTO scheduler_state (job, last_run_at) VALUES (?, ?) '
                                  'ON CONFLICT(job) DO UPDATE SET last_run_at=excluded.last_run_at',
                                  (job, now.isoformat()))
+                if job == 'board' and board_is_current(store, now):
+                    result['skipped'].append(job)
+                    continue
                 try:
                     callback(store, replace(preferences, sync_mode_default='full')
                              if job == 'full_sync' else preferences)

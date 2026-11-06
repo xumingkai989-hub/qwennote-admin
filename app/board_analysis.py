@@ -112,7 +112,11 @@ def build_report(store, *, scope, day, model=None, analyze=True) -> dict:
     if not analyze:
         error = 'analysis_skipped'
     elif items:
-        analysis, model_name, error = _analyze(store, build_input(items, scope=scope, day=day), model)
+        try:
+            analysis, model_name, error = _analyze(store, build_input(items, scope=scope, day=day), model)
+        except Exception:
+            # Provider/SDK failures must not discard stats or expose credentials.
+            error = 'analysis_failed'
     return {'day': start.isoformat(), 'scope': scope, 'stats': stats, 'analysis': analysis,
             'model': model_name, 'generated_at': datetime.now(SHANGHAI).isoformat(), 'error': error}
 

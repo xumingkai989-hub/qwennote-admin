@@ -82,6 +82,7 @@ def install_board(app, *, settings, templates, sessions, authorize, valid_csrf,
                                 secure=settings.secure_cookies, samesite='lax', path='/board')
         return response
 
+    @app.post('/board/regenerate')
     @app.post('/board/generate')
     async def generate(request: Request):
         if access(request) is None:
@@ -93,13 +94,14 @@ def install_board(app, *, settings, templates, sessions, authorize, valid_csrf,
         if not isinstance(fields, dict):
             return fields
         try:
-            day = parse_day(fields.get('day', [''])[0])
+            day = parse_day(fields.get('day', [datetime.now(SHANGHAI).date().isoformat()])[0])
         except ValueError:
             return error_page(request, 400, '日期无效', '日期格式须为 YYYY-MM-DD。')
-        scope = fields.get('scope', ['both'])[0]
+        regenerate = request.url.path == '/board/regenerate'
+        scope = 'both' if regenerate else fields.get('scope', ['both'])[0]
         if scope not in ('day', 'week', 'both'):
             return error_page(request, 400, '范围无效', '请选择日报或周报。')
         for report_scope in (('day', 'week') if scope == 'both' else (scope,)):
             await run_in_threadpool(board_analysis.generate, app.state.store, scope=report_scope, day=day)
-        return RedirectResponse('/board?' + urlencode({'day': day.isoformat()}), status_code=303,
+        return RedirectResponse('/board?' + urlencode({'day': day.isoformat()}), status_code=302 if regenerate else 303,
                                 headers={'Cache-Control': 'no-store'})
