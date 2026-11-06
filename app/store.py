@@ -1,6 +1,7 @@
 import fcntl
 import hmac
 import json
+import logging
 import sqlite3
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -11,6 +12,19 @@ from typing import Iterator, Protocol
 from app.feishu import FeishuUser
 from app.minutes import RecordingDetail, RecordingMeta, SHANGHAI
 from app.sync import SyncInProgress, SyncRun, SyncStore
+
+
+logger = logging.getLogger(__name__)
+
+
+def fts_available(conn: sqlite3.Connection) -> bool:
+    """SQLite 是否支持 fts5 + trigram。"""
+    try:
+        conn.execute("CREATE VIRTUAL TABLE temp.__fts_probe USING fts5(x, tokenize='trigram')")
+        conn.execute('DROP TABLE temp.__fts_probe')
+        return True
+    except Exception:
+        return False
 
 
 @dataclass(frozen=True)
@@ -94,6 +108,8 @@ class Hotword:
 
 
 class Store(SyncStore, Protocol):
+    fts_available: bool
+
     def hotword_presentation(self, recording_id: str) -> dict: ...
 
     def hotword_decisions(self, recording_id: str) -> list[dict]: ...
@@ -157,6 +173,7 @@ class Store(SyncStore, Protocol):
 class SQLiteStore:
     def __init__(self, db_path: Path):
         self.db_path = db_path
+        self.fts_available = False
 
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
@@ -173,6 +190,13 @@ class SQLiteStore:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         with self._connect() as conn:
             conn.execute("PRAGMA journal_mode = WAL")
+            self.fts_available = fts_available(conn)
+            if not self.fts_available:
+                # Remove stale writers before any migration can update recordings.
+                # An unsupported virtual table must remain untouched.
+                for name in ('recordings_fts_insert', 'recordings_fts_delete', 'recordings_fts_update'):
+                    conn.execute(f'DROP TRIGGER IF EXISTS {name}')
+                logger.info('搜索降级为 LIKE 模式（SQLite 不支持 trigram）')
             conn.executescript("""
                 CREATE TABLE IF NOT EXISTS users (
                     subject TEXT PRIMARY KEY NOT NULL,
@@ -375,32 +399,38 @@ class SQLiteStore:
             if new_column:
                 conn.execute("ALTER TABLE recordings ADD COLUMN search_text TEXT NOT NULL DEFAULT ''")
                 self._backfill_search_text(conn)
-            conn.execute("""
-                CREATE VIRTUAL TABLE IF NOT EXISTS recordings_fts USING fts5(
-                    search_text, content='recordings', content_rowid='rowid', tokenize='trigram'
-                )
-            """)
-            conn.execute("""
-                CREATE TRIGGER IF NOT EXISTS recordings_fts_insert AFTER INSERT ON recordings BEGIN
-                    INSERT INTO recordings_fts(rowid, search_text) VALUES (new.rowid, new.search_text);
-                END
-            """)
-            conn.execute("""
-                CREATE TRIGGER IF NOT EXISTS recordings_fts_delete AFTER DELETE ON recordings BEGIN
-                    INSERT INTO recordings_fts(recordings_fts, rowid, search_text)
-                    VALUES ('delete', old.rowid, old.search_text);
-                END
-            """)
-            conn.execute("""
-                CREATE TRIGGER IF NOT EXISTS recordings_fts_update AFTER UPDATE OF search_text ON recordings
-                WHEN old.search_text IS NOT new.search_text BEGIN
-                    INSERT INTO recordings_fts(recordings_fts, rowid, search_text)
-                    VALUES ('delete', old.rowid, old.search_text);
-                    INSERT INTO recordings_fts(rowid, search_text) VALUES (new.rowid, new.search_text);
-                END
-            """)
-            if new_column or new_index:
-                conn.execute("INSERT INTO recordings_fts(recordings_fts) VALUES ('rebuild')")
+            if self.fts_available:
+                # Rebuild after a LIKE-only period, when the retained index is stale.
+                missing_triggers = conn.execute(
+                    "SELECT count(*) FROM sqlite_master WHERE type='trigger' AND name IN "
+                    "('recordings_fts_insert', 'recordings_fts_delete', 'recordings_fts_update')",
+                ).fetchone()[0] != 3
+                conn.execute("""
+                    CREATE VIRTUAL TABLE IF NOT EXISTS recordings_fts USING fts5(
+                        search_text, content='recordings', content_rowid='rowid', tokenize='trigram'
+                    )
+                """)
+                conn.execute("""
+                    CREATE TRIGGER IF NOT EXISTS recordings_fts_insert AFTER INSERT ON recordings BEGIN
+                        INSERT INTO recordings_fts(rowid, search_text) VALUES (new.rowid, new.search_text);
+                    END
+                """)
+                conn.execute("""
+                    CREATE TRIGGER IF NOT EXISTS recordings_fts_delete AFTER DELETE ON recordings BEGIN
+                        INSERT INTO recordings_fts(recordings_fts, rowid, search_text)
+                        VALUES ('delete', old.rowid, old.search_text);
+                    END
+                """)
+                conn.execute("""
+                    CREATE TRIGGER IF NOT EXISTS recordings_fts_update AFTER UPDATE OF search_text ON recordings
+                    WHEN old.search_text IS NOT new.search_text BEGIN
+                        INSERT INTO recordings_fts(recordings_fts, rowid, search_text)
+                        VALUES ('delete', old.rowid, old.search_text);
+                        INSERT INTO recordings_fts(rowid, search_text) VALUES (new.rowid, new.search_text);
+                    END
+                """)
+                if new_column or new_index or missing_triggers:
+                    conn.execute("INSERT INTO recordings_fts(recordings_fts) VALUES ('rebuild')")
 
     @staticmethod
     def _backfill_search_text(conn: sqlite3.Connection) -> None:
@@ -619,10 +649,19 @@ class SQLiteStore:
         with self._connect() as conn:
             conn.execute('BEGIN IMMEDIATE')
             self._backfill_search_text(conn)
-            conn.execute("INSERT INTO recordings_fts(recordings_fts) VALUES ('rebuild')")
+            if self.fts_available:
+                conn.execute("INSERT INTO recordings_fts(recordings_fts) VALUES ('rebuild')")
 
-    @staticmethod
-    def _search_predicate(query: str) -> tuple[str, list[str]]:
+    def _search_predicate(self, query: str) -> tuple[str, list[str]]:
+        if not self.fts_available:
+            terms = query.split() or [query]
+            where = " AND ".join(
+                "(search_text LIKE ? ESCAPE '\\' OR title LIKE ? ESCAPE '\\')" for _ in terms)
+            params = []
+            for term in terms:
+                pattern = '%' + term.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_') + '%'
+                params.extend((pattern, pattern))
+            return where, params
         if len(query) >= 3:
             # Quoting the entire phrase makes operators and quotes literal.
             where = 'rowid IN (SELECT rowid FROM recordings_fts WHERE recordings_fts MATCH ?)'

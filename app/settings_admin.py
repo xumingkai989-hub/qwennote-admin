@@ -26,6 +26,7 @@ def install_settings(app, *, settings, templates, authorize, valid_csrf, csrf,
             'saved': request.query_params.get('saved') == '1' and not error,
             'next_runs': next_runs(app.state.store, preferences, datetime.now(SHANGHAI)),
             'sync_run': app.state.store.latest_sync(),
+            'search_mode': 'FTS5 trigram' if app.state.store.fts_available else 'LIKE 降级',
         }, status_code=status, headers={'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer'})
         response.set_cookie(cookie, token, max_age=SESSION_MAX_AGE, httponly=True,
                             secure=settings.secure_cookies, samesite='lax', path='/settings')

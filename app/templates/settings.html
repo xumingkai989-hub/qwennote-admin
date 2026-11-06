@@ -4,6 +4,7 @@
 <div class="list-heading">{% include "mobile_back.html" %}<h1>设置中心</h1></div>
 <p class="settings-status" role="status">{% if saved %}<strong>已保存</strong> · {% endif %}{% if next_runs.sync %}下次同步 {{ next_runs.sync.strftime('%m-%d %H:%M') }}{% else %}自动同步已关闭{% endif %} · {% if next_runs.full_sync %}下次全盘同步 {{ next_runs.full_sync.strftime('%m-%d %H:%M') }}{% else %}每周全盘已关闭{% endif %}</p>
 <p class="settings-status" role="status">{% if next_runs.board %}下次生成看板 {{ next_runs.board.strftime('%m-%d %H:%M') }}{% else %}自动生成看板已关闭{% endif %}</p>
+<p class="settings-status">当前搜索模式 {{ search_mode }}</p>
 {% include "sync_result.html" %}
 {% if error %}<p class="settings-error" role="alert">{{ error }}</p>{% endif %}
 <form method="post" action="/settings" class="settings-form">

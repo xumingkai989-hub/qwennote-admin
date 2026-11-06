@@ -1,4 +1,6 @@
 import logging
+import re
+import sqlite3
 import time
 
 from collections import Counter
@@ -17,6 +19,15 @@ from app.minutes import MinutesRetryableError, MinutesSource, RecordingDetail, R
 OVERLAP = timedelta(minutes=10)
 BACKFILL_LIMIT = 3
 DETAIL_WORKERS = 2
+
+
+def _storage_error(error: Exception) -> str:
+    if isinstance(error, sqlite3.Error):
+        diagnostic = re.search(r'no such (?:tokenizer(?::\s*trigram\b)?|module:\s*fts5\b)',
+                               str(error), re.IGNORECASE)
+        if diagnostic:
+            return f'校验或入库失败（{diagnostic.group()}）'
+    return '校验或入库失败，请重试'
 
 
 class SyncInProgress(Exception):
@@ -138,8 +149,8 @@ def run_sync(source: MinutesSource, store: SyncStore, *, backfill_days: int = 90
             fetched += 1
             try:
                 previous = store.get_recording(meta.recording_id)
-            except Exception:
-                errors.append(f'录音 {meta.recording_id}：校验或入库失败，请重试')
+            except Exception as error:
+                errors.append(f'录音 {meta.recording_id}：{_storage_error(error)}')
                 continue
             complete = previous is not None and previous.has_transcript
             if ((mode == 'quick' and complete) or
@@ -183,8 +194,8 @@ def run_sync(source: MinutesSource, store: SyncStore, *, backfill_days: int = 90
                     previous = previous_by_id[meta.recording_id]
                     try:
                         outcome = store.upsert_recording(meta, detail, datetime.now(SHANGHAI).isoformat())
-                    except Exception:
-                        errors.append(f'录音 {meta.recording_id}：校验或入库失败，请重试')
+                    except Exception as error:
+                        errors.append(f'录音 {meta.recording_id}：{_storage_error(error)}')
                         if meta.recording_id in backfill_ids:
                             store.finish_backfill(meta.recording_id, datetime.now(SHANGHAI), status='bad_response')
                         continue
