@@ -272,7 +272,7 @@ def test_tag_switch_stops_sync_auto_tags(client, store, monkeypatch):
     now = datetime.now(SHANGHAI)
     source = FakeMinutesSource()
     source.recordings = [RecordingMeta('sync-new', '标题', now, 1)]
-    source.details = {'sync-new': RecordingDetail('sync-new', '内容', '', True, False)}
+    source.details = {'sync-new': RecordingDetail('sync-new', '内容', '', False, True)}
     calls = []
     monkeypatch.setattr('app.tag.run_tags', lambda *a, **k: calls.append(k))
     store.save_settings(replace(AutomationSettings(), tag_enabled=False))

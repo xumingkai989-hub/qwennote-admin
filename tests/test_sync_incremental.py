@@ -109,9 +109,10 @@ def test_incomplete_old_record_is_refetched_and_updated(incremental, missing):
     with store._connect() as conn:
         conn.execute('UPDATE backfill_state SET next_attempt_at=NULL')
     result = run_sync(source, store)
-    assert source.detail_calls == ['late']
-    assert (result.fetched, result.inserted, result.updated, result.skipped) == (2, 0, 1, 1)
-    assert getattr(store.get_recording('late'), missing)
+    expected = missing == 'has_transcript'
+    assert source.detail_calls == (['late'] if expected else [])
+    assert (result.fetched, result.inserted, result.updated, result.skipped) == (2, 0, int(expected), 2-int(expected))
+    assert getattr(store.get_recording('late'), missing) == expected
 
 
 @pytest.mark.parametrize('offset,expected_calls', [

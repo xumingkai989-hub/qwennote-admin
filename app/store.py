@@ -33,6 +33,13 @@ class RecordingCard:
     has_transcript: bool
     has_summary: bool
     tags: tuple[str, ...] = field(default=(), kw_only=True)
+    backfill_status: str | None = field(default=None, kw_only=True)
+
+    @property
+    def backfill_label(self) -> str | None:
+        if self.has_transcript:
+            return None
+        return '无转写内容' if self.backfill_status == 'no_upstream_content' else '转写生成中'
 
     @property
     def status(self) -> tuple[str, str]:
@@ -341,6 +348,17 @@ class SQLiteStore:
             for column in ('note', 'http_status'):
                 if column not in {row['name'] for row in conn.execute('PRAGMA table_info(sync_runs)')}:
                     conn.execute(f'ALTER TABLE sync_runs ADD COLUMN {column} TEXT')
+            if not conn.in_transaction:
+                conn.execute('BEGIN IMMEDIATE')
+            # Column presence is the one-time T7 migration marker. Never reset
+            # genuine first failures again when another worker starts.
+            if 'pending_checks' not in {row['name'] for row in conn.execute('PRAGMA table_info(backfill_state)')}:
+                conn.execute('ALTER TABLE backfill_state ADD COLUMN pending_checks INTEGER NOT NULL DEFAULT 0')
+                conn.execute("""UPDATE backfill_state SET attempts=0, last_status='pending_upstream',
+                    next_attempt_at=NULL, last_http_status=NULL
+                    WHERE last_status='bad_response' AND attempts=1""")
+                conn.execute('DELETE FROM backfill_state WHERE recording_id IN '
+                             '(SELECT recording_id FROM recordings WHERE has_transcript=1)')
             from app.enrichment import migrate as migrate_enrichment
             migrate_enrichment(conn)
             conn.execute('CREATE INDEX IF NOT EXISTS recordings_created_at_idx '
@@ -636,7 +654,9 @@ class SQLiteStore:
             page = min(max(1, page), pages)
             rows = conn.execute(
                 'SELECT recording_id, title, created_at, duration_min, has_transcript, has_summary, '
-                f'summary_md, transcript_md FROM recordings WHERE {where} '
+                'summary_md, transcript_md, (SELECT last_status FROM backfill_state b '
+                'WHERE b.recording_id=recordings.recording_id) AS backfill_status '
+                f'FROM recordings WHERE {where} '
                 'ORDER BY created_at DESC, recording_id DESC LIMIT 20 OFFSET ?',
                 (*params, (page - 1) * 20),
             ).fetchall()
@@ -645,7 +665,7 @@ class SQLiteStore:
             StoredRecording(row['recording_id'], row['title'], datetime.fromisoformat(row['created_at']),
                             row['duration_min'], bool(row['has_transcript']), bool(row['has_summary']),
                             row['summary_md'] or '', row['transcript_md'] or '',
-                            tags=tags.get(row['recording_id'], ()))
+                            tags=tags.get(row['recording_id'], ()), backfill_status=row['backfill_status'])
             for row in rows
         ], total, page, pages)
 
@@ -664,7 +684,9 @@ class SQLiteStore:
             total = conn.execute(f'SELECT COUNT(*) FROM recordings WHERE {where}', params).fetchone()[0]
             rows = conn.execute(
                 'SELECT recording_id, title, created_at, duration_min, has_transcript, has_summary, '
-                f'summary_md, transcript_md FROM recordings WHERE {where} '
+                'summary_md, transcript_md, (SELECT last_status FROM backfill_state b '
+                'WHERE b.recording_id=recordings.recording_id) AS backfill_status '
+                f'FROM recordings WHERE {where} '
                 'ORDER BY created_at DESC, recording_id DESC LIMIT ? OFFSET ?',
                 (*params, limit if limit is not None else -1, offset),
             ).fetchall()
@@ -673,7 +695,7 @@ class SQLiteStore:
             StoredRecording(row['recording_id'], row['title'], datetime.fromisoformat(row['created_at']),
                             row['duration_min'], bool(row['has_transcript']), bool(row['has_summary']),
                             row['summary_md'] or '', row['transcript_md'] or '',
-                            tags=tags.get(row['recording_id'], ()))
+                            tags=tags.get(row['recording_id'], ()), backfill_status=row['backfill_status'])
             for row in rows
         ], total)
 
@@ -733,7 +755,8 @@ class SQLiteStore:
             pages = max(1, (total + 19) // 20)
             page = min(max(1, page), pages)
             rows = conn.execute(
-                'SELECT recording_id, title, created_at, duration_min, has_transcript, has_summary '
+                'SELECT recording_id, title, created_at, duration_min, has_transcript, has_summary, '
+                '(SELECT last_status FROM backfill_state b WHERE b.recording_id=recordings.recording_id) AS backfill_status '
                 f'FROM recordings WHERE {where} '
                 'ORDER BY created_at DESC, recording_id DESC LIMIT 20 OFFSET ?',
                 (*bounds, (page - 1) * 20),
@@ -742,7 +765,7 @@ class SQLiteStore:
         return RecordingPage([
             RecordingCard(row['recording_id'], row['title'], datetime.fromisoformat(row['created_at']),
                           row['duration_min'], bool(row['has_transcript']), bool(row['has_summary']),
-                          tags=tags.get(row['recording_id'], ()))
+                          tags=tags.get(row['recording_id'], ()), backfill_status=row['backfill_status'])
             for row in rows
         ], total, page, pages)
 
@@ -789,7 +812,7 @@ class SQLiteStore:
         with self._connect() as conn:
             rows = conn.execute('''SELECT r.recording_id, r.title, r.created_at, r.duration_min, r.media_type
                 FROM recordings r LEFT JOIN backfill_state b ON b.recording_id=r.recording_id
-                WHERE (r.has_transcript=0 OR r.has_summary=0)
+                WHERE r.has_transcript=0
                   AND (b.next_attempt_at IS NULL OR julianday(b.next_attempt_at)<=julianday(?))
                 ORDER BY r.created_at DESC, r.recording_id DESC LIMIT ?''',
                 (now.isoformat(), limit)).fetchall()
@@ -798,7 +821,8 @@ class SQLiteStore:
 
     def finish_backfill(self, recording_id: str, now: datetime, *, status: str,
                         http_status: int | None = None) -> None:
-        if status not in {'ok', 'rate_limited', 'upstream_error', 'bad_response'}:
+        if status not in {'ok', 'pending_upstream', 'no_upstream_content',
+                          'rate_limited', 'upstream_error', 'bad_response'}:
             raise ValueError('Invalid backfill status')
         if http_status is not None and (type(http_status) is not int or not 100 <= http_status <= 599):
             raise ValueError('Invalid HTTP status')
@@ -807,18 +831,28 @@ class SQLiteStore:
             if status == 'ok':
                 conn.execute('DELETE FROM backfill_state WHERE recording_id=?', (recording_id,))
                 return
-            row = conn.execute('SELECT attempts FROM backfill_state WHERE recording_id=?',
+            row = conn.execute('SELECT attempts, pending_checks FROM backfill_state WHERE recording_id=?',
                                (recording_id,)).fetchone()
-            attempts = (row[0] if row else 0) + 1
-            delay = (10, 60, 360, 1440)[min(attempts, 4) - 1]
+            attempts = row['attempts'] if row else 0
+            pending_checks = row['pending_checks'] if row else 0
+            if status == 'pending_upstream':
+                delay = (10, 30, 120)[min(pending_checks, 2)]
+                pending_checks += 1
+            elif status == 'no_upstream_content':
+                delay = 1440
+            else:
+                attempts += 1
+                # Real failures cool down daily after five attempts; a later
+                # successful empty response can still return to pending.
+                delay = 1440 if attempts >= 5 else (360 if status == 'bad_response' else 30)
             conn.execute('''INSERT INTO backfill_state
-                (recording_id, attempts, last_attempt_at, next_attempt_at, last_status, last_http_status)
-                VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(recording_id) DO UPDATE SET
+                (recording_id, attempts, last_attempt_at, next_attempt_at, last_status, last_http_status, pending_checks)
+                VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(recording_id) DO UPDATE SET
                 attempts=excluded.attempts, last_attempt_at=excluded.last_attempt_at,
                 next_attempt_at=excluded.next_attempt_at, last_status=excluded.last_status,
-                last_http_status=excluded.last_http_status''',
+                last_http_status=excluded.last_http_status, pending_checks=excluded.pending_checks''',
                 (recording_id, attempts, now.isoformat(), (now + timedelta(minutes=delay)).isoformat(),
-                 status, http_status))
+                 status, http_status, pending_checks))
 
     def latest_sync(self) -> SyncRun | None:
         with self._connect() as conn:
@@ -870,7 +904,9 @@ class SQLiteStore:
         with self._connect() as conn:
             row = conn.execute(
                 'SELECT recording_id, title, created_at, duration_min, has_transcript, has_summary, '
-                'summary_md, transcript_md FROM recordings WHERE recording_id = ?', (recording_id,),
+                'summary_md, transcript_md, (SELECT last_status FROM backfill_state b '
+                'WHERE b.recording_id=recordings.recording_id) AS backfill_status '
+                'FROM recordings WHERE recording_id = ?', (recording_id,),
             ).fetchone()
             tags = self._tags_for(conn, [row] if row else [])
         if row is None:
@@ -881,6 +917,7 @@ class SQLiteStore:
             duration_min=row['duration_min'], has_transcript=bool(row['has_transcript']),
             has_summary=bool(row['has_summary']), summary_md=row['summary_md'] or '',
             transcript_md=row['transcript_md'] or '', tags=tags.get(recording_id, ()),
+            backfill_status=row['backfill_status'],
         )
 
     @staticmethod

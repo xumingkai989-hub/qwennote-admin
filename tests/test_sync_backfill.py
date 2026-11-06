@@ -57,27 +57,31 @@ def test_three_old_incomplete_rows_then_fourth_next_round(queue, full):
     assert store.latest_sync() == result
 
 
-@pytest.mark.parametrize('kind', ['incomplete', 'exception', '429'])
+@pytest.mark.parametrize('kind', ['incomplete', 'exception', '429', '500', 'timeout'])
 def test_backoff_first_third_fifth_and_daily_retry(queue, kind):
     source, store, clock = queue
     if kind == 'incomplete':
         source.details['0'] = RecordingDetail('0', None, None, False, False)
     else:
-        source.detail_errors['0'] = MinutesRetryableError(429) if kind == '429' else ValueError('private body')
-    for attempt, delay in enumerate([10, 60, 360, 1440, 1440, 1440], 1):
+        source.detail_errors['0'] = (MinutesRetryableError(int(kind)) if kind in ('429', '500')
+                                     else TimeoutError() if kind == 'timeout' else ValueError('private body'))
+    first_delay = 1440 if kind == 'incomplete' else 360 if kind == 'exception' else 30
+    for attempt, delay in enumerate([first_delay] * 4 + [1440, 1440], 1):
         run_sync(source, store)
         saved = state(store)
-        assert saved['attempts'] == attempt
+        assert saved['attempts'] == (0 if kind == 'incomplete' else attempt)
         assert datetime.fromisoformat(saved['next_attempt_at']) == clock.current + timedelta(minutes=delay)
-        assert saved['last_status'] == ('rate_limited' if kind == '429' else 'bad_response')
-        assert saved['last_http_status'] == (429 if kind == '429' else None)
+        assert saved['last_status'] == ('no_upstream_content' if kind == 'incomplete' else
+                                        'rate_limited' if kind == '429' else
+                                        'upstream_error' if kind in ('500', 'timeout') else 'bad_response')
+        assert saved['last_http_status'] == (int(kind) if kind in ('429', '500') else None)
         assert 'private' not in str(saved)
         source.detail_calls.clear()
         # Repeated quick AND full sync cannot bypass queue backoff.
         for full in (False, True):
             run_sync(source, store, full=full)
             assert '0' not in source.detail_calls
-            assert state(store)['attempts'] == attempt
+            assert state(store)['attempts'] == (0 if kind == 'incomplete' else attempt)
         clock.current += timedelta(minutes=delay)
 
 
@@ -87,7 +91,7 @@ def test_success_removes_state_and_counts_update(queue):
     run_sync(source, store)
     assert state(store)['last_status'] == 'upstream_error'
     source.detail_errors.clear()
-    clock.current += timedelta(minutes=10)
+    clock.current += timedelta(minutes=30)
     result = run_sync(source, store)
     assert result.updated == 2 and result.note == 'backfilled=2'
     assert state(store) is None and store.get_recording('0').has_summary
@@ -137,12 +141,12 @@ def test_due_timestamp_compares_instants_across_offsets(queue):
 
 
 @pytest.mark.parametrize('missing', ['has_summary', 'has_transcript'])
-def test_each_missing_flag_queues_independently(queue, missing):
+def test_only_missing_transcript_queues(queue, missing):
     _, store, _ = queue
     with store._connect() as conn:
         conn.execute('UPDATE recordings SET has_summary=1, has_transcript=1')
         conn.execute(f'UPDATE recordings SET {missing}=0 WHERE recording_id="0"')
-    assert [m.recording_id for m in store.backfill_candidates(NOW, 10)] == ['0']
+    assert [m.recording_id for m in store.backfill_candidates(NOW, 10)] == (['0'] if missing == 'has_transcript' else [])
     assert store.complete_recording_ids() == {'1', '2', '3'}
 
 
@@ -242,12 +246,19 @@ def test_list_search_and_detail_backfill_markers(client, store, flag):
     meta = RecordingMeta('pending', 'waiting', datetime.now(SHANGHAI), 1)
     detail = replace(RecordingDetail('pending', 'summary', 'transcript', True, True), **{flag: False})
     store.upsert_recording(meta, detail, NOW.isoformat())
-    for url in ['/', '/?q=waiting']:
-        assert '转写待补齐' in client.get(url).text
-    assert '上游转写未完成，系统每 10 分钟自动重试' in client.get('/recordings/pending').text
+    for url in ['/', '/search?q=waiting', '/recordings/pending']:
+        html = client.get(url).text
+        assert ('转写生成中' in html) == (flag == 'has_transcript')
+        assert '无转写内容' not in html
+    store.finish_backfill('pending', NOW, status='no_upstream_content')
+    for url in ['/', '/search?q=waiting', '/recordings/pending']:
+        html = client.get(url).text
+        assert ('无转写内容' in html) == (flag == 'has_transcript')
+        assert '转写生成中' not in html
     store.upsert_recording(meta, replace(detail, **{flag: True}), NOW.isoformat())
-    assert '转写待补齐' not in client.get('/').text
-    assert '上游转写未完成' not in client.get('/recordings/pending').text
+    for url in ['/', '/search?q=waiting', '/recordings/pending']:
+        html = client.get(url).text
+        assert '转写生成中' not in html and '无转写内容' not in html
 
 
 def test_migration_preserves_history_and_backoff(queue):
@@ -259,3 +270,82 @@ def test_migration_preserves_history_and_backoff(queue):
     assert state(store) == before
     assert store.latest_sync().http_status is None and store.latest_sync().note is None
     assert len(store.backfill_candidates(NOW, 10)) == 3
+
+
+@pytest.mark.parametrize('age,status,delay', [
+    (timedelta(hours=1), 'pending_upstream', 10),
+    (timedelta(hours=24)-timedelta(microseconds=1), 'pending_upstream', 10),
+    (timedelta(hours=24), 'no_upstream_content', 1440),
+    (timedelta(hours=30), 'no_upstream_content', 1440),
+])
+def test_successful_empty_response_classifies_age(queue, age, status, delay):
+    source, store, _ = queue
+    with store._connect() as conn:
+        conn.execute('UPDATE recordings SET created_at=? WHERE recording_id="0"',
+                     ((NOW-age).astimezone(timezone.utc).isoformat(),))
+    source.details['0'] = RecordingDetail('0', None, None, False, False)
+    result = run_sync(source, store)
+    assert result.status == 'success' and result.http_status is None
+    saved = state(store)
+    assert saved['last_status'] == status and saved['attempts'] == 0
+    assert datetime.fromisoformat(saved['next_attempt_at']) == NOW + timedelta(minutes=delay)
+    assert '0' not in {m.recording_id for m in store.backfill_candidates(NOW, 10)}
+
+
+def test_pending_schedule_survives_restart_then_becomes_empty_and_recovers(queue):
+    source, store, clock = queue
+    with store._connect() as conn:
+        conn.execute('UPDATE recordings SET created_at=? WHERE recording_id="0"',
+                     ((NOW-timedelta(hours=1)).isoformat(),))
+    source.details['0'] = RecordingDetail('0', None, None, False, False)
+    for delay in [10, 30, 120, 120, 120, 120]:
+        run_sync(source, store)
+        store.migrate()
+        saved = state(store)
+        assert saved['attempts'] == 0 and saved['last_status'] == 'pending_upstream'
+        assert datetime.fromisoformat(saved['next_attempt_at']) == clock.current + timedelta(minutes=delay)
+        clock.current += timedelta(minutes=delay)
+    clock.current = NOW + timedelta(hours=23)
+    run_sync(source, store)
+    assert state(store)['last_status'] == 'no_upstream_content'
+    assert state(store)['attempts'] == 0
+    source.details['0'] = RecordingDetail('0', None, '迟到的转写', True, False)
+    clock.current += timedelta(days=1)
+    run_sync(source, store)
+    assert state(store) is None and store.get_recording('0').has_transcript
+    assert store.get_recording('0').backfill_label is None
+
+
+def test_true_error_budget_does_not_cap_pending(queue):
+    _, store, _ = queue
+    for _ in range(5):
+        store.finish_backfill('0', NOW, status='bad_response')
+    store.finish_backfill('0', NOW, status='pending_upstream')
+    assert state(store)['attempts'] == 5
+    assert datetime.fromisoformat(state(store)['next_attempt_at']) == NOW + timedelta(minutes=10)
+
+
+def test_migration_resets_legacy_false_failure_once_and_removes_complete(queue):
+    _, store, _ = queue
+    for rid in ('0', '1', '2', '3'):
+        store.finish_backfill(rid, NOW, status='bad_response')
+    store.finish_backfill('1', NOW, status='bad_response')
+    store.finish_backfill('2', NOW, status='rate_limited', http_status=429)
+    with store._connect() as conn:
+        conn.execute('UPDATE recordings SET has_transcript=1 WHERE recording_id="3"')
+        conn.execute('ALTER TABLE backfill_state DROP COLUMN pending_checks')
+    before1, before2 = state(store, '1'), state(store, '2')
+    store.migrate()
+    reset = state(store)
+    assert reset['last_status'] == 'pending_upstream' and reset['attempts'] == 0
+    assert reset['next_attempt_at'] is None and reset['pending_checks'] == 0
+    assert state(store, '3') is None
+    for rid, before in [('1', before1), ('2', before2)]:
+        after = state(store, rid)
+        after.pop('pending_checks')
+        assert after == before
+    assert '0' in {m.recording_id for m in store.backfill_candidates(NOW, 10)}
+    store.finish_backfill('0', NOW, status='bad_response')
+    genuine_failure = state(store)
+    store.migrate()
+    assert state(store) == genuine_failure

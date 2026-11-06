@@ -20,7 +20,7 @@
         <h1 title="{{ title }}">{{ title }}</h1>
         <span class="badge badge-{{ status }}">{{ status_label }}</span>
       </div>
-      {% if not recording.has_transcript or not recording.has_summary %}<p class="backfill-pending">上游转写未完成，系统每 10 分钟自动重试</p>{% endif %}
+      {% if recording.backfill_label %}<p class="backfill-pending">{{ recording.backfill_label }}</p>{% endif %}
     </div>
     <div id="detail-export" class="detail-export">
       <button id="export-button" class="secondary" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="export-menu">导出 <span aria-hidden="true">▾</span></button>

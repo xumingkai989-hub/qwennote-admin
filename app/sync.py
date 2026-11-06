@@ -141,7 +141,7 @@ def run_sync(source: MinutesSource, store: SyncStore, *, backfill_days: int = 90
             except Exception:
                 errors.append(f'录音 {meta.recording_id}：校验或入库失败，请重试')
                 continue
-            complete = previous is not None and previous.has_summary and previous.has_transcript
+            complete = previous is not None and previous.has_transcript
             if ((mode == 'quick' and complete) or
                     (previous is not None and not complete and meta.recording_id not in backfill_ids)):
                 skipped += 1
@@ -188,9 +188,12 @@ def run_sync(source: MinutesSource, store: SyncStore, *, backfill_days: int = 90
                         if meta.recording_id in backfill_ids:
                             store.finish_backfill(meta.recording_id, datetime.now(SHANGHAI), status='bad_response')
                         continue
-                    complete = detail.has_transcript and detail.has_summary
-                    store.finish_backfill(meta.recording_id, datetime.now(SHANGHAI),
-                                          status='ok' if complete else 'bad_response')
+                    complete = detail.has_transcript
+                    checked_at = datetime.now(SHANGHAI)
+                    backfill_status = ('ok' if complete else 'pending_upstream'
+                                       if checked_at - meta.created_at < timedelta(hours=24)
+                                       else 'no_upstream_content')
+                    store.finish_backfill(meta.recording_id, checked_at, status=backfill_status)
                     backfilled += meta.recording_id in backfill_ids and complete
                     inserted += outcome == 'inserted'
                     updated += outcome == 'updated'
