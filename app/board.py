@@ -45,6 +45,25 @@ def totals(store) -> dict:
     return {'count': row[0], 'minutes': row[1]}
 
 
+def monday_of(day):
+    day = _date(day)
+    return day - timedelta(days=day.weekday())
+
+
+def load_report(store, day, scope='day'):
+    """Read an archive without using its numeric snapshot for live statistics."""
+    with store._connect() as conn:
+        row = conn.execute('SELECT * FROM board_reports WHERE day = ? AND scope = ?',
+                           (_date(day).isoformat(), scope)).fetchone()
+    return dict(row) if row else None
+
+
+def report_days(store):
+    with store._connect() as conn:
+        return [row['day'] for row in conn.execute(
+            "SELECT day FROM board_reports WHERE scope = 'day' ORDER BY day DESC LIMIT 30")]
+
+
 def _day_stats(items):
     return {**_numbers(items), 'items': [
         {'recording_id': item['recording_id'], 'title': item['title'], 'minutes': item['minutes'],

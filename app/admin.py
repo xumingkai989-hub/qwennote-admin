@@ -58,6 +58,11 @@ def install_admin(app: FastAPI, *, settings: Settings, templates: Jinja2Template
             return error_page(request, 403, '请求无效', 'CSRF 校验失败，请刷新管理页后重试。')
         return fields
 
+    from app.board_page import install_board
+    install_board(app, settings=settings, templates=templates, sessions=sessions,
+                  authorize=authorize, valid_csrf=valid_csrf, csrf=csrf,
+                  session_binding=session_binding, parse_form=parse_form, error_page=error_page)
+
     from app.assistant import install_assistant
     install_assistant(app, settings=settings, templates=templates, sessions=sessions,
                       authorize=authorize, valid_csrf=valid_csrf, csrf=csrf,

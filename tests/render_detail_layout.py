@@ -6,6 +6,7 @@ import sys
 import tempfile
 from datetime import datetime
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT), str(ROOT / 'tests')]
@@ -25,7 +26,8 @@ def render(output):
     (output / 'static').mkdir(exist_ok=True)
     for name in [p.name for p in (ROOT / 'app/static').iterdir() if p.suffix in {'.css', '.js'}]:
         (output / 'static' / name).write_bytes((ROOT / 'app/static' / name).read_bytes())
-    with tempfile.TemporaryDirectory() as temp:
+    # Login-sync must not race synthetic rows/tags while snapshots are rendered.
+    with tempfile.TemporaryDirectory() as temp, patch('app.login_sync.Thread'):
         settings = Settings(
             feishu_app_id='layout-fixture', feishu_app_secret=secrets.token_hex(16),
             feishu_redirect_uri='http://testserver/auth/callback', session_secret=secrets.token_hex(32),
