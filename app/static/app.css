@@ -112,7 +112,7 @@ h1 { margin: 0; font-size: 34px; line-height: 1.2; font-weight: 700; letter-spac
 [aria-disabled="true"] { color: var(--secondary); }
 /* One border-box frame owns every detail view's width and gutters. */
 .detail-layout { width: 100%; max-width: var(--content-max); margin-inline: auto; padding: 0 var(--gutter) 48px; }
-.detail-header { position: sticky; top: 0; z-index: 3; display: grid; grid-template-columns: 46px minmax(0, 1fr) auto; gap: 8px; align-items: center; background: var(--background); }
+.detail-header { position: sticky; top: 0; z-index: 3; display: grid; grid-template-columns: 46px minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 12px 0 8px; background: var(--background); }
 #back-to-list { display: inline-flex; align-items: center; justify-content: center; width: 46px; height: 46px; border-radius: 10px; font-size: 24px; }
 #back-to-list:hover { background: var(--hover); text-decoration: none; }
 .detail-heading { min-width: 0; }
@@ -649,6 +649,7 @@ body { padding-bottom: var(--safe-area-bottom); }
     padding-top: var(--safe-area-top); padding-bottom: 0;
     background: var(--background); border-bottom: 1px solid var(--separator);
   }
+  .has-navigation .detail-header { padding-bottom: 8px; }
   .assistant-layout > .assistant-heading,
   .settings-page > .list-heading,
   .models-page > .list-heading {
