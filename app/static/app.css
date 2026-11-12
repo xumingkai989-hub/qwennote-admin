@@ -112,14 +112,14 @@ h1 { margin: 0; font-size: 34px; line-height: 1.2; font-weight: 700; letter-spac
 [aria-disabled="true"] { color: var(--secondary); }
 /* One border-box frame owns every detail view's width and gutters. */
 .detail-layout { width: 100%; max-width: var(--content-max); margin-inline: auto; padding: 0 var(--gutter) 48px; }
-.detail-header { position: sticky; top: 0; z-index: 3; display: grid; grid-template-columns: 46px minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 12px 0 8px; background: var(--background); }
+.detail-header { position: sticky; top: 0; z-index: 3; display: grid; grid-template-columns: 46px minmax(0, 1fr) auto; gap: 8px; align-items: start; padding: 12px 0 8px; background: var(--background); }
 #back-to-list { display: inline-flex; align-items: center; justify-content: center; width: 46px; height: 46px; border-radius: 10px; font-size: 24px; }
 #back-to-list:hover { background: var(--hover); text-decoration: none; }
-.detail-heading { min-width: 0; }
+.detail-heading { min-width: 0; padding-top: 11px; }
 .detail-title-row { display: flex; align-items: center; gap: 8px; }
 .detail-header h1 { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 17px; font-weight: 600; line-height: 24px; letter-spacing: normal; }
 .detail-title-row .badge { flex-shrink: 0; white-space: nowrap; }
-.detail-export { position: relative; }
+.detail-export { position: relative; margin-top: 1px; }
 #export-button { padding-inline: 12px; white-space: nowrap; }
 .export-menu { position: absolute; top: calc(100% + 4px); right: 0; width: 180px; padding: 4px; border-radius: 10px; background: #FFFFFF; color: #1C1C1E; box-shadow: 0 4px 16px #0000001A; }
 .export-menu [role="menuitem"] { display: flex; align-items: center; width: 100%; min-height: 44px; padding: 8px 12px; border-radius: 6px; color: inherit; background: transparent; font-size: 14px; text-align: left; }
@@ -649,7 +649,7 @@ body { padding-bottom: var(--safe-area-bottom); }
     padding-top: var(--safe-area-top); padding-bottom: 0;
     background: var(--background); border-bottom: 1px solid var(--separator);
   }
-  .has-navigation .detail-header { padding-bottom: 8px; }
+  .has-navigation .detail-header { padding-top: max(8px, var(--safe-area-top)); padding-bottom: 8px; }
   .assistant-layout > .assistant-heading,
   .settings-page > .list-heading,
   .models-page > .list-heading {
