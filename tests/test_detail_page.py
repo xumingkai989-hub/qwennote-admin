@@ -1,4 +1,5 @@
 from hotword_fixtures import seed_rule
+from dataclasses import replace
 import json
 import re
 import sqlite3
@@ -41,6 +42,26 @@ def test_detail_markdown_and_metadata(detail_client):
         assert text in html
     assert response.headers['cache-control'] == 'no-store'
     assert '/recordings/detail.md' in html
+
+
+@pytest.mark.parametrize('count', [0, 3, 7])
+def test_detail_shows_all_tags_below_title(detail_client, store, monkeypatch, count):
+    labels = ['AI Tutor', '模考系统', '<script>x</script>', '导师中心', '述职', '项目规划', '质量验收'][:count]
+    if labels:
+        store.replace_tags(store.get_recording('detail'), labels[:5], 'fixture', '2026-10-29T12:00:00+08:00')
+    if count > 5:
+        # Test seven view-model tags without changing the five-tag DB constraint.
+        recording = replace(store.get_recording('detail'), tags=tuple(labels))
+        monkeypatch.setattr(store, 'get_recording', lambda recording_id: recording)
+    html = detail_client.get('/recordings/detail').text
+    if not labels:
+        assert 'detail-tags' not in html
+        return
+    match = re.search(r'<div class="recording-tags detail-tags">(.*?)</div>', html, re.S)
+    assert match is not None
+    assert [unescape(value) for value in re.findall(r'<span class="tag-pill">(.*?)</span>', match[1])] == labels
+    assert html.index('class="detail-title-row"') < match.start() < html.index('id="detail-export"')
+    assert '<script>x</script>' not in html
 
 
 def test_transcript_preserves_segments_and_paragraphs(detail_client):

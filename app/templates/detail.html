@@ -20,6 +20,11 @@
         <h1 title="{{ title }}">{{ title }}</h1>
         <span class="badge badge-{{ status }}">{{ status_label }}</span>
       </div>
+      {% if recording.tags %}
+      <div class="recording-tags detail-tags">
+        {% for tag in recording.tags %}<span class="tag-pill">{{ tag }}</span>{% endfor %}
+      </div>
+      {% endif %}
       {% if recording.backfill_label %}<p class="backfill-pending">{{ recording.backfill_label }}</p>{% endif %}
     </div>
     <div id="detail-export" class="detail-export">

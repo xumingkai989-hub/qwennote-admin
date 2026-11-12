@@ -4,6 +4,7 @@ import re
 import secrets
 import sys
 import tempfile
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
@@ -66,9 +67,21 @@ def render(output):
             for recording in store.read_recordings(limit=None).items:
                 store.replace_tags(recording, ['AI Tutor', '中台与数据看板', '模考系统', '导师中心', '述职'],
                                    'fixture-model', '2026-10-30T12:00:00+08:00')
-            html = client.get('/').text.replace('http://testserver/static/', 'static/').replace('src="/static/', 'src="static/')
-            html = re.sub(r'name="csrf_token" value="[^"]*"', 'name="csrf_token" value="layout-fixture"', html)
-            (output / 'home-tags.html').write_text(html)
+            # Render seven synthetic view-model tags; the DB still caps tags at five.
+            extra_tags = ('项目规划', 'LongUnbrokenMeetingTagForResponsiveWrappingVerification')
+            original_list = store.list_recordings
+            original_get = store.get_recording
+            def list_with_extra_tags(*args, **kwargs):
+                page = original_list(*args, **kwargs)
+                return replace(page, items=[replace(item, tags=item.tags + extra_tags) for item in page.items])
+            def get_with_extra_tags(recording_id):
+                recording = original_get(recording_id)
+                return replace(recording, tags=recording.tags + extra_tags)
+            with patch.object(store, 'list_recordings', list_with_extra_tags), patch.object(store, 'get_recording', get_with_extra_tags):
+                for name, url in [('home-tags', '/'), ('detail-tags', '/recordings/layout-0')]:
+                    html = client.get(url).text.replace('http://testserver/static/', 'static/').replace('src="/static/', 'src="static/')
+                    html = re.sub(r'name="csrf_token" value="[^"]*"', 'name="csrf_token" value="layout-fixture"', html)
+                    (output / f'{name}.html').write_text(html)
 
             with store._connect() as conn:
                 conn.execute("UPDATE assistant_config SET instructions = '按业务线归类，不按会议形式。\n涉及产品规划时优先使用具体产品标签。' WHERE id = 1")

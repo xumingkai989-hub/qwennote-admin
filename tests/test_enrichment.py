@@ -366,8 +366,10 @@ def test_reopened_pages_use_persisted_state(client, queued, store, state):
     detail = client.get('/recordings/enhance').text
     if state in ('pending', 'running'):
         assert '标签生成中…' in home and '热词分析中…' in detail
+        assert '<span class="tag-pill enrichment-pending">标签生成中…</span>' in home
     elif state == 'failed':
         assert '分析失败 · 重试' in home and 'data-enrichment-retry="enhance"' in detail
+        assert '<span class="tag-pill enrichment-failed">' in home
     else:
         assert '标签生成中…' not in home and '热词分析中…' not in detail
 

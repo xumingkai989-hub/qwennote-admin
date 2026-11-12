@@ -23,7 +23,7 @@ for(const [result,expected] of [
  assert.equal(await p.locator('#mobile-sync-result').evaluate(e=>e.scrollWidth<=e.clientWidth),true);
  if(result.status==='failed') {await p.locator('#sync-error').evaluate(e=>e.textContent='示例错误'); await p.locator('#mobile-sync-result button').click(); assert.equal(await p.locator('#sync-error').isVisible(),true);}
 }));
-test('home icon search, secondary sync menu and two visible tags',()=>run(async p=>{
+test('home icon search, secondary sync menu and all visible tags',()=>run(async p=>{
  await p.goto(url('home-tags')); assert.equal(await p.locator('.search-form button svg').isVisible(),true);
  assert.equal(await p.locator('.search-form button').evaluate(e=>getComputedStyle(e).backgroundColor),'rgba(0, 0, 0, 0)');
  assert.equal(await p.locator('#full-sync-button').isVisible(),false);
@@ -31,7 +31,7 @@ test('home icon search, secondary sync menu and two visible tags',()=>run(async 
  const cards=await p.locator('.timeline-card').evaluateAll(es=>es.map(e=>{
  const visible=[...e.querySelectorAll('.tag-pill')].filter(t=>t.checkVisibility()); const badge=e.querySelector('.badge').getBoundingClientRect(),time=e.querySelector('.card-created').getBoundingClientRect();
  return {tags:visible.map(t=>t.textContent),aligned:Math.abs((badge.y+badge.height/2)-(time.y+time.height/2))<1};}));
- for(const c of cards){assert.equal(c.tags.length,3);assert.equal(c.tags[2],'+3');assert.ok(c.aligned);}
+ for(const c of cards){assert.equal(c.tags.length,7);assert.ok(c.tags.every(t=>!/^\+\d+$/.test(t)));assert.ok(c.aligned);}
  await p.screenshot({path:path.join(out,'390-home.png')});
 }));
 test('detail two-line title, sticky tabs, expanded search focus and speaker sizes',()=>run(async p=>{

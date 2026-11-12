@@ -2,7 +2,9 @@ import asyncio
 from dataclasses import replace
 from datetime import date, datetime
 import json
+import re
 import sqlite3
+from html import unescape
 
 import httpx
 import pytest
@@ -230,18 +232,31 @@ def test_cascade_migration_and_stale_response_guard(tagged_store):
     assert tagged_store.list_recordings(date.min, date.max).items[0].tags
 
 
-def test_home_tags_after_status_overflow_and_escaping(client, store):
+@pytest.mark.parametrize('count', [0, 3, 7])
+def test_home_all_tags_after_status_and_escaping(client, store, monkeypatch, count):
     store.upsert_recording(RecordingMeta('page', '测试', datetime.now(SHANGHAI), 30),
                            RecordingDetail('page', '总结', '转写', True, True), tag.now())
     assert login(client).status_code == 302
     assert 'class="recording-tags"' not in client.get('/').text
-    run(store, lambda _: response(['AI Tutor', '模考系统', '<script>x</script>', '导师中心', '述职']))
+    labels = ['AI Tutor', '模考系统', '<script>x</script>', '导师中心', '述职', '项目规划', '质量验收'][:count]
+    if labels:
+        store.replace_tags(store.get_recording('page'), labels[:5], 'fixture', tag.now())
+    if count > 5:
+        # The current schema caps persisted tags at five; exercise the view's
+        # unbounded rendering contract without changing that backend constraint.
+        original_list = store.list_recordings
+        def list_with_all_tags(*args, **kwargs):
+            page = original_list(*args, **kwargs)
+            return replace(page, items=[replace(item, tags=tuple(labels)) for item in page.items])
+        monkeypatch.setattr(store, 'list_recordings', list_with_all_tags)
     html = client.get('/').text
-    assert html.index('已转录</span>') < html.index('class="recording-tags"') < html.index('class="card-created"')
-    assert html.count('class="tag-pill"') == 2
-    assert html.count('class="tag-pill desktop-only"') == 2 and '>+2</span>' in html
-    assert 'class="tag-pill mobile-only"' in html and '>+3</span>' in html
-    assert 'title="AI Tutor · 模考系统 · &lt;script&gt;x&lt;/script&gt; · 导师中心 · 述职"' in html
+    if labels:
+        assert html.index('已转录</span>') < html.index('class="recording-tags"') < html.index('class="card-created"')
+    assert [unescape(value) for value in re.findall(r'<span class="tag-pill">(.*?)</span>', html)] == labels
+    assert 'class="tag-pill desktop-only"' not in html
+    assert 'class="tag-pill mobile-only"' not in html
+    assert not re.search(r'>\+\d+</span>', html)
+    assert not re.search(r'<span[^>]*title="[^"]*"[^>]*data-enrichment-tags', html)
     assert '<script>x</script>' not in html
 
 
