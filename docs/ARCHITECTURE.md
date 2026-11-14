@@ -21,6 +21,7 @@
 | `primary_tag.py` | 会议核心议题判定、持久化 fallback 与标签指纹失效重判 | 显式批量调用 |
 | `tag_time.py` | 主标签周度时长聚合、分类小项与标签 Top 6 合并、双层整数分钟守恒 | 显式只读调用 |
 | `kb.py` | 只读会议与标签扫描、SQLite 补充记录回写、知识库索引与标签/分类 Markdown 重建 | 显式 Python 调用，后续 CLI 扩展 |
+| `kb_cli.py` | 独立 qwennote-kb 入口、分层帮助、JSON 包络、格式与 jq、schema 和无副作用 dry-run；复用 kb 业务函数 | qwennote-kb / python -m app.kb |
 | `knowledge_page.py` | 知识库列表、标签 Markdown 阅读与管理员重建；读取生成文件，复用会话及 CSRF 校验。 | /knowledge、/knowledge/{tag}、/knowledge/rebuild |
 | `config.py` | 读取进程环境、校验身份配置与会话密钥 | main、admin、feishu、部署适配器 |
 | `feishu.py` | OAuth 换身份、联系人搜索与安全错误封装 | main、admin、store |

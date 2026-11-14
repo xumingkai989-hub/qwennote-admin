@@ -100,22 +100,24 @@ cat knowledge/tags/"<标签>.md"
 
 ### 方式二：CLI
 
+先运行 `scripts/install_kb_cli.sh` 安装到 PATH（系统目录可能需要 sudo）。查看 `qwennote-kb --help` 和 `qwennote-kb schema "note add"` 获取完整参数。
+
 ```bash
-python -m app.kb list --json                    # 全部标签
-python -m app.kb list --category <分类> --json    # 按分类过滤
-python -m app.kb show "<标签>" --json             # 单标签全文
-python -m app.kb search <关键词> --limit 5 --json  # 跨标签检索
-python -m app.kb build --full                   # 重建（需数据权限）
-python -m app.kb note add "<标签>" --text "…" --source codex
-python -m app.kb note list "<标签>" --json
-python -m app.kb note remove <id>
+qwennote-kb list --format json                    # 全部标签
+qwennote-kb list --category <分类> --format json    # 按分类过滤
+qwennote-kb show "<标签>" --format json             # 单标签全文
+qwennote-kb search <关键词> --limit 5 --format json  # 跨标签检索
+qwennote-kb build --full                   # 重建（需数据权限）
+qwennote-kb note add "<标签>" --text "…" --source codex
+qwennote-kb note list "<标签>" --format json
+qwennote-kb note remove <id>
 ```
 
 输出契约：
 
-- `list --json` → 数组，元素同 index.json 的 `tags[]`
-- `show --json` → `{"tag", "path", "sessions", "notes", "content"}`，`content` 是完整 Markdown
-- `search --json` → 数组，元素 `{"tag", "category", "sessions", "notes", "path"}`
+- `list --format json` → `{ok: true, data: [...], meta: {count, root, took_ms}}`，data 元素同 index.json 的 `tags[]`
+- `show --format json` → 包络的 `data` 为 `{"tag", "path", "sessions", "notes", "content"}`，`data.content` 是完整 Markdown；省略格式时直接输出 Markdown
+- `search --format json` → 包络的 `data` 数组，元素同 index 的标签元数据（名称字段为 `name`）
 - 退出码：有结果 0，无结果 1，参数或运行错误 2
 
 `search` 匹配范围：标签名、会议标题、补充记录正文、综述正文。
@@ -125,7 +127,7 @@ python -m app.kb note remove <id>
 `note add` 会立即重建该标签文件，随后 `show` 即可读到。
 
 ```bash
-python -m app.kb note add "<标签>" --text "状态机卡点已确认：教师样本不足" --source codex
+qwennote-kb note add "<标签>" --text "状态机卡点已确认：教师样本不足" --source codex
 ```
 
 限制：单条 2000 字；只追加不可编辑；删除用 `note remove <id>`。
@@ -142,10 +144,20 @@ python -m app.kb note add "<标签>" --text "状态机卡点已确认：教师�
 
 ## 常见问题
 
-**`list` 返回空数组**：知识库尚未生成，或 `KB_ROOT` 指向了空目录。运行 `python -m app.kb build --full`。
+**`list` 的 data 返回空数组**：知识库尚未生成，或 `KB_ROOT` 指向了空目录。运行 `qwennote-kb build --full`。
 
-**`show` 报标签不存在**：先用 `list --json` 拿准确名称，注意中文标点与空格。
+**`show` 报标签不存在**：先用 `list --format json` 拿准确名称，注意中文标点与空格。
 
 **写入后文件没变**：`note add` 默认会重建；若加了 `--no-build`，需要手动 `build --tag <标签>`。
 
-**CLI 报 SQLite 相关错误**：手动跑时需带上与服务一致的环境变量（`LD_LIBRARY_PATH` 指向项目自带的 sqlite 库）。生产部署通常已封装为 `scripts/kb.sh`，优先用它。
+**CLI 报 SQLite 相关错误**：手动跑时需带上与服务一致的环境变量（`LD_LIBRARY_PATH` 指向项目自带的 sqlite 库）。`qwennote-kb` wrapper 会在存在时加载环境文件和自带 sqlite 库。
+
+## CLI 版本与边界（T11）
+
+- 失败为 `{ok: false, error: {type, message}, meta}`；错误同时写 stderr。显式 `--format md|table` 时只在 stderr 输出一行错误。
+- `--json` 是 `--format json` 的兼容别名，旧模块入口 `python -m app.kb` 仍可用；CLI JSON 已统一为包络。
+- `--jq '.data[0].name'` 输出单个标签名；支持字段、整数索引、`[]` 展开和 `| length` / `| keys`，不支持完整 jq 语言，不执行代码。
+- `note add/remove`、`build` 可加 `--dry-run`，只预览动作，不访问数据库、不写文件；预览不保证目标存在。
+- 写入后重建失败时查看 `error.committed`、`error.id`，先核验再重建，避免重复追加。
+- `qwennote-kb prompt --task "总结本周进展"` 默认输出可直接复制的提示词；`--format json` 时正文在 `data.content`。
+- 本次仅更新项目已有技能；未创建同义个人技能。回滚可恢复 T11 之前的提交。

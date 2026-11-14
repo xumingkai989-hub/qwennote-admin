@@ -227,10 +227,10 @@ def test_subprocess_module_entrypoint_and_root(db, tmp_path):
     env = dict(os.environ, DB_PATH=str(db.db_path), ANTHROPIC_AUTH_TOKEN='')
     result = subprocess.run([sys.executable, '-m', 'app.kb', 'build', '--full', '--root', str(root)],
                             env=env, text=True, capture_output=True)
-    assert result.returncode == 0 and json.loads(result.stdout)['rebuilt'] == ['A']
+    assert result.returncode == 0 and json.loads(result.stdout)['data']['rebuilt'] == ['A']
     result = subprocess.run([sys.executable, '-m', 'app.kb', '--root', str(root), 'show', 'A', '--json'],
                             env=env, text=True, capture_output=True)
-    assert result.returncode == 0 and json.loads(result.stdout)['tag'] == 'A'
+    assert result.returncode == 0 and json.loads(result.stdout)['data']['tag'] == 'A'
 
 
 @pytest.mark.parametrize('failure', ['raise', 'partial', 'ok'])

@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# Resolve symlinks so /usr/local/bin/qwennote-kb still locates its repository.
+script=${BASH_SOURCE[0]}
+while [[ -L "$script" ]]; do
+    directory=$(cd -P "$(dirname "$script")" && pwd)
+    script=$(readlink "$script")
+    [[ "$script" = /* ]] || script="$directory/$script"
+done
+root=$(cd -P "$(dirname "$script")/.." && pwd)
+cd "$root"
+if [[ -f /etc/qwennote/qwennote.env ]]; then
+    set -a
+    . /etc/qwennote/qwennote.env
+    set +a
+fi
+if [[ -d "$root/.sqlite/lib" ]]; then
+    export LD_LIBRARY_PATH="$root/.sqlite/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+fi
+exec .venv/bin/python -m app.kb_cli "$@"

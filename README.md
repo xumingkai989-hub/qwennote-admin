@@ -149,23 +149,25 @@ knowledge/                  # 默认 <repo>/knowledge，已 gitignore
 └── tags/<标签>.md
 ```
 
-先激活 Python 环境并设置 `DB_PATH` 指向已有数据库（无需 Web 登录参数）。以下七个命令均通过 `python -m app.kb` 执行：
+### 命令行工具
+
+运行 `qwennote-kb --help` 查看帮助。使用前运行 `scripts/install_kb_cli.sh` 将 `qwennote-kb` 软链到 `/usr/local/bin`（需要时提示 sudo）。wrapper 从自身路径定位仓库，加载存在的 `/etc/qwennote/qwennote.env` 与 `.sqlite/lib`，使用项目 `.venv/bin/python`；无需手动激活虚拟环境。查询文件只需要知识库目录；搜索、补充记录与构建需要 `DB_PATH` 指向已有数据库。
 
 ```sh
-python -m app.kb build --full                 # 或 --tag "AI Tutor"；可加 --root <路径>
-python -m app.kb list --category 产品 --json
-python -m app.kb show "AI Tutor"              # 默认输出 Markdown 原文；可加 --json
-python -m app.kb search "教师试点" --limit 5 --json
-python -m app.kb note add "AI Tutor" --text "试点教师样本已补齐。" --source codex
-python -m app.kb note list "AI Tutor" --limit 20 --json
-python -m app.kb note remove 123              # 123 替换为 add 返回的真实 id
+qwennote-kb list --category 产品 --sort sessions
+qwennote-kb list --jq '.data[0].name'
+qwennote-kb show "AI Tutor"                     # 默认 Markdown 原文
+qwennote-kb search "教师试点" --limit 5
+qwennote-kb note add "AI Tutor" --text "试点教师样本已补齐。" --source codex --dry-run
+qwennote-kb build --full --dry-run               # 去掉 dry-run 执行；或 --tag "AI Tutor"
+qwennote-kb prompt --task "总结本周进展"
 ```
 
-查询命中退出 0，空结果退出 1，参数或运行错误退出 2；正文在 stdout，错误在 stderr。`show --json` 返回 `{tag, path, sessions, notes, content}`；`list/search/note list --json` 返回数组。搜索不区分大小写，匹配标签名、全部关联会议标题、全部补充记录正文及已生成的综述；默认最多 5 个标签。首次使用先全量构建。
-
-回写只追加到 SQLite `knowledge_notes`，不改会议原文或标签词表，单条最多 2000 字；`add` 输出 id，`remove` 按 id 删除。未知标签可回写，并生成独立标签文件。添加或删除后立即增量构建；`--no-build` 可暂缓，之后用 `build --tag` 补建。若构建失败，已提交的记录仍保留，可按输出 id 查询后重建，避免重复添加。
-
-`build --tag` 只处理指定标签、其所属分类和索引；不改其他标签文件。`--full` 或不带筛选参数处理全部标签。文件内容不变时不写盘，完整内容的 SHA-256 存入 index 的 `content_hash`；没有元数据变化时索引也不写盘。构建输出 `{rebuilt, skipped, errors}`，前两项为标签名数组，最后一项为脱敏错误数组。删除最后一条记录后的孤立标签文件会清理；文件名冲突时保留其他标签既有路径。
+成功 JSON 为 `{ok: true, data, meta: {count, root, took_ms}}`，失败为 `{ok: false, error: {type, message}, meta}`，错误同时写 stderr。`show` 和 `prompt` 默认 Markdown，其余默认 JSON；全局支持 `--format json|md|table`，可放在命令前后。显式 Markdown/table 格式的错误只在 stderr 输出一行文本。退出码：成功 0，无结果或目标不存在 1，参数或运行错误 2。空列表仍返回 `ok: true, data: []`，退出 1。
+`--jq` 支持 `.data[0].name`、`.data[].name`、带引号的字段、负索引以及 `| length` / `| keys` 管道；字符串原样输出。它是标准库实现的有限子集，不支持完整 jq 语言。`--jq` 自动使用 JSON 包络，不能与显式 md/table 混用。
+`python -m app.kb` 与 `python -m app.kb_cli` 复用同一入口；旧 `--json` 参数仍可用，JSON 输出已统一为新包络。`show --format json` 的完整 Markdown 在 `data.content`。搜索不区分大小写，覆盖标签名、全部会议标题、全部补充记录及已生成综述，默认最多 5 个标签。
+补充记录只追加到 SQLite，不改会议原文或标签词表，单条最多 2000 字；`note add/remove` 返回 `data.id` 并默认增量重建。未知标签可写入。`--no-build` 暂缓重建，之后用 `build --tag` 补建。若重建失败，记录仍已提交，错误含 `committed` 与 `id`，先核验再重建，避免重复追加。`--dry-run` 在数据库初始化前返回计划，不写库、不写文件，也不验证目标是否存在。
+`build --tag` 只处理指定标签、其分类和索引；`--full` 或无筛选时全量构建。内容不变不写盘，文件格式及哈希规则不变。JSON 的 `data` 包含 `{rebuilt, skipped, errors}`；重建失败退出 2，已提交记录不回滚。
 
 同步完成后自动更新本轮 inserted/updated 会议涉及的新旧标签，失败仅记日志，不改变同步结果。设置中心的「同步后更新知识库」（`kb_auto_build`，默认 true）可关闭此步骤。既有异步打标流程保持原样，后续标签变化由每日全量兜底。`kb_full_build` 每天按 `board_time`（默认 Asia/Shanghai 22:00）在看板任务之后执行，独立记录每日执行状态；看板关闭、跳过或失败不阻断知识库，知识库失败也不阻断后续任务。
 
@@ -250,7 +252,7 @@ JS 层验证同步按钮、搜索、复制和菜单等交互；浏览器层验�
 - [增强模型兜底与 SQLite 兼容（35）](docs/enrichment-35.md)
 - [标签词表两级分类（37）](docs/tag-categories-37.md)
 - [标签树形列表（38）](docs/tag-tree-38.md)
-- [移动端导航与触摸目标（40）](docs/mobile-40.md)、[页面密度与控件收纳（41）](docs/mobile-41.md)、[登录快速同步（42）](docs/login-sync-42.md)、[看板统计与分析（T1+T2）](docs/board-t1-t2.md)、[看板页面与导航（T3）](docs/board-t3.md)、[看板定时生成（T4）](docs/board-t4.md)、[未完成会议自动补齐（T6）](docs/backfill-t6.md)、[补齐状态分类修正（T7）](docs/backfill-t7.md)、[窗口内同步与详情节流（T9）](docs/backfill-t9.md)、[看板图表与 UI（T5）](docs/board-t5.md)、[会议核心议题判定（T1）](docs/primary-tag-t1.md)、[周度时间分配聚合（T2）](docs/tag-time-t2.md)、[本周时间分配饼图（T3）](docs/tag-time-t3.md)、[Agent 提示词（KB-T10）](docs/kb-t10.md)、[周度时间分配每日生成与解读（T4）](docs/tag-time-t4.md)、[层级切换与近八周对比（T5）](docs/tag-time-t5.md)、[判定健壮性与对比图比例尺（T6）](docs/tag-time-t6.md)、[允许模型显式未分类（T7）](docs/tag-time-t7.md)、[对比周数可选（T8）](docs/board-t8.md)、[近 N 周垂直堆叠柱（T10）](docs/board-t10.md)、[固定堆叠顺序（T11）](docs/board-t11.md)、[知识库扫描与索引（T1）](docs/kb-t1.md)、[知识库标签与分类渲染（T2）](docs/kb-t2.md)、[知识库回写与重建保真（T3）](docs/kb-t3.md)、[知识库 AI 综述与缓存（T4）](docs/kb-t4.md)、[知识库 CLI、增量与调度（T5）](docs/kb-t5.md)
+- [移动端导航与触摸目标（40）](docs/mobile-40.md)、[页面密度与控件收纳（41）](docs/mobile-41.md)、[登录快速同步（42）](docs/login-sync-42.md)、[看板统计与分析（T1+T2）](docs/board-t1-t2.md)、[看板页面与导航（T3）](docs/board-t3.md)、[看板定时生成（T4）](docs/board-t4.md)、[未完成会议自动补齐（T6）](docs/backfill-t6.md)、[补齐状态分类修正（T7）](docs/backfill-t7.md)、[窗口内同步与详情节流（T9）](docs/backfill-t9.md)、[看板图表与 UI（T5）](docs/board-t5.md)、[会议核心议题判定（T1）](docs/primary-tag-t1.md)、[周度时间分配聚合（T2）](docs/tag-time-t2.md)、[本周时间分配饼图（T3）](docs/tag-time-t3.md)、[Agent 提示词（KB-T10）](docs/kb-t10.md)、[独立知识库 CLI（KB-T11）](docs/kb-t11.md)、[周度时间分配每日生成与解读（T4）](docs/tag-time-t4.md)、[层级切换与近八周对比（T5）](docs/tag-time-t5.md)、[判定健壮性与对比图比例尺（T6）](docs/tag-time-t6.md)、[允许模型显式未分类（T7）](docs/tag-time-t7.md)、[对比周数可选（T8）](docs/board-t8.md)、[近 N 周垂直堆叠柱（T10）](docs/board-t10.md)、[固定堆叠顺序（T11）](docs/board-t11.md)、[知识库扫描与索引（T1）](docs/kb-t1.md)、[知识库标签与分类渲染（T2）](docs/kb-t2.md)、[知识库回写与重建保真（T3）](docs/kb-t3.md)、[知识库 AI 综述与缓存（T4）](docs/kb-t4.md)、[知识库 CLI、增量与调度（T5）](docs/kb-t5.md)
 - [同步按钮主次与进行中状态（30，提交记录）](https://github.com/xumingkai989-hub/qwennote-admin/commit/4b12f5d346f99713022be25bf7051e7792acb25b)
 
 ## 许可证

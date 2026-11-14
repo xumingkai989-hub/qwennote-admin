@@ -1,7 +1,6 @@
 """File-backed knowledge pages; only explicit rebuilds read meeting data."""
 import json
 import math
-import os
 import secrets
 from datetime import datetime
 from urllib.parse import quote
@@ -16,31 +15,30 @@ from app.recording_content import render_summary
 from app.session import SESSION_MAX_AGE
 
 COMMANDS = (
-    '/opt/qwennote/current/scripts/kb.sh list --json',
-    '/opt/qwennote/current/scripts/kb.sh show "AI Tutor" --json',
-    '/opt/qwennote/current/scripts/kb.sh search 状态机 --limit 5 --json',
-    '/opt/qwennote/current/scripts/kb.sh note add "AI Tutor" --text "…" --source codex',
+    'qwennote-kb list --format json',
+    'qwennote-kb show "AI Tutor" --format json',
+    'qwennote-kb search 状态机 --limit 5 --format json',
+    'qwennote-kb note add "AI Tutor" --text "…" --source codex',
 )
 
 
-def build_agent_prompt(kb_cli):
-    location = '\n\n在项目根目录执行。' if kb_cli == 'python -m app.kb' else ''
-    return f'''你是我的会议知识助手。QwenNote 已经把会议按标签整理成知识库，你直接读它，不要让我贴会议内容。{location}
+def build_agent_prompt(kb_cli='qwennote-kb'):
+    return f'''你是我的会议知识助手。QwenNote 已经把会议按标签整理成知识库，你直接读它，不要让我贴会议内容。
 
 ## 先看全貌
-执行：{kb_cli} list --json
+执行：{kb_cli} list --format json
 返回所有标签及其会议数、总时长、补充记录数、最近会议日期。
 
 ## 再读具体主题
-执行：{kb_cli} show "<标签>" --json
-返回的 content 字段是完整的 Markdown，固定四段：
+执行：{kb_cli} show "<标签>" --format json
+返回的 data.content 字段是完整的 Markdown，固定四段：
 - 当前状态：3-5 句综述，说明在推进什么、进展到哪、卡在哪
 - 补充记录：我和之前的 agent 写进去的结论，按时间倒序，优先级高于会议原文
 - 会议：最多 20 场，每场带日期、时长、一句话摘要和原文链接
 - 时间线：会议与补充记录的合并视图
 
 ## 搜索
-执行：{kb_cli} search <关键词> --limit 5 --json
+执行：{kb_cli} search <关键词> --limit 5 --format json
 
 ## 写入
 执行：{kb_cli} note add "<标签>" --text "<你的结论>" --source codex
@@ -121,10 +119,10 @@ def install_knowledge(app, *, settings, templates, sessions, authorize, valid_cs
             token = request.cookies.get(cookie, '')
             if not valid_csrf(request, token, cookie_name=cookie):
                 token = csrf.encode(session_binding(request) + ':' + secrets.token_urlsafe(32))
-        kb_cli = '/opt/qwennote/current/scripts/kb.sh' if os.environ.get('KB_ROOT', '').strip() else 'python -m app.kb'
+        kb_cli = 'qwennote-kb'
         response = templates.TemplateResponse(request=request, name='knowledge.html', context={
             'title': '知识库', 'index': read_index(kb.configured_root()),
-            'commands': tuple(command.replace('/opt/qwennote/current/scripts/kb.sh', kb_cli, 1) for command in COMMANDS),
+            'commands': COMMANDS,
             'kb_prompt': build_agent_prompt(kb_cli), 'kb_cli': kb_cli,
             'csrf_token': token, 'error': error,
         }, headers={'Cache-Control': 'no-store'})

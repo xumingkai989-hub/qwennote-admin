@@ -62,9 +62,9 @@ def test_group_order_stats_links_and_navigation(knowledge_client, knowledge_file
 
 
 @pytest.mark.parametrize('root, cli', [
-    ('/var/lib/qwennote/knowledge', '/opt/qwennote/current/scripts/kb.sh'),
-    (None, 'python -m app.kb'),
-    ('', 'python -m app.kb'),
+    ('/var/lib/qwennote/knowledge', 'qwennote-kb'),
+    (None, 'qwennote-kb'),
+    ('', 'qwennote-kb'),
 ])
 def test_agent_prompt_and_commands_use_runtime_cli(knowledge_client, knowledge_files, monkeypatch, root, cli):
     from html import unescape
@@ -81,8 +81,8 @@ def test_agent_prompt_and_commands_use_runtime_cli(knowledge_client, knowledge_f
     prompt = response.context['kb_prompt']
     assert prompt == knowledge_page.build_agent_prompt(cli)
     assert prompt.splitlines()[-1] == '<在这里写你的具体任务>'
-    assert ('在项目根目录执行' in prompt) == (cli == 'python -m app.kb')
-    for command in ('list --json', 'show "<标签>" --json', 'search <关键词> --limit 5 --json',
+    assert '在项目根目录执行' not in prompt
+    for command in ('list --format json', 'show "<标签>" --format json', 'search <关键词> --limit 5 --format json',
                     'note add "<标签>" --text "<你的结论>" --source codex'):
         assert f'执行：{cli} {command}' in prompt
     assert '- 写完立刻 show 读回，确认记录真的进了文件' in prompt
@@ -108,8 +108,8 @@ def test_missing_or_corrupt_index_empty_state(client, bad):
     response = client.get('/knowledge')
     assert response.status_code == 200
     assert '知识库尚未生成' in response.text
-    assert 'python -m app.kb build --full' in response.text
-    assert 'scripts/kb.sh build --full' in response.text
+    assert 'qwennote-kb build --full' in response.text
+    assert 'python -m app.kb' not in response.text and 'scripts/kb.sh' not in response.text
     assert '给 Agent 接入' in response.text
 
 
@@ -191,8 +191,7 @@ def test_regular_whitelist_read_only(client, fake_auth, store, knowledge_files):
     assert client.post('/knowledge/rebuild').status_code == 403
     (knowledge_files[0] / 'index.json').unlink()
     html = client.get('/knowledge').text
-    assert '知识库尚未生成' in html and 'python -m app.kb build --full' not in html
-    assert 'scripts/kb.sh build --full' not in html
+    assert '知识库尚未生成' in html and 'qwennote-kb build --full' not in html
 
 
 def test_empty_generated_index_offers_admin_build_hint(knowledge_client, knowledge_files):
@@ -201,7 +200,7 @@ def test_empty_generated_index_offers_admin_build_hint(knowledge_client, knowled
     (root / 'index.json').write_text(json.dumps(index))
     html = knowledge_client.get('/knowledge').text
     assert '知识库暂无内容' in html
-    assert 'scripts/kb.sh build --full' in html
+    assert 'qwennote-kb build --full' in html
 
 
 def test_admin_rebuild(knowledge_client, store, knowledge_files, monkeypatch):

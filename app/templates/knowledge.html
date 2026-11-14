@@ -28,11 +28,10 @@
 </section>
 {% endfor %}
 {% if not index.tags %}<p class="empty-state">知识库暂无内容</p>
-{% if navigation_admin %}<p>运行 <code>scripts/kb.sh build --full</code></p>{% endif %}{% endif %}
+{% if navigation_admin %}<p>运行 <code>qwennote-kb build --full</code></p>{% endif %}{% endif %}
 {% else %}
 <section class="knowledge-empty"><h2>知识库尚未生成</h2>
-{% if navigation_admin %}<p>运行 <code>python -m app.kb build --full</code></p>{% endif %}
-{% if navigation_admin %}<p>运行 <code>scripts/kb.sh build --full</code></p>{% endif %}
+{% if navigation_admin %}<p>运行 <code>qwennote-kb build --full</code></p>{% endif %}
 </section>
 {% endif %}
 <section class="knowledge-agent" aria-labelledby="knowledge-agent-title">
