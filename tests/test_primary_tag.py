@@ -89,7 +89,7 @@ def test_optional_reason_and_all_categories(db, reply):
     assert '不许发明新标签' in reply.call_args.kwargs['system']
 
 
-@pytest.mark.parametrize('answer', ['市场与投放', '发明标签', '未分类', '', ' \n ', None,
+@pytest.mark.parametrize('answer', ['市场与投放', '发明标签', '', ' \n ', None,
                                   'AI Tutor、模考系统', 'AI Tutor\n模考系统', 'AI Tutor\n解释一些内容'])
 def test_outside_set_or_empty_falls_back(db, reply, answer):
     meeting(db)
@@ -133,7 +133,7 @@ def test_fingerprint_order_duplicates_and_unambiguous_boundaries():
     assert primary_tag.fingerprint(['a', 'b\nc']) != primary_tag.fingerprint(['a\nb', 'c'])
 
 
-@pytest.mark.parametrize('answer', ['AI Tutor', '未分类'])
+@pytest.mark.parametrize('answer', ['AI Tutor', '未分类', '非法标签'])
 def test_same_fingerprint_skips_even_fallback_after_restart(db, reply, answer):
     meeting(db)
     reply.return_value = answer
@@ -358,3 +358,40 @@ def test_force_rejudges_cached_week(db, reply):
     week(db)
     result = primary_tag.ensure_week(db, '2026-11-02', '2026-11-06', force=True)
     assert result['judged'] == 1 and result['skipped'] == 0 and reply.call_count == 2
+
+
+@pytest.mark.parametrize('answer,reason', [
+    ('未分类', None),
+    ('「未分类」\n理由：没有标签能概括主要议题。', '没有标签能概括主要议题。'),
+    ('未分类\n原因：private-test-key', '[redacted]'),
+])
+@pytest.mark.parametrize('tags', [('AI Tutor', '模考系统'), ('未分类', 'AI Tutor')])
+def test_explicit_unclassified_is_model_decision(db, reply, answer, reason, tags):
+    meeting(db, tags=tags)
+    reply.return_value = answer
+    result = primary_tag.judge(db, 'r1')
+    assert result['source'] == 'model'
+    assert result['tag_name'] == '未分类' and result['tag_id'] is None
+    assert result['reason'] == reason
+    assert saved(db) == result
+
+
+def test_in_set_legacy_tag_without_vocabulary_is_valid(db, reply):
+    meeting(db, tags=('遗留标签', 'AI Tutor'))
+    reply.return_value = '遗留标签'
+    result = primary_tag.judge(db, 'r1')
+    assert result['source'] == 'model' and result['tag_name'] == '遗留标签'
+    assert result['tag_id'] is None and saved(db) == result
+
+
+def test_invalidated_old_unclassified_fallback_is_rejudged(db, reply):
+    meeting(db)
+    reply.return_value = '未分类\n理由：现有标签不适用。'
+    primary_tag.judge(db, 'r1')
+    with db._connect() as conn:
+        conn.execute("UPDATE recording_primary_tag SET source='fallback', reason='out_of_set:未分类', tag_fingerprint=''")
+    result = week(db)
+    assert {k: result[k] for k in ('judged', 'model', 'fallback', 'errors', 'skipped')} == {
+        'judged': 1, 'model': 1, 'fallback': 0, 'errors': 0, 'skipped': 0}
+    assert saved(db)['reason'] == '现有标签不适用。'
+    assert reply.call_count == 2

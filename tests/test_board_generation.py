@@ -247,13 +247,14 @@ def test_failed_allocation_stays_failed_until_regenerated(board_client, store, m
 
 
 @pytest.mark.parametrize('exception_count', [0, 1, 2])
-def test_week_report_only_flags_model_exceptions(store, monkeypatch, provider, exception_count):
+@pytest.mark.parametrize('answer', ['invalid label', '未分类'])
+def test_week_report_only_flags_model_exceptions(store, monkeypatch, provider, exception_count, answer):
     from unittest.mock import Mock
     from app.models import ModelCredentials
     for i in range(2):
         add(store, f'judge-{i}', tags=('AI Tutor', '模考系统'))
     monkeypatch.setattr(board_analysis, 'resolve_model', lambda s: ModelCredentials('fixture', 'https://fixture.invalid', 'test'))
-    request = Mock(side_effect=[RuntimeError('private-key') if i < exception_count else 'invalid label' for i in range(2)])
+    request = Mock(side_effect=[RuntimeError('private-key') if i < exception_count else answer for i in range(2)])
     monkeypatch.setattr(board_analysis, 'request_text', request)
     for _ in range(2):
         result = run(store)
