@@ -72,13 +72,13 @@ def test_shared_scale_order_connections_and_color_without_mutation():
     result = board_page.allocation_comparison(weeks, current)
     rows = result['rows']
     assert [r['end'] for r in rows[0]['segments']] == [.5, .75]
-    assert [r['end'] for r in rows[1]['segments']] == [.75, 1]
+    assert [r['end'] for r in rows[1]['segments']] == [.25, 1]
     assert rows[3]['segments'][0]['end'] == .5
-    assert [c['name'] for c in result['connections']] == ['技术', '产品']
+    assert [c['name'] for c in result['connections']] == ['产品', '技术']
     assert all((c['week1'], c['week2']) == ('2026-10-12', '2026-10-19') for c in result['connections'])
-    product = result['connections'][1]
+    product = result['connections'][0]
     assert product['bottom1'] == result['bottom']
-    assert product['top2'] == rows[1]['segments'][1]['top']
+    assert product['top2'] == rows[1]['segments'][0]['top']
     for row in rows:
         for segment in row['segments']:
             if segment['name'] == '产品':
@@ -105,7 +105,7 @@ def test_present_zero_minute_category_has_connection():
     weeks[1]['by_category'].append({'name': '未分类', 'minutes': 0, 'share': 0})
     weeks[0]['by_category'].append({'name': '未分类', 'minutes': 0, 'share': 0})
     chart = board_page.allocation_comparison(weeks, [])
-    assert [item['name'] for item in chart['connections']] == ['技术', '产品', '未分类']
+    assert [item['name'] for item in chart['connections']] == ['产品', '技术', '未分类']
 
 
 def test_comparison_failure_keeps_existing_board(board_client, monkeypatch):

@@ -76,11 +76,14 @@ def allocation_chart(rows, total, level):
     return sectors
 
 
+COMPARISON_CATEGORY_ORDER = ('产品', '中台', '师资', '市场', '技术', '公司管理', '其他', '未分类')
+
+
 def allocation_comparison(weeks, current_sectors):
     """One category palette shared with the unchanged current-week donut.
 
-    Use the largest weekly total as the common scale, retaining each week's
-    aggregation order, stacked bottom to top. Only adjacent weeks connect.
+    Use the largest weekly total as the common scale. Stack bottom to top in
+    fixed category rank order, skipping absent categories. Only neighbors connect.
     """
     colors = {item['name']: item['color'] for item in current_sectors}
     colors.update({'其他': 'allocation-other', '未分类': 'allocation-unknown'})
@@ -90,6 +93,11 @@ def allocation_comparison(weeks, current_sectors):
     for name in names:
         if name not in colors:
             colors[name] = available.pop(0) if available else str(len(colors) % 6 + 1)
+    # Keep palette assignment unchanged. Unknown future categories also receive
+    # a deterministic rank, independent of weekly minutes or input order.
+    order = [*COMPARISON_CATEGORY_ORDER, *sorted(set(names) - set(COMPARISON_CATEGORY_ORDER))]
+    ranks = {name: rank for rank, name in enumerate(order)}
+    names = sorted(names, key=ranks.__getitem__)
     weeks = sorted(weeks, key=lambda week: week['monday'])
     maximum = max((week['total_minutes'] for week in weeks), default=0)
     plot_height, bottom = 240, 264
@@ -100,11 +108,12 @@ def allocation_comparison(weeks, current_sectors):
         cx = (index + .5) / len(weeks)
         x = cx - column_width / 2
         segments, current, offset = [], {}, 0
-        for item in week['by_category']:
+        for item in sorted(week['by_category'], key=lambda item: ranks[item['name']]):
             start = offset / maximum if maximum else 0
             segment_bottom = bottom - offset * scale
             offset += item['minutes']
-            segment = {**item, 'start': start, 'end': offset / maximum if maximum else 0,
+            segment = {**item, 'rank': ranks[item['name']],
+                       'start': start, 'end': offset / maximum if maximum else 0,
                        'x': x, 'width': column_width, 'top': bottom - offset * scale,
                        'bottom': segment_bottom, 'height': item['minutes'] * scale,
                        'color': colors[item['name']]}
@@ -127,7 +136,7 @@ def allocation_comparison(weeks, current_sectors):
     return {'rows': rows, 'connections': connections, 'height': 300,
             'plot_height': plot_height, 'bottom': bottom, 'ticks': ticks,
             'max_minutes': maximum, 'axis_max_minutes': maximum * 1.1,
-            'legend': [{'name': name, 'color': colors[name]} for name in names]}
+            'legend': [{'name': name, 'color': colors[name], 'rank': ranks[name]} for name in names]}
 
 
 def parse_day(value):

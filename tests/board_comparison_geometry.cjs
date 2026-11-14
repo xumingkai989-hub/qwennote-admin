@@ -22,7 +22,7 @@ module.exports = async function inspect(section, weeks, javascript = true) {
     return {overflow:document.documentElement.scrollWidth>innerWidth, colors, bands,
       expectedBands: rows.slice(1).reduce((n,row,i)=>n+[...row.querySelectorAll('rect')].filter(e=>[...rows[i].querySelectorAll('rect')].some(r=>r.dataset.category===e.dataset.category)).length,0),
       rows:rows.map(row=>({day:row.dataset.week,cx:+row.dataset.cx,minutes:+row.dataset.minutes,
-        height:+row.dataset.height,segments:[...row.querySelectorAll('rect')].map(e=>({...box(e),pixelWidth:e.getBoundingClientRect().width}))})),
+        height:+row.dataset.height,segments:[...row.querySelectorAll('rect')].map(e=>({...box(e),name:e.dataset.category,pixelWidth:e.getBoundingClientRect().width}))})),
       labels:labels.map(e=>{const text=e.querySelector('text'),r=text.getBoundingClientRect();return {left:r.left,right:r.right,fontSize:getComputedStyle(text).fontSize,text:text.textContent};}),
       totals:[...section.querySelectorAll('[data-total-label]')].map(e=>{const r=e.getBoundingClientRect();return {day:e.dataset.totalLabel,size:getComputedStyle(e).fontSize,left:r.left,right:r.right,top:r.top,bottom:r.bottom};}),
       bounds:{left:plot.getBoundingClientRect().left,right:plot.getBoundingClientRect().right,top:section.querySelector('.board-comparison-svg').getBoundingClientRect().top},
@@ -35,7 +35,11 @@ module.exports = async function inspect(section, weeks, javascript = true) {
   assert.equal(facts.rows.length,weeks);
   assert.deepEqual(facts.rows.map(r=>r.day),facts.rows.map(r=>r.day).sort());
   const maximum=Math.max(...facts.rows.map(r=>r.minutes));
+  const order=['产品','中台','师资','市场','技术','公司管理','其他','未分类'];
+  const legend=facts.legendColors.map(item=>item.name);
+  assert.deepEqual(legend,order.filter(name=>legend.includes(name)));
   facts.rows.forEach((row,i)=>{
+    assert.deepEqual(row.segments.map(s=>s.name),legend.filter(name=>row.segments.some(s=>s.name===name)));
     if(i) assert.ok(row.cx>facts.rows[i-1].cx);
     assert.ok(Math.abs(row.height-(maximum ? row.minutes/maximum*240/1.1 : 0))<.01);
     let bottom=264;
@@ -52,6 +56,15 @@ module.exports = async function inspect(section, weeks, javascript = true) {
     assert.equal(band.b,band.a+1);
     assert.equal(band.opacity,'0.18'); assert.equal(band.color,band.expectedColor);
     band.points.forEach((p,i)=>p.forEach((v,j)=>assert.ok(Math.abs(v-band.expected[i][j])<.01)));
+  }
+  for(let i=0;i<facts.bands.length;i++) for(const upper of facts.bands.slice(i+1)) {
+    const lower=facts.bands[i];
+    if(lower.a!==upper.a) continue;
+    for(const t of [0,.25,.5,.75,1]) {
+      const lowerTop=lower.points[0][1]*(1-t)+lower.points[1][1]*t;
+      const upperBottom=upper.points[3][1]*(1-t)+upper.points[2][1]*t;
+      assert.ok(lowerTop>=upperBottom-.01,'adjacent bands must not cross or overlap');
+    }
   }
   assert.equal(facts.grid.length,maximum?5:1);
   assert.ok(facts.grid.every(opacity=>opacity==='0.5'));
