@@ -48,6 +48,13 @@ class RecordingCard:
     has_summary: bool
     tags: tuple[str, ...] = field(default=(), kw_only=True)
     backfill_status: str | None = field(default=None, kw_only=True)
+    last_attempt_at: str | None = field(default=None, kw_only=True)
+
+    @property
+    def backfill_attempt_time(self) -> str | None:
+        if not self.backfill_label or not self.last_attempt_at:
+            return None
+        return datetime.fromisoformat(self.last_attempt_at).astimezone(SHANGHAI).strftime("%H:%M")
 
     @property
     def backfill_label(self) -> str | None:
@@ -739,7 +746,9 @@ class SQLiteStore:
             rows = conn.execute(
                 'SELECT recording_id, title, created_at, duration_min, has_transcript, has_summary, '
                 'summary_md, transcript_md, (SELECT last_status FROM backfill_state b '
-                'WHERE b.recording_id=recordings.recording_id) AS backfill_status '
+                'WHERE b.recording_id=recordings.recording_id) AS backfill_status, '
+                '(SELECT last_attempt_at FROM backfill_state b '
+                'WHERE b.recording_id=recordings.recording_id) AS last_attempt_at '
                 f'FROM recordings WHERE {where} '
                 'ORDER BY created_at DESC, recording_id DESC LIMIT 20 OFFSET ?',
                 (*params, (page - 1) * 20),
@@ -749,7 +758,8 @@ class SQLiteStore:
             StoredRecording(row['recording_id'], row['title'], datetime.fromisoformat(row['created_at']),
                             row['duration_min'], bool(row['has_transcript']), bool(row['has_summary']),
                             row['summary_md'] or '', row['transcript_md'] or '',
-                            tags=tags.get(row['recording_id'], ()), backfill_status=row['backfill_status'])
+                            tags=tags.get(row['recording_id'], ()), backfill_status=row['backfill_status'],
+                          last_attempt_at=row['last_attempt_at'])
             for row in rows
         ], total, page, pages)
 
@@ -769,7 +779,9 @@ class SQLiteStore:
             rows = conn.execute(
                 'SELECT recording_id, title, created_at, duration_min, has_transcript, has_summary, '
                 'summary_md, transcript_md, (SELECT last_status FROM backfill_state b '
-                'WHERE b.recording_id=recordings.recording_id) AS backfill_status '
+                'WHERE b.recording_id=recordings.recording_id) AS backfill_status, '
+                '(SELECT last_attempt_at FROM backfill_state b '
+                'WHERE b.recording_id=recordings.recording_id) AS last_attempt_at '
                 f'FROM recordings WHERE {where} '
                 'ORDER BY created_at DESC, recording_id DESC LIMIT ? OFFSET ?',
                 (*params, limit if limit is not None else -1, offset),
@@ -779,7 +791,8 @@ class SQLiteStore:
             StoredRecording(row['recording_id'], row['title'], datetime.fromisoformat(row['created_at']),
                             row['duration_min'], bool(row['has_transcript']), bool(row['has_summary']),
                             row['summary_md'] or '', row['transcript_md'] or '',
-                            tags=tags.get(row['recording_id'], ()), backfill_status=row['backfill_status'])
+                            tags=tags.get(row['recording_id'], ()), backfill_status=row['backfill_status'],
+                          last_attempt_at=row['last_attempt_at'])
             for row in rows
         ], total)
 
@@ -840,7 +853,9 @@ class SQLiteStore:
             page = min(max(1, page), pages)
             rows = conn.execute(
                 'SELECT recording_id, title, created_at, duration_min, has_transcript, has_summary, '
-                '(SELECT last_status FROM backfill_state b WHERE b.recording_id=recordings.recording_id) AS backfill_status '
+                '(SELECT last_status FROM backfill_state b WHERE b.recording_id=recordings.recording_id) AS backfill_status, '
+                '(SELECT last_attempt_at FROM backfill_state b '
+                'WHERE b.recording_id=recordings.recording_id) AS last_attempt_at '
                 f'FROM recordings WHERE {where} '
                 'ORDER BY created_at DESC, recording_id DESC LIMIT 20 OFFSET ?',
                 (*bounds, (page - 1) * 20),
@@ -849,7 +864,8 @@ class SQLiteStore:
         return RecordingPage([
             RecordingCard(row['recording_id'], row['title'], datetime.fromisoformat(row['created_at']),
                           row['duration_min'], bool(row['has_transcript']), bool(row['has_summary']),
-                          tags=tags.get(row['recording_id'], ()), backfill_status=row['backfill_status'])
+                          tags=tags.get(row['recording_id'], ()), backfill_status=row['backfill_status'],
+                          last_attempt_at=row['last_attempt_at'])
             for row in rows
         ], total, page, pages)
 
@@ -920,7 +936,7 @@ class SQLiteStore:
             attempts = row['attempts'] if row else 0
             pending_checks = row['pending_checks'] if row else 0
             if status == 'pending_upstream':
-                delay = (10, 30, 120)[min(pending_checks, 2)]
+                delay = (5, 15, 60)[min(pending_checks, 2)]
                 pending_checks += 1
             elif status == 'no_upstream_content':
                 delay = 1440
@@ -989,7 +1005,9 @@ class SQLiteStore:
             row = conn.execute(
                 'SELECT recording_id, title, created_at, duration_min, has_transcript, has_summary, '
                 'summary_md, transcript_md, (SELECT last_status FROM backfill_state b '
-                'WHERE b.recording_id=recordings.recording_id) AS backfill_status '
+                'WHERE b.recording_id=recordings.recording_id) AS backfill_status, '
+                '(SELECT last_attempt_at FROM backfill_state b '
+                'WHERE b.recording_id=recordings.recording_id) AS last_attempt_at '
                 'FROM recordings WHERE recording_id = ?', (recording_id,),
             ).fetchone()
             tags = self._tags_for(conn, [row] if row else [])
@@ -1001,7 +1019,7 @@ class SQLiteStore:
             duration_min=row['duration_min'], has_transcript=bool(row['has_transcript']),
             has_summary=bool(row['has_summary']), summary_md=row['summary_md'] or '',
             transcript_md=row['transcript_md'] or '', tags=tags.get(recording_id, ()),
-            backfill_status=row['backfill_status'],
+            backfill_status=row['backfill_status'], last_attempt_at=row['last_attempt_at'],
         )
 
     @staticmethod

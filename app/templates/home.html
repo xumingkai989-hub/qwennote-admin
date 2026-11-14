@@ -32,7 +32,8 @@
     {% set status, status_label = recording.status %}
     <article class="recording-card" data-recording-id="{{ recording.recording_id }}">
       <span class="badge badge-{{ status }}">{{ status_label }}</span>
-      {% if recording.backfill_label %}<span class="backfill-badge">{{ recording.backfill_label }}</span>{% endif %}
+      {% if recording.backfill_label %}<span class="backfill-badge">{{ recording.backfill_label }}</span>
+      {% if recording.backfill_attempt_time %}<small class="backfill-attempt">最近尝试 {{ recording.backfill_attempt_time }}</small>{% endif %}{% endif %}
       <h2><a href="/recordings/{{ recording.recording_id | urlencode }}{{ detail_query }}">{{ recording.title or '未命名录音' }}</a></h2>
       {% set state = enrichment_states.get(recording.recording_id, {}) if enrichment_states is defined else {} %}
       {% include 'enrichment_card.html' %}
@@ -62,7 +63,8 @@
         <article class="timeline-card" data-recording-id="{{ recording.recording_id }}">
           <a class="timeline-card-link" href="/recordings/{{ recording.recording_id | urlencode }}{{ detail_query }}">
             <div class="card-title-row"><h3 class="recording-title" title="{{ recording.title or '未命名录音' }}">{{ recording.title or '未命名录音' }}</h3></div>
-            {% if recording.backfill_label %}<span class="backfill-badge">{{ recording.backfill_label }}</span>{% endif %}
+            {% if recording.backfill_label %}<span class="backfill-badge">{{ recording.backfill_label }}</span>
+      {% if recording.backfill_attempt_time %}<small class="backfill-attempt">最近尝试 {{ recording.backfill_attempt_time }}</small>{% endif %}{% endif %}
             {% if card.summary %}<p class="card-summary">{{ card.summary }}</p>{% endif %}
             {% if card.duration %}<span class="duration-pill" aria-label="录音时长">录音 · {{ card.duration }}</span>{% endif %}
             <div class="card-footer">

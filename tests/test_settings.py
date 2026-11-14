@@ -268,7 +268,7 @@ def test_retention_transaction_rolls_back(client, store):
     assert store.get_overrides('old')['summary']['content_md'] == '人工修订'
 
 
-def test_tag_switch_stops_sync_auto_tags(client, store, monkeypatch):
+def test_tag_switch_stops_sync_auto_tags(client, store, monkeypatch, detail_clock):
     now = datetime.now(SHANGHAI)
     source = FakeMinutesSource()
     source.recordings = [RecordingMeta('sync-new', '标题', now, 1)]
@@ -278,6 +278,7 @@ def test_tag_switch_stops_sync_auto_tags(client, store, monkeypatch):
     store.save_settings(replace(AutomationSettings(), tag_enabled=False))
     assert run_sync(source, store, backfill_days=1).status == 'success'
     assert not calls
+    detail_clock[0] += 60
     store.save_settings(AutomationSettings())
     source.recordings = [replace(source.recordings[0], title='新标题')]
     with store._connect() as conn:

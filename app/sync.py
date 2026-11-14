@@ -11,6 +11,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import AbstractContextManager
 from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timedelta
+from threading import Lock
 from typing import Protocol
 
 from app.mcp import TokenRefreshError
@@ -19,6 +20,22 @@ from app.minutes import MinutesRetryableError, MinutesSource, RecordingDetail, R
 OVERLAP = timedelta(minutes=10)
 BACKFILL_LIMIT = 3
 DETAIL_WORKERS = 2
+DETAIL_THROTTLE_SECONDS = 60
+_last_detail_attempt: dict[str, float] = {}
+_detail_attempt_lock = Lock()
+
+
+def _claim_detail_attempt(recording_id: str) -> bool:
+    """Process-local cooldown shared by login, tick and manual sync callers."""
+    with _detail_attempt_lock:
+        now = time.monotonic()
+        for rid, attempted_at in list(_last_detail_attempt.items()):
+            if now - attempted_at >= DETAIL_THROTTLE_SECONDS:
+                del _last_detail_attempt[rid]
+        if recording_id in _last_detail_attempt:
+            return False
+        _last_detail_attempt[recording_id] = now
+        return True
 
 
 def _storage_error(error: Exception) -> str:
@@ -139,7 +156,7 @@ def run_sync(source: MinutesSource, store: SyncStore, *, backfill_days: int = 90
             errors.append('录音列表拉取失败，请检查数据源、凭据和网络配置后重试')
 
         # This independent stage also runs when listing fails. Existing incomplete
-        # rows only enter through the bounded, due queue, even during full sync.
+        # rows outside the window only enter through the bounded, due queue.
         pending = []
         previous_by_id = {}
         for meta in ([] if fatal_auth else [*recordings, *candidates]):
@@ -153,8 +170,12 @@ def run_sync(source: MinutesSource, store: SyncStore, *, backfill_days: int = 90
                 errors.append(f'录音 {meta.recording_id}：{_storage_error(error)}')
                 continue
             complete = previous is not None and previous.has_transcript
-            if ((mode == 'quick' and complete) or
-                    (previous is not None and not complete and meta.recording_id not in backfill_ids)):
+            in_window = meta.created_at >= start
+            if mode == 'quick' and complete:
+                skipped += 1
+                continue
+            if (previous is not None and not complete and not in_window
+                    and meta.recording_id not in backfill_ids):
                 skipped += 1
                 continue
             pending.append(meta)
@@ -165,6 +186,9 @@ def run_sync(source: MinutesSource, store: SyncStore, *, backfill_days: int = 90
         with ThreadPoolExecutor(max_workers=DETAIL_WORKERS) as pool:
             for offset in range(0, len(pending), DETAIL_WORKERS):
                 wave = pending[offset:offset + DETAIL_WORKERS]
+                ready = [m for m in wave if _claim_detail_attempt(m.recording_id)]
+                skipped += len(wave) - len(ready)
+                wave = ready
                 if detail_serialized:
                     results = {m.recording_id: _fetch_detail(source, m) for m in wave}
                 else:
@@ -172,6 +196,7 @@ def run_sync(source: MinutesSource, store: SyncStore, *, backfill_days: int = 90
                     results = {rid: future.result() for rid, future in futures.items()}
                 for meta in wave:
                     detail, error = results[meta.recording_id]
+                    previous = previous_by_id[meta.recording_id]
                     code = _http_status(error)
                     consecutive_limited = consecutive_limited + 1 if code == 429 else 0
                     if consecutive_limited >= 2 and not detail_serialized:
@@ -184,19 +209,18 @@ def run_sync(source: MinutesSource, store: SyncStore, *, backfill_days: int = 90
                         _count_http_failure(http_failures, error)
                         if not isinstance(error, TokenRefreshError):
                             errors.append(f'录音 {meta.recording_id}：详情拉取失败，请重试')
-                        if meta.recording_id in backfill_ids:
+                        if previous is not None and not previous.has_transcript:
                             store.finish_backfill(meta.recording_id, datetime.now(SHANGHAI),
                                 status='rate_limited' if code == 429 else (
                                     'upstream_error' if code is not None or isinstance(error,
                                         (MinutesRetryableError, httpx.TimeoutException, TimeoutError)) else 'bad_response'),
                                 http_status=code)
                         continue
-                    previous = previous_by_id[meta.recording_id]
                     try:
                         outcome = store.upsert_recording(meta, detail, datetime.now(SHANGHAI).isoformat())
                     except Exception as error:
                         errors.append(f'录音 {meta.recording_id}：{_storage_error(error)}')
-                        if meta.recording_id in backfill_ids:
+                        if previous is not None and not previous.has_transcript:
                             store.finish_backfill(meta.recording_id, datetime.now(SHANGHAI), status='bad_response')
                         continue
                     complete = detail.has_transcript

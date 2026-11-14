@@ -213,7 +213,7 @@ def test_content_change_invalidates_but_unchanged_sync_preserves(populated, stor
     assert '本条的用词尚未经过热词判断' in populated.get('/recordings/hotword').text
 
 
-def test_sync_judges_only_new_or_changed_content(populated, store, monkeypatch):
+def test_sync_judges_only_new_or_changed_content(populated, store, monkeypatch, detail_clock):
     r = store.get_recording('hotword')
     class Source:
         body = BODY
@@ -223,6 +223,7 @@ def test_sync_judges_only_new_or_changed_content(populated, store, monkeypatch):
     monkeypatch.setattr('app.hotword_judge.run_judgments', lambda store, **kw: calls.append(kw))
     source = Source()
     assert run_sync(source, store, backfill_days=90, full=True).status == 'success' and calls == []
+    detail_clock[0] += 60
     source.body = '内容变化'
     assert run_sync(source, store, backfill_days=90, full=True).status == 'success'
     assert calls == [] and store.hotword_decisions('hotword') == []

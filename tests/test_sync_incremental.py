@@ -99,7 +99,7 @@ def test_only_new_record_needs_details(incremental):
 
 
 @pytest.mark.parametrize('missing', ['has_transcript', 'has_summary'])
-def test_incomplete_old_record_is_refetched_and_updated(incremental, missing):
+def test_incomplete_old_record_is_refetched_and_updated(incremental, missing, detail_clock):
     source, store = incremental
     add(source, 'late', days_ago=5 / 1440, **{missing: False})
     add(source, 'complete', days_ago=6 / 1440)
@@ -108,6 +108,7 @@ def test_incomplete_old_record_is_refetched_and_updated(incremental, missing):
     source.details['late'] = replace(source.details['late'], **{missing: True})
     with store._connect() as conn:
         conn.execute('UPDATE backfill_state SET next_attempt_at=NULL')
+    detail_clock[0] += 60  # This refresh occurs after the process cooldown.
     result = run_sync(source, store)
     expected = missing == 'has_transcript'
     assert source.detail_calls == (['late'] if expected else [])
@@ -130,13 +131,14 @@ def test_complete_records_are_skipped_including_exact_boundary(incremental, offs
     assert source.detail_calls == expected_calls
 
 
-def test_full_sync_bypasses_window_and_skip_rules(incremental):
+def test_full_sync_bypasses_window_and_skip_rules(incremental, detail_clock):
     source, store = incremental
     add(source, 'old')
     add(source, 'older', 20)
     run_sync(source, store)
     source.detail_calls.clear()
     source.details['old'] = replace(source.details['old'], summary_md='修复总结')
+    detail_clock[0] += 60  # This refresh occurs after the process cooldown.
     result = run_sync(source, store, full=True, backfill_days=60)
     assert [w[0] for w in source.windows] == [NOW - timedelta(days=90), NOW - timedelta(days=60)]
     assert source.detail_calls == ['old', 'older']
@@ -176,7 +178,7 @@ def test_window_uses_latest_success_started_at_and_ignores_newer_failures(increm
     assert source.windows[0][0] == NOW - timedelta(days=expected)
 
 
-def test_watermark_query_failure_falls_back_to_full_without_skipping(incremental, monkeypatch):
+def test_watermark_query_failure_falls_back_to_full_without_skipping(incremental, monkeypatch, detail_clock):
     source, store = incremental
     add(source, 'old')
     run_sync(source, store)
@@ -186,6 +188,7 @@ def test_watermark_query_failure_falls_back_to_full_without_skipping(incremental
         raise sqlite3.OperationalError('private provider error')
 
     monkeypatch.setattr(store, 'latest_successful_sync', broken)
+    detail_clock[0] += 60  # This refresh occurs after the process cooldown.
     result = run_sync(source, store)
     assert result.status == 'success' and result.error is None
     assert [w[0] for w in source.windows] == [NOW - timedelta(days=90)] * 2
@@ -231,7 +234,7 @@ def test_skipped_migration_is_idempotent_and_preserves_old_runs(store):
     assert run.mode == 'quick' and run.skipped == 0 and run.fetched == 12 and run.started_at == NOW.isoformat()
 
 
-def test_http_full_sync_uses_saved_backfill_and_pulls_complete_history(client, store):
+def test_http_full_sync_uses_saved_backfill_and_pulls_complete_history(client, store, detail_clock):
     login(client)
     source = WindowSource()
     source.recordings.append(RecordingMeta('old', 'old', datetime.now(SHANGHAI), 10))
@@ -243,6 +246,7 @@ def test_http_full_sync_uses_saved_backfill_and_pulls_complete_history(client, s
     assert client.post('/sync').json()['skipped'] == 1
     assert source.detail_calls == []
     store.save_settings(replace(store.get_settings(), backfill_days=30))
+    detail_clock[0] += 60  # This refresh occurs after the process cooldown.
     result = client.post('/sync?full=1')
     assert result.status_code == 200 and result.json()['skipped'] == 0
     assert source.detail_calls == ['old'] and len(source.windows) == 3

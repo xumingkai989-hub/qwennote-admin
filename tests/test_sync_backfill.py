@@ -25,6 +25,7 @@ def queue(store, monkeypatch):
             return cls.current.astimezone(tz)
 
     monkeypatch.setattr('app.sync.datetime', Clock)
+    monkeypatch.setattr('app.sync.time.monotonic', lambda: Clock.current.timestamp())
     monkeypatch.setattr('app.sync.time.sleep', lambda _: None)
     store.migrate()
     rid = store.start_sync(NOW.isoformat())
@@ -98,10 +99,10 @@ def test_success_removes_state_and_counts_update(queue):
 
 
 @pytest.mark.parametrize('full', [False, True])
-def test_list_duplicates_cannot_bypass_cap_or_backoff(queue, full):
+def test_outside_window_list_duplicates_cannot_bypass_cap_or_backoff(queue, full):
     source, store, clock = queue
     with store._connect() as conn:
-        conn.execute('UPDATE recordings SET created_at=?', ((NOW-timedelta(minutes=1)).isoformat(),))
+        conn.execute('UPDATE recordings SET created_at=?', ((NOW-timedelta(days=100)).isoformat(),))
     source.recordings = store.backfill_candidates(NOW, 10) * 2
     source.detail_errors = {str(i): ValueError('private') for i in range(4)}
     run_sync(source, store, full=full)
@@ -273,8 +274,8 @@ def test_migration_preserves_history_and_backoff(queue):
 
 
 @pytest.mark.parametrize('age,status,delay', [
-    (timedelta(hours=1), 'pending_upstream', 10),
-    (timedelta(hours=24)-timedelta(microseconds=1), 'pending_upstream', 10),
+    (timedelta(hours=1), 'pending_upstream', 5),
+    (timedelta(hours=24)-timedelta(microseconds=1), 'pending_upstream', 5),
     (timedelta(hours=24), 'no_upstream_content', 1440),
     (timedelta(hours=30), 'no_upstream_content', 1440),
 ])
@@ -298,7 +299,7 @@ def test_pending_schedule_survives_restart_then_becomes_empty_and_recovers(queue
         conn.execute('UPDATE recordings SET created_at=? WHERE recording_id="0"',
                      ((NOW-timedelta(hours=1)).isoformat(),))
     source.details['0'] = RecordingDetail('0', None, None, False, False)
-    for delay in [10, 30, 120, 120, 120, 120]:
+    for delay in [5, 15, 60, 60, 60, 60]:
         run_sync(source, store)
         store.migrate()
         saved = state(store)
@@ -322,7 +323,7 @@ def test_true_error_budget_does_not_cap_pending(queue):
         store.finish_backfill('0', NOW, status='bad_response')
     store.finish_backfill('0', NOW, status='pending_upstream')
     assert state(store)['attempts'] == 5
-    assert datetime.fromisoformat(state(store)['next_attempt_at']) == NOW + timedelta(minutes=10)
+    assert datetime.fromisoformat(state(store)['next_attempt_at']) == NOW + timedelta(minutes=5)
 
 
 def test_migration_resets_legacy_false_failure_once_and_removes_complete(queue):

@@ -100,3 +100,16 @@ def controlled_login_sync_dispatch(monkeypatch):
     thread = Mock()
     monkeypatch.setattr('app.login_sync.Thread', thread)
     return thread
+
+
+@pytest.fixture(autouse=True)
+def isolated_detail_throttle(monkeypatch):
+    # Process memory must not leak recording IDs between independent tests.
+    monkeypatch.setattr("app.sync._last_detail_attempt", {})
+
+
+@pytest.fixture
+def detail_clock(monkeypatch):
+    clock = [1000.0]
+    monkeypatch.setattr("app.sync.time.monotonic", lambda: clock[0])
+    return clock

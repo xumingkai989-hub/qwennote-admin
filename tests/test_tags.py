@@ -192,7 +192,7 @@ def test_provider_errors_do_not_leak_and_single_failure_isolated(tagged_store, c
     assert 'private-test-key' not in str(result) + caplog.text
 
 
-def test_sync_only_new_or_model_input_changed(tagged_store, monkeypatch):
+def test_sync_only_new_or_model_input_changed(tagged_store, monkeypatch, detail_clock):
     original_run = tag.run_tags
     results = []
     def fake(store, **kwargs):
@@ -212,10 +212,12 @@ def test_sync_only_new_or_model_input_changed(tagged_store, monkeypatch):
             source.recordings[0] = replace(source.recordings[0], **{field: value})
         assert run_sync(source, tagged_store, backfill_days=1, full=True).status == 'success'
         process_pending(tagged_store)
+        detail_clock[0] += 60
     for field in ['summary_md', 'transcript_md']:
         source.details['new'] = replace(source.details['new'], **{field: '更正内容'})
         run_sync(source, tagged_store, backfill_days=1, full=True)
         process_pending(tagged_store)
+        detail_clock[0] += 60
     assert [result['attempted'] for result in results] == [1, 1, 1, 1]
 
 

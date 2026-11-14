@@ -77,9 +77,10 @@ def test_identical_sync_only_changes_synced_at(sync_client, settings):
     assert len(rows(settings, 'sync_runs')) == 2
 
 
-def test_title_change_updates_exactly_one_record(sync_client, settings, source):
+def test_title_change_updates_exactly_one_record(sync_client, settings, source, detail_clock):
     sync_client.post('/sync')
     source.recordings[0] = replace(source.recordings[0], title='更正标题')
+    detail_clock[0] += 60  # This refresh occurs after the process cooldown.
     result = sync_client.post('/sync?full=1').json()
     assert (result['inserted'], result['updated']) == (0, 1)
     assert rows(settings, 'recordings')[0]['title'] == '更正标题'
@@ -184,18 +185,20 @@ def test_detail_id_mismatch_is_skipped(sync_client, settings, source):
     ('summary_md', '新总结'), ('transcript_md', '新转写'),
     ('has_summary', False), ('has_transcript', False),
 ])
-def test_detail_changes_update_one_record(sync_client, settings, source, field, value):
+def test_detail_changes_update_one_record(sync_client, settings, source, field, value, detail_clock):
     sync_client.post('/sync')
     source.details['demo-1'] = replace(source.details['demo-1'], **{field: value})
+    detail_clock[0] += 60  # This refresh occurs after the process cooldown.
     result = sync_client.post('/sync?full=1').json()
     assert (result['inserted'], result['updated']) == (0, 1)
     assert rows(settings, 'recordings')[0][field] == value
 
 
-def test_failed_refresh_keeps_previous_detail(sync_client, settings, source):
+def test_failed_refresh_keeps_previous_detail(sync_client, settings, source, detail_clock):
     sync_client.post('/sync')
     before = rows(settings, 'recordings')[0]
     source.detail_errors['demo-1'] = RuntimeError('unavailable')
+    detail_clock[0] += 60  # This refresh occurs after the process cooldown.
     assert sync_client.post('/sync?full=1').json()['status'] == 'failed'
     assert rows(settings, 'recordings')[0] == before
 

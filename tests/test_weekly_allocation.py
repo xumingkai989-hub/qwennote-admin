@@ -130,7 +130,7 @@ def test_category_name_is_escaped(board_client, store):
 def test_script_and_styles_have_updated_cache_keys(board_client):
     html = board_client.get('/board').text
     assert 'board.js?v=20261114-tag-time-t6' in html
-    assert 'app.css?v=20261114-board-t8' in html
+    assert 'app.css?v=20261114-backfill-t9' in html
 
 
 def test_138_and_214_hours_use_one_global_scale_and_matching_connections():

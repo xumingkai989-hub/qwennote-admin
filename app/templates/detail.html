@@ -25,7 +25,8 @@
         {% for tag in recording.tags %}<span class="tag-pill">{{ tag }}</span>{% endfor %}
       </div>
       {% endif %}
-      {% if recording.backfill_label %}<p class="backfill-pending">{{ recording.backfill_label }}</p>{% endif %}
+      {% if recording.backfill_label %}<p class="backfill-pending">{{ recording.backfill_label }}</p>
+      {% if recording.backfill_attempt_time %}<small class="backfill-attempt">最近尝试 {{ recording.backfill_attempt_time }}</small>{% endif %}{% endif %}
     </div>
     <div id="detail-export" class="detail-export">
       <button id="export-button" class="secondary" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="export-menu">导出 <span aria-hidden="true">▾</span></button>
