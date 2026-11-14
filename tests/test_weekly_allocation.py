@@ -75,9 +75,10 @@ def test_shared_scale_order_connections_and_color_without_mutation():
     assert [r['end'] for r in rows[1]['segments']] == [.75, 1]
     assert rows[3]['segments'][0]['end'] == .5
     assert [c['name'] for c in result['connections']] == ['技术', '产品']
-    assert all((c['y1'], c['y2']) == (16, 30) for c in result['connections'])
+    assert all((c['week1'], c['week2']) == ('2026-10-12', '2026-10-19') for c in result['connections'])
     product = result['connections'][1]
-    assert (product['start1'], product['end1'], product['start2'], product['end2']) == (0, .5, .75, 1)
+    assert product['bottom1'] == result['bottom']
+    assert product['top2'] == rows[1]['segments'][1]['top']
     for row in rows:
         for segment in row['segments']:
             if segment['name'] == '产品':
@@ -94,7 +95,7 @@ def test_svg_count_empty_rows_and_missing_week_break(board_client, monkeypatch):
     assert html.count('<polygon ') == 2
     assert html.count('fill-opacity="0.18"') == 2
     assert 'data-week="2026-10-26"' in html
-    assert '>0.0h</text>' in html
+    assert '2026-10-26' in html and '10-26 · 0.0h</title>' in html
     assert html.index('<polygon ') < html.index('<rect ')
     assert response.text.index('id="board-allocation-title"') < response.text.index('id="board-comparison-title"')
 
@@ -129,7 +130,7 @@ def test_category_name_is_escaped(board_client, store):
 
 def test_script_and_styles_have_updated_cache_keys(board_client):
     html = board_client.get('/board').text
-    assert 'board.js?v=20261114-tag-time-t6' in html
+    assert 'board.js?v=20261114-board-t10' in html
     assert 'app.css?v=20261114-backfill-t9' in html
 
 
@@ -140,7 +141,8 @@ def test_138_and_214_hours_use_one_global_scale_and_matching_connections():
     result = board_page.allocation_comparison(weeks, [])
     assert result['max_minutes'] == 1284
     short, longest = [row['segments'][0] for row in result['rows']]
-    assert longest['width'] == longest['end'] == 1
-    assert short['width'] == short['end'] == pytest.approx(13.8 / 21.4)
+    assert longest['end'] == 1
+    assert longest['height'] == pytest.approx(240 / 1.1)
+    assert short['height'] / longest['height'] == pytest.approx(13.8 / 21.4)
     band = result['connections'][0]
-    assert band['end1'] == short['end'] and band['end2'] == longest['end']
+    assert band['top1'] == short['top'] and band['top2'] == longest['top']

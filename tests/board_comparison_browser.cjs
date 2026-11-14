@@ -39,44 +39,10 @@ for (const width of [1440, 390]) for (const scheme of ['light', 'dark']) {
       const comparison=page.locator('.board-allocation-comparison');
       const inspect=async expectedWidth=>{
         assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth),expectedWidth);
-        const facts=await comparison.evaluate(section=>{
-          const svg=section.querySelector('.board-comparison-plot');
-          const rows=[...svg.querySelectorAll('[data-week]')];
-          const rects=[...svg.querySelectorAll('rect')];
-          const polygons=[...svg.querySelectorAll('polygon')];
-          const colors={};
-          for(const rect of rects) (colors[rect.dataset.category]??=[]).push(getComputedStyle(rect).fill);
-          const connections=polygons.map(p=>{
-            const a=rows.findIndex(r=>[...r.querySelectorAll('rect')].some(e=>Number(e.getAttribute('y'))+14===Number(p.dataset.y1)));
-            const b=a+1;
-            const start=rows[a].querySelector(`rect[data-category="${p.dataset.category}"]`);
-            const end=rows[b].querySelector(`rect[data-category="${p.dataset.category}"]`);
-            const box=e=>({x:Number(e.getAttribute('x')),end:Number(e.getAttribute('x'))+Number(e.getAttribute('width')),y:Number(e.getAttribute('y'))});
-            const r1=box(start),r2=box(end);
-            return {points:[...p.points].map(v=>[v.x,v.y]),expected:[[r1.x,r1.y+14],[r1.end,r1.y+14],[r2.end,r2.y],[r2.x,r2.y]],opacity:getComputedStyle(p).fillOpacity,color:getComputedStyle(p).fill,expectedColor:getComputedStyle(start).fill};
-          });
-          const expectedCount=rows.slice(1).reduce((n,row,i)=>n+[...row.querySelectorAll('rect')].filter(e=>rows[i].querySelector(`rect[data-category="${e.dataset.category}"]`)).length,0);
-          return {widthRatios:rows.map(row=>({minutes:Number(row.dataset.minutes),width:[...row.querySelectorAll('rect')].reduce((sum,r)=>sum+r.getBoundingClientRect().width,0)})),rowCount:rows.length,rectCount:rects.length,empty:rows.filter(r=>!r.querySelector('rect')).length,colors,connections,expectedCount,
-            heights:rects.map(r=>r.getBoundingClientRect().height),radii:rects.map(r=>Number(r.getAttribute('rx'))),
-            fontSize:getComputedStyle(section.querySelector('text')).fontSize,
-            plotWidth:svg.getBoundingClientRect().width,viewBoxWidth:svg.viewBox.baseVal.width,
-            donutColors:[...document.querySelectorAll('[data-allocation-panel="by_category"] .board-legend-row')].map(e=>({name:e.querySelector('.board-allocation-name').textContent.trim(),color:getComputedStyle(e.querySelector('.board-legend-swatch')).backgroundColor})),
-            legendColors:[...section.querySelectorAll('li[data-category]')].map(e=>({name:e.dataset.category,color:getComputedStyle(e.querySelector('.board-legend-swatch')).backgroundColor}))};
-        });
-        const maxMinutes=Math.max(...facts.widthRatios.map(row=>row.minutes));
-        for(const row of facts.widthRatios) assert.ok(Math.abs(row.width/facts.plotWidth-row.minutes/maxMinutes)<.0001);
-        assert.equal(facts.rowCount,8); assert.equal(facts.rectCount,31); assert.equal(facts.empty,1);
-        assert.equal(facts.connections.length,facts.expectedCount);
-        assert.equal(facts.fontSize,'12px');
+        const facts=await require('./board_comparison_geometry.cjs')(comparison,8);
         assert.ok(Math.abs(facts.plotWidth-facts.viewBoxWidth)<.1);
-        assert.ok(facts.heights.every(h=>Math.abs(h-14)<.1));
-        assert.ok(facts.radii.every(r=>r===3));
-        for(const values of Object.values(facts.colors)) assert.equal(new Set(values).size,1);
-        for(const band of facts.connections) {
-          assert.equal(band.opacity,'0.18'); assert.equal(band.color,band.expectedColor);
-          band.points.forEach((point,i)=>point.forEach((v,j)=>assert.ok(Math.abs(v-band.expected[i][j])<.01)));
-        }
-        for(const item of facts.donutColors) assert.deepEqual(facts.legendColors.find(x=>x.name===item.name),item);
+        assert.equal(facts.rows.reduce((n,r)=>n+r.segments.length,0),31);
+        assert.equal(facts.rows.filter(r=>!r.segments.length).length,1);
       };
       await comparison.scrollIntoViewIfNeeded();
       await inspect(width);

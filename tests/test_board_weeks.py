@@ -25,7 +25,7 @@ def test_window_rows_title_height_and_selection(board_client, query, weeks):
     assert f'id="board-comparison-title">近 {weeks} 周对比</h2>' in html
     assert f'最近 {weeks} 周分类时间分配' in html
     assert f'近 {weeks} 周没有已知时长的会议' in html
-    assert f'class="board-comparison-svg" width="100%" height="{weeks * 28 - 10}"' in html
+    assert f'class="board-comparison-svg" width="100%" height="{300}"' in html
     links = re.findall(r'<a href="([^"]*)" aria-pressed="(true|false)">(\d+) 周</a>', html)
     assert len(links) == 3
     for href, pressed, count in links:
@@ -57,15 +57,14 @@ def test_scale_uses_only_selected_weeks(board_client, store, weeks, maximum):
     chart = response.context['allocation_comparison']
     assert len(chart['rows']) == weeks
     assert chart['max_minutes'] == maximum
-    widths = [sum(s['width'] for s in row['segments']) for row in chart['rows']]
-    assert max(widths) == pytest.approx(1)
-    for row, width in zip(chart['rows'], widths):
-        assert width == pytest.approx(row['total_minutes'] / maximum)
+    heights = [sum(s['height'] for s in row['segments']) for row in chart['rows']]
+    assert max(heights) == pytest.approx(240 / 1.1)
+    for row, height in zip(chart['rows'], heights):
+        assert height == pytest.approx(row['total_minutes'] / maximum * 240 / 1.1)
     assert len(chart['connections']) == (weeks - 1) * 2
     for band in chart['connections']:
-        assert band['y2'] - band['y1'] == 14
-    rendered = re.findall(r'<g data-week="[^"]+" data-minutes="[^"]+">(.*?)</g>', response.text, re.S)
-    assert max(sum(map(float, re.findall(r'data-width="([^"]+)"', row))) for row in rendered) == pytest.approx(1)
+        assert band['x2'] - band['x1'] == pytest.approx(.4 / weeks)
+    assert response.text.count('data-week-label="') == weeks
     for key in ('daily', 'weekly', 'chart', 'week_days', 'allocation', 'allocation_charts'):
         assert response.context[key] == baseline[key]
 

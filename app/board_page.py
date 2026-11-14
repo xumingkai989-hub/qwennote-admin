@@ -80,7 +80,7 @@ def allocation_comparison(weeks, current_sectors):
     """One category palette shared with the unchanged current-week donut.
 
     Use the largest weekly total as the common scale, retaining each week's
-    aggregation order. Connections only join categories in adjacent rows.
+    aggregation order, stacked bottom to top. Only adjacent weeks connect.
     """
     colors = {item['name']: item['color'] for item in current_sectors}
     colors.update({'其他': 'allocation-other', '未分类': 'allocation-unknown'})
@@ -90,28 +90,43 @@ def allocation_comparison(weeks, current_sectors):
     for name in names:
         if name not in colors:
             colors[name] = available.pop(0) if available else str(len(colors) % 6 + 1)
+    weeks = sorted(weeks, key=lambda week: week['monday'])
     maximum = max((week['total_minutes'] for week in weeks), default=0)
+    plot_height, bottom = 240, 264
+    scale = plot_height / (maximum * 1.1) if maximum else 0
+    column_width = .6 / len(weeks) if weeks else 0
     rows, connections, previous = [], [], {}
     for index, week in enumerate(weeks):
+        cx = (index + .5) / len(weeks)
+        x = cx - column_width / 2
         segments, current, offset = [], {}, 0
         for item in week['by_category']:
             start = offset / maximum if maximum else 0
+            segment_bottom = bottom - offset * scale
             offset += item['minutes']
             segment = {**item, 'start': start, 'end': offset / maximum if maximum else 0,
-                       'width': item['minutes'] / maximum if maximum else 0,
-                       'y': index * 28 + 2, 'color': colors[item['name']]}
+                       'x': x, 'width': column_width, 'top': bottom - offset * scale,
+                       'bottom': segment_bottom, 'height': item['minutes'] * scale,
+                       'color': colors[item['name']]}
             segments.append(segment)
             current[item['name']] = segment
             prior = previous.get(item['name'])
             if prior is not None:
                 connections.append({'name': item['name'], 'color': segment['color'],
-                                    'start1': prior['start'], 'end1': prior['end'],
-                                    'start2': segment['start'], 'end2': segment['end'],
-                                    'y1': prior['y'] + 14, 'y2': segment['y']})
-        rows.append({**week, 'y': index * 28, 'segments': segments})
+                                    'week1': weeks[index - 1]['monday'], 'week2': week['monday'],
+                                    'x1': prior['x'] + column_width, 'x2': x,
+                                    'top1': prior['top'], 'bottom1': prior['bottom'],
+                                    'top2': segment['top'], 'bottom2': segment['bottom']})
+        height = week['total_minutes'] * scale
+        rows.append({**week, 'cx': cx, 'x': x, 'width': column_width,
+                     'height': height, 'top': bottom - height, 'segments': segments})
         previous = current
-    return {'rows': rows, 'connections': connections, 'height': len(rows) * 28 - 10,
-            'max_minutes': maximum,
+    ticks = [{'y': bottom - maximum * fraction * scale,
+              'label': f'{maximum * fraction / 60:.1f}'.rstrip('0').rstrip('.') + 'h'}
+             for fraction in (0, .25, .5, .75, 1)] if maximum else [{'y': bottom, 'label': '0h'}]
+    return {'rows': rows, 'connections': connections, 'height': 300,
+            'plot_height': plot_height, 'bottom': bottom, 'ticks': ticks,
+            'max_minutes': maximum, 'axis_max_minutes': maximum * 1.1,
             'legend': [{'name': name, 'color': colors[name]} for name in names]}
 
 

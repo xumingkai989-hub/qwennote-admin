@@ -162,29 +162,44 @@
   <div class="board-panel">
     {% set comparison = allocation_comparison %}
     {% if comparison is not none %}
-    <svg class="board-comparison-svg" width="100%" height="{{ comparison.height }}" role="img" aria-labelledby="board-comparison-description">
-      <title id="board-comparison-description">最近 {{ comparison_weeks }} 周分类时间分配，按周总时长统一比例；浅色带连接相邻周的同一分类</title>
-      <svg class="board-comparison-plot" x="72" width="calc(100% - 124px)" height="{{ comparison.height }}" viewBox="0 0 1000 {{ comparison.height }}" preserveAspectRatio="none" aria-hidden="true">
+    <style>
+      @media (max-width: 600px) {
+        .board-comparison-svg[data-dense="true"] [data-skip-mobile="true"] { display: none; }
+        .board-comparison-svg[data-dense="true"] [data-lift-mobile="true"] { transform: translateY(-14px); }
+      }
+    </style>
+    <svg class="board-comparison-svg" width="100%" height="{{ comparison.height }}" data-dense="{{ 'true' if comparison_weeks > 4 else 'false' }}" role="img" aria-labelledby="board-comparison-description">
+      <title id="board-comparison-description">最近 {{ comparison_weeks }} 周分类时间分配，最早在左、最新在右；柱高按周总时长统一比例，分类由下向上堆叠；浅色带连接相邻周的同一分类</title>
+      {% for tick in comparison.ticks %}
+      <text class="board-comparison-label" x="38" y="{{ tick.y + 4 }}" text-anchor="end">{{ tick.label }}</text>
+      {% endfor %}
+      <svg class="board-comparison-plot" x="44" width="calc(100% - 52px)" height="{{ comparison.height }}" viewBox="0 0 1000 {{ comparison.height }}" preserveAspectRatio="none" aria-hidden="true">
+        {% for tick in comparison.ticks %}
+        <line x1="0" x2="100%" y1="{{ tick.y }}" y2="{{ tick.y }}" stroke="var(--separator)" stroke-opacity="0.5" />
+        {% endfor %}
         {% for item in comparison.connections %}
-        <polygon data-category="{{ item.name }}" data-start1="{{ item.start1 }}" data-end1="{{ item.end1 }}" data-start2="{{ item.start2 }}" data-end2="{{ item.end2 }}" data-y1="{{ item.y1 }}" data-y2="{{ item.y2 }}" points="{{ item.start1 * 1000 }},{{ item.y1 }} {{ item.end1 * 1000 }},{{ item.y1 }} {{ item.end2 * 1000 }},{{ item.y2 }} {{ item.start2 * 1000 }},{{ item.y2 }}" fill="var(--chart-{{ item.color }})" fill-opacity="0.18" />
+        <polygon data-category="{{ item.name }}" data-week1="{{ item.week1 }}" data-week2="{{ item.week2 }}" data-x1="{{ item.x1 }}" data-x2="{{ item.x2 }}" data-top1="{{ item.top1 }}" data-bottom1="{{ item.bottom1 }}" data-top2="{{ item.top2 }}" data-bottom2="{{ item.bottom2 }}" points="{{ item.x1 * 1000 }},{{ item.top1 }} {{ item.x2 * 1000 }},{{ item.top2 }} {{ item.x2 * 1000 }},{{ item.bottom2 }} {{ item.x1 * 1000 }},{{ item.bottom1 }}" fill="var(--chart-{{ item.color }})" fill-opacity="0.18" />
         {% endfor %}
         {% for row in comparison.rows %}
-        <g data-week="{{ row.monday }}" data-minutes="{{ row.total_minutes }}">
-          {% if not row.segments %}<line x1="0" x2="100%" y1="{{ row.y + 9 }}" y2="{{ row.y + 9 }}" class="board-comparison-track" />{% endif %}
+        <g data-week="{{ row.monday }}" data-minutes="{{ row.total_minutes }}" data-cx="{{ row.cx }}" data-height="{{ row.height }}">
+          <title>{{ row.monday[5:] }} · {{ '%.1f' | format(row.total_minutes / 60) }}h</title>
           {% for item in row.segments %}
-          <rect data-category="{{ item.name }}" data-start="{{ item.start }}" data-end="{{ item.end }}" x="{{ item.start * 1000 }}" y="{{ item.y }}" width="{{ item.width * 1000 }}" data-width="{{ item.width }}" height="14" rx="3" fill="var(--chart-{{ item.color }})">
-            <title>{{ row.label }} · {{ item.name }} · {{ '%.1f' | format(item.minutes / 60) }}h</title>
+          <rect data-category="{{ item.name }}" data-x="{{ item.x }}" data-width="{{ item.width }}" x="{{ item.x * 1000 }}" y="{{ item.top }}" width="{{ item.width * 1000 }}" height="{{ item.height }}" fill="var(--chart-{{ item.color }})">
+            <title>{{ row.monday[5:] }} · {{ item.name }} · {{ '%.1f' | format(item.minutes / 60) }}h</title>
           </rect>
           {% endfor %}
         </g>
         {% endfor %}
       </svg>
-      {% for row in comparison.rows %}
-      <g class="board-comparison-label" data-week-label="{{ row.monday }}">
-        <text x="0" y="{{ row.y + 13 }}">{{ row.label }}</text>
-        <text x="100%" dx="-1" y="{{ row.y + 13 }}" text-anchor="end">{{ '%.1f' | format(row.total_minutes / 60) }}h</text>
-      </g>
-      {% endfor %}
+      {# Native SVG viewport keeps labels in CSS pixels even without JavaScript. #}
+      <svg class="board-comparison-labels" x="44" width="calc(100% - 52px)" height="{{ comparison.height }}" aria-hidden="true">
+        {% for row in comparison.rows %}
+        <g class="board-comparison-label" data-week-label="{{ row.monday }}" data-cx="{{ row.cx }}" data-skip-mobile="{{ 'true' if loop.index0 % 2 else 'false' }}">
+          <text x="{{ 0 if loop.first else 100 if loop.last else row.cx * 100 }}%" y="286" text-anchor="{{ 'start' if loop.first else 'end' if loop.last else 'middle' }}">{{ row.monday[5:] }}</text>
+        </g>
+        {% if row.height >= 30 %}<text class="board-comparison-label" data-total-label="{{ row.monday }}" data-cx="{{ row.cx }}" data-y="{{ row.top - 6 }}" data-lift-mobile="{{ 'true' if loop.index0 % 2 else 'false' }}" x="{{ row.cx * 100 }}%" y="{{ row.top - 6 }}" text-anchor="{{ 'start' if loop.first else 'end' if loop.last else 'middle' }}" style="font-size: 11px">{{ '%.1f' | format(row.total_minutes / 60) }}h</text>{% endif %}
+        {% endfor %}
+      </svg>
     </svg>
     <ul class="board-comparison-legend" aria-label="周度对比分类图例">
       {% for item in comparison.legend %}
@@ -201,5 +216,5 @@
     {% for saved_day in history %}<a href="/board?day={{ saved_day }}" aria-label="{{ saved_day }}"{% if saved_day == day.isoformat() %} aria-current="date"{% endif %}>{{ saved_day[5:] }}</a>{% else %}<p class="board-note">暂无存档</p>{% endfor %}
   </nav>
 </section>
-<script src="{{ url_for('static', path='board.js') }}?v=20261114-tag-time-t6" defer></script>
+<script src="{{ url_for('static', path='board.js') }}?v=20261114-board-t10" defer></script>
 {% endblock %}
