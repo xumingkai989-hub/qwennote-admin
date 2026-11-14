@@ -1,10 +1,11 @@
-"""Read-only knowledge scan and index generation (no tag bodies or summaries)."""
+"""Read-only knowledge scanning and Markdown generation (no AI summaries)."""
 from datetime import datetime
 import hashlib
 import html
 import json
 from pathlib import Path
 import re
+from urllib.parse import quote
 
 from app.minutes import SHANGHAI
 from app.tag_vocabulary import resolve
@@ -150,7 +151,7 @@ def _markdown(index):
 
 
 def build_index(store, root: Path = DEFAULT_ROOT) -> dict:
-    """Create directories and both indexes, leaving tag/category bodies for T2."""
+    """Create directories and both indexes without rendering tag/category bodies."""
     index = scan(store)
     root = Path(root)
     (root / 'categories').mkdir(parents=True, exist_ok=True)
@@ -160,6 +161,110 @@ def build_index(store, root: Path = DEFAULT_ROOT) -> dict:
     return index
 
 
+def _is_unclassified(tag):
+    return tag['id'] is None and tag['name'] == UNCLASSIFIED and tag['category'] == UNCLASSIFIED
+
+
+def _tag_recordings(store, tag):
+    """Use the same alias/merge membership as scan, retaining displayed tag order."""
+    with store._connect() as conn:
+        conn.execute('PRAGMA query_only = ON')
+        conn.execute('BEGIN')
+        relations = list(conn.execute(
+            'SELECT recording_id, tag FROM recording_tags ORDER BY recording_id, position, tag'))
+        canonical = {}
+        for name in sorted({row['tag'] for row in relations}):
+            target = resolve(conn, name)
+            canonical[name] = target['name'] if target is not None else name
+        labels = {}
+        for row in relations:
+            labels.setdefault(row['recording_id'], []).append(row['tag'])
+        recordings = []
+        for row in conn.execute(
+                'SELECT r.recording_id, r.title, r.created_at, r.duration_min, r.summary_md, '
+                'p.tag_name AS primary_tag FROM recordings r LEFT JOIN recording_primary_tag p '
+                'ON p.recording_id = r.recording_id'):
+            names = labels.get(row['recording_id'], [])
+            belongs = (not names if _is_unclassified(tag) else
+                       any(canonical[name] == tag['name'] for name in names))
+            if belongs:
+                recordings.append(dict(row, tags=names))
+    return sorted(recordings, key=lambda row: (_instant(row['created_at']), row['recording_id']),
+                  reverse=True)
+
+
+def _first_sentence(summary):
+    text = (summary or '').strip()
+    if not text:
+        return '（无总结）'
+    end = re.search(r'[。.\r\n]', text)
+    if end:
+        text = text[:end.end()].strip()
+    else:
+        text = text[:60]
+    return text[:80] + '…' if len(text) > 80 else text
+
+
+def _date(value, pattern):
+    return _instant(value).astimezone(SHANGHAI).strftime(pattern) if value else '—'
+
+
+def render_tag_file(store, tag: dict, notes: list[dict] | None = None) -> str:
+    """Render a scanned tag; notes are reserved for T3 and empty in this ticket."""
+    recordings = _tag_recordings(store, tag)
+    lines = [f"# {_markdown_text(tag['name'])}", '',
+             f"> {_markdown_text(tag['category'])} · {tag['sessions']} 场会议 · "
+             f"{tag['minutes']} 分钟 · 更新于 {_date(tag['updated_at'], '%Y-%m-%d %H:%M')}", '']
+    if not _is_unclassified(tag):
+        lines += ['## 当前状态', '', '综述未生成。', '',
+                  '## 补充记录', '', '暂无补充记录。', '']
+    lines += ['## 会议', '']
+    for row in recordings[:20]:
+        duration = '时长未知' if row['duration_min'] is None else f"{row['duration_min']} 分钟"
+        labels = '、'.join(row['tags']) or '—'
+        lines += [f"### {_date(row['created_at'], '%Y-%m-%d')} · {_markdown_text(row['title'])}",
+                  f"- {duration} · 主议题：{_markdown_text(row['primary_tag'] or '—')} · "
+                  f"标签：{_markdown_text(labels)}",
+                  f"- {_markdown_text(_first_sentence(row['summary_md']))}",
+                  f"- [查看原文](/recordings/{quote(row['recording_id'], safe='')})", '']
+    if len(recordings) > 20:
+        lines += [f'另有 {len(recordings) - 20} 场更早的会议未列出。', '']
+    lines += ['## 时间线', '', '| 日期 | 类型 | 内容 |', '|---|---|---|']
+    for row in recordings[:30]:
+        lines.append(f"| {_date(row['created_at'], '%m-%d')} | 会议 | "
+                     f"{_markdown_text(row['title'])} |")
+    return '\n'.join(lines) + '\n'
+
+
+def render_category_file(store, category: dict, tags: list[dict]) -> str:
+    """Render category union statistics and links using T1's allocated paths."""
+    lines = [f"# {_markdown_text(category['name'])}", '',
+             f"> {category['tags']} 个标签 · {category['sessions']} 场会议 · "
+             f"{category['minutes']} 分钟", '',
+             '| 标签 | 会议 | 时长 | 最近 |', '|---|---:|---:|---|']
+    for tag in tags:
+        if tag['category'] != category['name']:
+            continue
+        # Angle destinations keep spaces/parentheses valid without changing the slug.
+        path = tag['path'].replace('%', '%25').replace('#', '%23')
+        destination = f'<{path}>' if re.search(r'[\s()]', path) else path
+        lines.append(f"| [{_markdown_text(tag['name'])}]({destination}) | {tag['sessions']} | "
+                     f"{tag['minutes']} 分钟 | {_date(tag['last_session_at'], '%m-%d')} |")
+    return '\n'.join(lines) + '\n'
+
+
 def build(store, root: Path = DEFAULT_ROOT, tags: list[str] | None = None) -> dict:
-    """T1 always rebuilds the full index; tags is reserved for incremental bodies."""
+    """Render all bodies, then build the unchanged T1 indexes; tags is reserved."""
+    index = scan(store)
+    root = Path(root)
+    for tag in index['tags']:
+        path = root / tag['path']
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(render_tag_file(store, tag, notes=[]), encoding='utf-8')
+    for category in index['categories']:
+        if not category['tags']:
+            continue
+        path = root / category['path']
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(render_category_file(store, category, index['tags']), encoding='utf-8')
     return build_index(store, root)
