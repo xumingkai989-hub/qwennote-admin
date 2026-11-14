@@ -99,6 +99,14 @@ def test_svg_count_empty_rows_and_missing_week_break(board_client, monkeypatch):
     assert response.text.index('id="board-allocation-title"') < response.text.index('id="board-comparison-title"')
 
 
+def test_present_zero_minute_category_has_connection():
+    weeks = fixture_rows()[:2]
+    weeks[1]['by_category'].append({'name': '未分类', 'minutes': 0, 'share': 0})
+    weeks[0]['by_category'].append({'name': '未分类', 'minutes': 0, 'share': 0})
+    chart = board_page.allocation_comparison(weeks, [])
+    assert [item['name'] for item in chart['connections']] == ['技术', '产品', '未分类']
+
+
 def test_comparison_failure_keeps_existing_board(board_client, monkeypatch):
     def fail(*a, **kw):
         raise ValueError('private database detail')

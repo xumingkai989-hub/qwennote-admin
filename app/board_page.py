@@ -102,7 +102,7 @@ def allocation_comparison(weeks, current_sectors):
             segments.append(segment)
             current[item['name']] = segment
             prior = previous.get(item['name'])
-            if prior and prior['minutes'] and item['minutes']:
+            if prior is not None:
                 connections.append({'name': item['name'], 'color': segment['color'],
                                     'start1': prior['start'], 'end1': prior['end'],
                                     'start2': segment['start'], 'end2': segment['end'],
