@@ -151,12 +151,19 @@
   </div>
 </section>
 <section class="board-section board-allocation-comparison" aria-labelledby="board-comparison-title">
-  <h2 id="board-comparison-title">近 8 周对比</h2>
+  <div class="board-section-heading">
+    <h2 id="board-comparison-title">近 {{ comparison_weeks }} 周对比</h2>
+    <div class="board-segmented board-week-selector" role="group" aria-label="对比周数">
+      {% for option in comparison_week_options %}
+      <a href="{{ option.url }}" aria-pressed="{{ 'true' if option.weeks == comparison_weeks else 'false' }}">{{ option.weeks }} 周</a>
+      {% endfor %}
+    </div>
+  </div>
   <div class="board-panel">
     {% set comparison = allocation_comparison %}
     {% if comparison is not none %}
     <svg class="board-comparison-svg" width="100%" height="{{ comparison.height }}" role="img" aria-labelledby="board-comparison-description">
-      <title id="board-comparison-description">最近八周分类时间分配，按周总时长统一比例；浅色带连接相邻周的同一分类</title>
+      <title id="board-comparison-description">最近 {{ comparison_weeks }} 周分类时间分配，按周总时长统一比例；浅色带连接相邻周的同一分类</title>
       <svg class="board-comparison-plot" x="72" width="calc(100% - 124px)" height="{{ comparison.height }}" viewBox="0 0 1000 {{ comparison.height }}" preserveAspectRatio="none" aria-hidden="true">
         {% for item in comparison.connections %}
         <polygon data-category="{{ item.name }}" data-start1="{{ item.start1 }}" data-end1="{{ item.end1 }}" data-start2="{{ item.start2 }}" data-end2="{{ item.end2 }}" data-y1="{{ item.y1 }}" data-y2="{{ item.y2 }}" points="{{ item.start1 * 1000 }},{{ item.y1 }} {{ item.end1 * 1000 }},{{ item.y1 }} {{ item.end2 * 1000 }},{{ item.y2 }} {{ item.start2 * 1000 }},{{ item.y2 }}" fill="var(--chart-{{ item.color }})" fill-opacity="0.18" />
@@ -184,8 +191,8 @@
       <li data-category="{{ item.name }}" style="--chart-color: var(--chart-{{ item.color }})"><span class="board-legend-swatch" aria-hidden="true"></span>{{ item.name }}</li>
       {% endfor %}
     </ul>
-    {% if not comparison.legend %}<p class="board-empty">近 8 周没有已知时长的会议</p>{% endif %}
-    {% else %}<p class="board-note" role="status">近 8 周对比暂不可用</p>{% endif %}
+    {% if not comparison.legend %}<p class="board-empty">近 {{ comparison_weeks }} 周没有已知时长的会议</p>{% endif %}
+    {% else %}<p class="board-note" role="status">近 {{ comparison_weeks }} 周对比暂不可用</p>{% endif %}
   </div>
 </section>
 <section class="board-section" aria-labelledby="board-history-title">

@@ -142,6 +142,12 @@ def install_board(app, *, settings, templates, sessions, authorize, valid_csrf,
         except ValueError:
             return error_page(request, 400, '日期无效', '日期格式须为 YYYY-MM-DD。')
         monday = board.monday_of(day)
+        weeks_value = request.query_params.get('weeks', '8')
+        weeks = int(weeks_value) if weeks_value in ('4', '8', '12') else 8
+        other_params = [(key, value) for key, value in request.query_params.multi_items()
+                        if key != 'weeks']
+        week_options = [{'weeks': count, 'url': '?' + urlencode(other_params + [('weeks', count)])}
+                        for count in (4, 8, 12)]
         store = app.state.store
         daily, weekly = board.day_stats(store, day), board.week_stats(store, monday, day)
         allocation, allocation_text, allocation_error = board_generation.allocation_view(
@@ -149,7 +155,7 @@ def install_board(app, *, settings, templates, sessions, authorize, valid_csrf,
         allocation_charts = {key: allocation_chart(allocation[key], allocation['total_minutes'], key)
                              for key in ('by_category', 'by_tag')}
         try:
-            comparison = allocation_comparison(tag_time.weekly_allocation(store, today=today),
+            comparison = allocation_comparison(tag_time.weekly_allocation(store, weeks=weeks, today=today),
                                                allocation_charts['by_category'])
         except Exception:
             # A failed historical query must not break today's cards or the
@@ -171,6 +177,7 @@ def install_board(app, *, settings, templates, sessions, authorize, valid_csrf,
             'allocation': allocation, 'allocation_text': allocation_text,
             'allocation_error': allocation_error,
             'allocation_charts': allocation_charts, 'allocation_comparison': comparison,
+            'comparison_weeks': weeks, 'comparison_week_options': week_options,
             'unknown_count': sum(item['minutes'] is None for item in daily['items']),
             'day_report': board.load_report(store, day),
             'week_report': board_generation.meeting_review(board.load_report(store, monday, 'week')),

@@ -885,8 +885,12 @@ body { padding-bottom: var(--safe-area-bottom); }
 .board-allocation [hidden] { display: none; }
 .board-allocation .board-section-heading { gap: 12px 16px; }
 .board-segmented { display: inline-flex; flex-wrap: nowrap; max-width: 100%; padding: 4px; border-radius: 12px; background: var(--control); }
-.board-segmented button { flex: 1; min-width: 0; min-height: 44px; padding: 8px 14px; border: 0; border-radius: 8px; background: transparent; color: var(--muted); white-space: nowrap; font-size: .8125rem; }
-.board-segmented button[aria-pressed="true"] { background: var(--surface); color: var(--text); box-shadow: 0 1px 3px rgb(0 0 0 / .08); }
+.board-segmented button, .board-week-selector a { flex: 1; min-width: 0; min-height: 44px; padding: 8px 14px; border: 0; border-radius: 8px; background: transparent; color: var(--muted); white-space: nowrap; font-size: .8125rem; }
+.board-segmented button[aria-pressed="true"], .board-week-selector a[aria-pressed="true"] { background: var(--surface); color: var(--text); box-shadow: 0 1px 3px rgb(0 0 0 / .08); }
+.board-allocation-comparison .board-section-heading { flex-wrap: wrap; align-items: center; gap: 8px; }
+.board-allocation-comparison h2 { white-space: nowrap; }
+.board-week-selector { flex-shrink: 0; }
+.board-week-selector a { display: inline-flex; align-items: center; justify-content: center; padding-inline: 10px; text-decoration: none; }
 .board-allocation-name { min-width: 0; overflow-wrap: anywhere; }
 .board-allocation-name small { display: block; margin-top: 2px; color: var(--muted); font-size: .75rem; }
 .board-comparison-svg { display: block; overflow: hidden; }

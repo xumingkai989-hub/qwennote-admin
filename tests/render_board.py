@@ -45,8 +45,8 @@ def render(output):
             FeishuUser(settings.admin_open_id, '演示用户', '')))
         with TestClient(app, follow_redirects=False) as client:
             assert login(client).status_code == 302
-            def save(name):
-                response = client.get('/board')
+            def save(name, query=''):
+                response = client.get('/board' + query)
                 assert response.status_code == 200
                 html = response.text.replace('http://testserver/static/', 'static/')
                 html = re.sub(r'name="csrf_token" value="[^"]*"', 'name="csrf_token" value="synthetic-fixture"', html)
@@ -116,6 +116,14 @@ def render(output):
                     meeting(store, f'comparison-{week}-{i}', name, category, minutes,
                             stamp=monday.isoformat() + 'T09:00:00+08:00')
             save('comparison')
+            # Extend only the selectable-window fixture, retaining T5 geometry.
+            for week in range(4):
+                monday = date(2026, 8, 17) + timedelta(weeks=week)
+                for category, minutes in [('产品', 780 - week * 120), ('中台', 620 - week * 80)]:
+                    meeting(store, f'window-{week}-{category}', category, category, minutes,
+                            stamp=monday.isoformat() + 'T09:00:00+08:00')
+            for weeks in (4, 8, 12):
+                save(f'comparison-{weeks}', f'?day=2026-11-05&weeks={weeks}&filter=a%26b&filter=second')
 
 
 
