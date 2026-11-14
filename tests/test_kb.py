@@ -292,17 +292,51 @@ def test_render_limits_do_not_change_totals(db, count):
 @pytest.mark.parametrize('summary,expected', [
     ('第一句。第二句。', '第一句。'), ('First sentence. Second sentence.', 'First sentence.'),
     ('第一行\n第二行。', '第一行'), ('第一行\r\n第二行', '第一行'),
-    ('没有句号', '没有句号'), ('长' * 100, '长' * 60),
+    ('没有句号', '没有句号'), ('长' * 100, '长' * 80 + '…'),
     ('长' * 100 + '。后句', '长' * 80 + '…'),
     ('长' * 100 + '\n后句', '长' * 80 + '…'),
     ('长' * 79 + '。', '长' * 79 + '。'),
     ('', '（无总结）'), (None, '（无总结）'), (' \n ', '（无总结）'),
+    ('第一行\r第二行', '第一行'),
+    ('## 会议背景\n*周例会*\n\n本次会议确认了新版范围。', '本次会议确认了新版范围。'),
+    ('## 标题\n\n- 要点一\n- 要点二\n\n结论是延期上线。', '结论是延期上线。'),
+    ('## 标题', '（无总结）'),
+    ('*周例会*', '（无总结）'), ('**产品研讨**', '（无总结）'),
+    ('&#42;周例会&#42;\n第一行', '第一行'),
+    ('&#42;&#42;产品研讨&#42;&#42;\n第一行', '第一行'),
+    ('---\n***\n| 表格 |\n第一行', '第一行'),
+    ('  第一行  \n\n第二段。', '第一行'),
+    ('短', '短'), ('周例会', '周例会'),
+    ('*未配对', '未配对'), ('**未配对', '未配对'),
+    ('*' + '长' * 11 + '*', '（无总结）'),
+    ('**' + '长' * 12 + '**', '长' * 12),
+    ('*' + '长' * 12 + '*', '长' * 12),
+    ('> 第一行\n第二行。', '第一行'), ('-第一行', '第一行'),
+    ('第一&#42;句&#42;。第二句。', '第一句。'),
+    ('延期！下一句。', '延期！'), ('延期？下一句。', '延期？'),
+    ('Ready! Next.', 'Ready!'), ('Ready? Next.', 'Ready?'),
+    ('长' * 80, '长' * 80),
+    ('【产品迭代】\n**议题数**: 2\n1. **介绍**\n🕒 09:39\n> - 介绍了新版功能。',
+     '介绍了新版功能。'),
+    ('*周例会*\n# 标题\n> 会议副标题\n【产品迭代】\n'
+     '**会议日期**: 2026-11-13 | **议题数**: 2\n---\n1. **介绍**\n> 第一行\n> 第二行。',
+     '第一行'),
 ])
 def test_render_summary_first_sentence(db, summary, expected):
     add_tag(db, 'A')
     add_meeting(db, 'one', ('A',))
     meeting_content(db, 'one', summary=summary)
     assert f'\n- {expected}\n' in kb.render_tag_file(db, kb.scan(db)['tags'][0])
+
+
+@pytest.mark.parametrize('limit,expected', [(0, '…'), (2, '第一…'), (4, '第一句。')])
+def test_summary_lead_custom_limit(limit, expected):
+    assert kb.summary_lead('第一句。第二句。', limit) == expected
+
+
+def test_summary_lead_negative_limit():
+    with pytest.raises(ValueError, match='non-negative'):
+        kb.summary_lead('第一句。', -1)
 
 
 @pytest.mark.parametrize('minutes,expected', [(None, '时长未知'), (0, '0 分钟')])

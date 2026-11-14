@@ -278,7 +278,7 @@ def _tag_recordings(store, tag):
 
 
 def summary_lead(summary_md: str, limit: int = 80) -> str:
-    """Return the first prose sentence, ignoring Markdown-only lead-in lines."""
+    """Return the first prose line's first sentence, ignoring Markdown lead-ins."""
     if limit < 0:
         raise ValueError('limit must be non-negative')
     summary_md = html.unescape(summary_md or '')
@@ -286,38 +286,39 @@ def summary_lead(summary_md: str, limit: int = 80) -> str:
     # before filtering, rather than treating its keyword ribbon as the lead.
     rich_meeting = (re.search(r'^\s*(?:【[^】\n]+】\s*)+$', summary_md, re.M)
                     and '**议题数**' in summary_md)
-    paragraph = []
+    in_template_header = bool(rich_meeting)
     for raw in summary_md.splitlines():
         line = raw.strip()
-        if not line:
-            if paragraph:
-                break
+        if rich_meeting and re.fullmatch(r'(?:【[^】]+】\s*)+', line):
+            in_template_header = False
             continue
-        if rich_meeting and line.startswith('>'):
-            prose = line.lstrip('>*- ')
-            if re.search(r'[。！？.!?]', prose):
-                line = prose
-        if (line.startswith(('#', '*', '-', '>', '|'))
-                or re.fullmatch(r'(?:【[^】]+】\s*)+', line)
-                or re.match(r'\d+[.)]\s|🕒', line)):
-            if paragraph:
-                break
+        # The quote before a recognized template's keyword ribbon is its
+        # subtitle, not meeting prose. This is structural, not length-based.
+        if in_template_header and line.startswith('>'):
             continue
-        line = re.sub(r'[*_/]', '', line).strip('*-> ')
-        # Short labels are not prose; retain brief sentences in either language.
-        if not line or (len(line) < 6 and not re.search(
-                r'[。！？.!?]|[A-Za-z]+\s+[A-Za-z]+|[是有在已将需应要了]|没有', line)):
+        if not line or line.startswith(('#', '|')) or re.fullmatch(r'(?:-{3,}|\*{3,})', line):
             continue
-        paragraph.append(line)
-    if not paragraph:
-        return '（无总结）'
-    text = ' '.join(paragraph)
-    # Wrapped Chinese prose needs no inter-word space; English still does.
-    text = re.sub(r'(?<=[\u3400-\u9fff]) (?=[\u3400-\u9fff])', '', text)
-    end = re.search(r'[。！？.!?]', text)
-    if end:
-        text = text[:end.end()]
-    return text[:limit] + '…' if len(text) > limit else text
+        # Keep list items out of the prose lead (the explicit T7 list example).
+        if re.match(r'[-*]\s+', line):
+            continue
+        if rich_meeting and re.match(r'\d+[.)]\s|🕒|\*\*(?:会议日期|议题数)\*\*\s*[:：]', line):
+            continue
+        # Examine balanced emphasis before removing its delimiters. Ordinary
+        # short lines and unmatched emphasis are valid prose regardless of length.
+        line = line.lstrip('-> ').strip()
+        label = re.fullmatch(r'(\*{1,2})([^*]+)\1', line)
+        if label and len(label[2].strip()) < 12:
+            continue
+        text = line.replace('*', '').strip()
+        if not text:
+            continue
+        # A physical newline remains a boundary, as required by the LF/CRLF
+        # acceptance cases, even when the first line has no punctuation.
+        end = re.search(r'[。！？.!?]', text)
+        if end:
+            text = text[:end.end()]
+        return text[:limit] + '…' if len(text) > limit else text
+    return '（无总结）'
 
 
 def _date(value, pattern):
