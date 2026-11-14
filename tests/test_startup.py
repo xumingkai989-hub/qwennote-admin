@@ -14,7 +14,7 @@ def test_startup_migrates_only_required_tables_and_seeds_admin(client, settings)
         assert conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
         tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         required = {"backfill_state", "enrichment_tasks", "enrichment_runs", "enrichment_run_tasks", "users", "recordings", "sync_runs", "api_keys", "api_audit", "recording_tags", "tag_runs",
-                    "tags", "tag_categories", "tag_category_checks", "tag_aliases", "assistant_config", "tag_change_log", "knowledge_notes",
+                    "tags", "tag_categories", "tag_category_checks", "tag_aliases", "assistant_config", "tag_change_log", "knowledge_notes", "knowledge_summary_cache",
                     "tag_merge_proposals", "tag_semantic_checks", "hotwords", "recording_overrides",
                     "settings", "scheduler_state", "models", "board_reports", "board_generation_state", "recording_primary_tag", "recording_hotword_decisions",
                     "recording_hotword_checks", "recording_hotword_decision_history", "recording_hotword_check_history", "sqlite_sequence",

@@ -387,6 +387,16 @@ class SQLiteStore:
             conn.execute('CREATE INDEX IF NOT EXISTS knowledge_notes_tag '
                          'ON knowledge_notes(tag_name, created_at DESC)')
             conn.execute("""
+                CREATE TABLE IF NOT EXISTS knowledge_summary_cache (
+                    tag_name TEXT NOT NULL,
+                    input_hash TEXT NOT NULL,
+                    summary TEXT NOT NULL,
+                    model TEXT NOT NULL,
+                    generated_at TEXT NOT NULL,
+                    PRIMARY KEY (tag_name, input_hash)
+                )
+            """)
+            conn.execute("""
                 CREATE TABLE IF NOT EXISTS recording_primary_tag (
                     recording_id TEXT PRIMARY KEY,
                     tag_id INTEGER REFERENCES tags(id),
