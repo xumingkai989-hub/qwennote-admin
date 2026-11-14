@@ -93,6 +93,11 @@ def render(output):
             ]):
                 meeting(store, f'allocation-{i}', name, category, minutes,
                         stamp='2026-11-02T09:00:00+08:00')
+            # Exercise the real archive/presentation flow with an offline provider.
+            from app import board_generation
+            with patch('app.board_analysis._analyze', return_value=('本周会议回顾。各主题独立。属于工作讨论。', 'fixture', None)), patch(
+                    'app.board_generation._requester', return_value=lambda prompt: '{"comparison":[]}'):
+                board_generation.generate(store, scope='week', day='2026-11-06')
             save('allocation')
 
 

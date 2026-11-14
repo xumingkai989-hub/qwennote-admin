@@ -16,6 +16,7 @@
 | `automation.py` | 自动化设置数据类、每日同步模式和每周全盘配置、默认值及表单校验 | store、settings_admin |
 | `board.py` | 上海时区总量、日明细、周分布统计与 day/week JSON CLI | 命令行、board_analysis |
 | `board_page.py` | 看板页面、占比与时长展示、管理员生成表单；复用登录与 CSRF | /board、/board/generate |
+| `board_generation.py` | 日报与周报生成编排、幂等缓存、主标签补齐、时间分配解读与守恒失败回退 | scheduler、board CLI、board_page |
 | `board_analysis.py` | 有界会议输入、共享模型文本请求、模型回顾、脱敏重试与复合键存档 | board CLI、primary_tag |
 | `primary_tag.py` | 会议核心议题判定、持久化 fallback 与标签指纹失效重判 | 显式批量调用 |
 | `tag_time.py` | 主标签周度时长聚合、分类小项与标签 Top 6 合并、双层整数分钟守恒 | 显式只读调用 |

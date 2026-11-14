@@ -59,7 +59,7 @@ def test_live_totals_details_archive_and_shanghai_default(board_client, store, m
     add(store, 'unknown', '2026-11-06T14:30:00+08:00', None)
     archive(store)
     archive(store, '2026-11-02', 'week')
-    monkeypatch.setattr(board_page.board_analysis, 'generate', lambda *a, **k: pytest.fail('GET generated AI'))
+    monkeypatch.setattr(board_page.board_generation, 'generate', lambda *a, **k: pytest.fail('GET generated AI'))
     response = board_client.get('/board')
     assert response.status_code == 200 and response.headers['cache-control'] == 'no-store'
     ctx = response.context
@@ -162,7 +162,7 @@ def test_escaped_content(board_client, store):
 @pytest.mark.parametrize('scope,expected', [('day', ['day']), ('week', ['week']), ('both', ['day', 'week'])])
 def test_generate_authorized_csrf_and_selected_date(board_client, store, monkeypatch, scope, expected):
     calls = []
-    monkeypatch.setattr(board_page.board_analysis, 'generate', lambda db, **kw: calls.append((db, kw)))
+    monkeypatch.setattr(board_page.board_generation, 'generate', lambda db, **kw: calls.append((db, kw)))
     response = board_client.post('/board/generate', data={
         'csrf_token': token(board_client), 'scope': scope, 'day': '2026-11-04'})
     assert response.status_code == 303 and response.headers['location'] == '/board?day=2026-11-04'
@@ -172,7 +172,7 @@ def test_generate_authorized_csrf_and_selected_date(board_client, store, monkeyp
 
 @pytest.mark.parametrize('mode', ['missing', 'wrong', 'different-session', 'duplicate'])
 def test_generate_rejects_invalid_csrf(board_client, settings, monkeypatch, mode):
-    monkeypatch.setattr(board_page.board_analysis, 'generate', lambda *a, **k: pytest.fail('invalid CSRF'))
+    monkeypatch.setattr(board_page.board_generation, 'generate', lambda *a, **k: pytest.fail('invalid CSRF'))
     signed = token(board_client)
     fields = {'day': '2026-11-06', 'scope': 'day', 'csrf_token': signed}
     if mode == 'missing': fields.pop('csrf_token')

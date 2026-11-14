@@ -100,7 +100,8 @@ def week_stats(store, monday, today) -> dict:
 
 
 def main(argv=None):
-    from app.board_analysis import build_report, generate
+    from app.board_analysis import build_report
+    from app.board_generation import generate
     from app.store import SQLiteStore
 
     parser = argparse.ArgumentParser(description=__doc__)

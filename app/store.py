@@ -274,6 +274,17 @@ class SQLiteStore:
                     error TEXT,
                     PRIMARY KEY (day, scope)
                 );
+                CREATE TABLE IF NOT EXISTS board_generation_state (
+                    day TEXT NOT NULL,
+                    scope TEXT NOT NULL CHECK(scope IN ('day','week')),
+                    input_hash TEXT NOT NULL,
+                    archive_hash TEXT NOT NULL,
+                    report_json TEXT NOT NULL,
+                    allocation_json TEXT,
+                    allocation_analysis TEXT,
+                    allocation_error TEXT,
+                    PRIMARY KEY (day, scope)
+                );
                 CREATE TABLE IF NOT EXISTS scheduler_state (
                     job TEXT PRIMARY KEY,
                     last_run_at TEXT

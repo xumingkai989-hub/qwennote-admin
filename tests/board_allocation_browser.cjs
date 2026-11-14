@@ -20,6 +20,8 @@ for (const width of [1440,390]) for (const scheme of ['light','dark']) {
   test(`${width} ${scheme}: weekly levels, geometry, keyboard, no request or overflow`,()=>withPage(width,scheme,async page=>{
     await page.goto(url('allocation'));
     const section=page.locator('.board-allocation');
+    assert.match(await section.locator('.board-analysis').textContent(), /本周时间主要投入产品（37.38%）、中台（20.56%）、师资（9.81%）。上周无对比数据。/);
+    assert.equal(await section.locator('form input[name="day"]').inputValue(), '2026-11-06');
     const category=section.locator('[data-allocation-panel="by_category"]');
     const tag=section.locator('[data-allocation-panel="by_tag"]');
     const buttons=section.locator('[data-allocation-view]');

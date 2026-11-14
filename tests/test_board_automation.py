@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from app import board, board_analysis
+from app import board, board_analysis, board_generation
 from app.automation import AutomationSettings
 from app.feishu import FeishuUser
 from app.scheduler_tick import tick, read_state, next_runs, board_is_current
@@ -57,6 +57,10 @@ def test_due_claim_idempotence_restart_and_week_cutoff(client, store, monkeypatc
         assert 'board' in read_state(store)  # claim persisted before the model
         return GOOD, 'fixture', None
     monkeypatch.setattr(board_analysis, '_analyze', analyze)
+    monkeypatch.setattr(board_generation, '_requester', lambda *a: lambda p: '{"comparison":[]}')
+    from app import primary_tag
+    monkeypatch.setattr(primary_tag, 'ensure_week', lambda *a, **kw:
+                        {'failed': 0, 'fallback': 0, 'items': []})
     assert tick(store, now=at('2026-11-06T21:59'))['executed'] == []
     assert reports(store) == []
     now = at('2026-11-06T22:01')
@@ -100,6 +104,7 @@ def test_freshness_after_last_sync(client, store, generated, finished, error, ex
 
 def test_fresh_report_skip_consumes_daily_slot(client, store, monkeypatch):
     board_only(store)
+    board_generation.generate(store, scope='week', day='2026-11-06')
     with store._connect() as conn:
         conn.execute('INSERT INTO board_reports VALUES (?, ?, ?, ?, ?, ?, ?)',
                      ('2026-11-06', 'day', '{}', GOOD, 'fixture', '2026-11-06T13:00:00Z', None))
@@ -123,7 +128,7 @@ def test_model_exception_archived_and_other_jobs_continue(client, store, monkeyp
     assert calls == ['sync', 'tag', 'retention', 'enrichment']
     rows = reports(store)
     assert len(rows) == 2
-    assert all(row['error'] == 'analysis_failed' and row['analysis_md'] is None for row in rows)
+    assert all(row['error'].startswith('analysis_failed') and row['analysis_md'] is None for row in rows)
     assert all(json.loads(row['stats_json'])['count'] == 1 for row in rows)
     assert 'private' not in json.dumps(rows) + caplog.text
     assert tick(store, now=at('2026-11-06T22:01'), **jobs)['failed'] == []
@@ -184,7 +189,7 @@ def test_regenerate_error_still_updates_numbers_and_shows_notice(board_client, s
     assert '1 场 · 0.8 小时' in page.text
     assert '数字已更新，部分分析未生成' in page.text
     assert 'private-key' not in page.text
-    assert all(row['error'] == 'analysis_failed' for row in reports(store))
+    assert all(row['error'].startswith('analysis_failed') for row in reports(store))
 
 
 @pytest.mark.parametrize('day', ['', 'bad', '20261106', '2026-02-30'])

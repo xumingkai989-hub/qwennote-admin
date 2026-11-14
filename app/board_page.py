@@ -7,7 +7,7 @@ from fastapi import Request
 from fastapi.responses import RedirectResponse
 from starlette.concurrency import run_in_threadpool
 
-from app import board, board_analysis, tag_time
+from app import board, board_analysis, board_generation, tag_time
 from app.minutes import SHANGHAI
 from app.session import SESSION_MAX_AGE
 
@@ -105,7 +105,8 @@ def install_board(app, *, settings, templates, sessions, authorize, valid_csrf,
         monday = board.monday_of(day)
         store = app.state.store
         daily, weekly = board.day_stats(store, day), board.week_stats(store, monday, day)
-        allocation = tag_time.week_allocation(store, board.monday_of(today), today)
+        allocation, allocation_text, allocation_error = board_generation.allocation_view(
+            store, board.monday_of(today), today)
         admin = bool(set(settings.admin_open_ids).intersection((user.subject, user.union_id, user.open_id)))
         token = ''
         if admin:
@@ -119,12 +120,13 @@ def install_board(app, *, settings, templates, sessions, authorize, valid_csrf,
             'week_days': week_chart(weekly, monday, day, today),
             'week_end': monday + timedelta(days=7),
             'chart': donut_chart(daily['items']),
-            'allocation': allocation,
+            'allocation': allocation, 'allocation_text': allocation_text,
+            'allocation_error': allocation_error,
             'allocation_charts': {key: allocation_chart(allocation[key], allocation['total_minutes'], key)
                                   for key in ('by_category', 'by_tag')},
             'unknown_count': sum(item['minutes'] is None for item in daily['items']),
             'day_report': board.load_report(store, day),
-            'week_report': board.load_report(store, monday, 'week'),
+            'week_report': board_generation.meeting_review(board.load_report(store, monday, 'week')),
             'history': board.report_days(store), 'csrf_token': token,
             'duration': duration, 'weekdays': '一二三四五六日',
         }, headers={'Cache-Control': 'no-store'})
@@ -153,6 +155,6 @@ def install_board(app, *, settings, templates, sessions, authorize, valid_csrf,
         if scope not in ('day', 'week', 'both'):
             return error_page(request, 400, '范围无效', '请选择日报或周报。')
         for report_scope in (('day', 'week') if scope == 'both' else (scope,)):
-            await run_in_threadpool(board_analysis.generate, app.state.store, scope=report_scope, day=day)
+            await run_in_threadpool(board_generation.generate, app.state.store, scope=report_scope, day=day)
         return RedirectResponse('/board?' + urlencode({'day': day.isoformat()}), status_code=302 if regenerate else 303,
                                 headers={'Cache-Control': 'no-store'})

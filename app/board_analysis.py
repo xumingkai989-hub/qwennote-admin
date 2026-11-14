@@ -139,3 +139,52 @@ def generate(store, *, scope, day, model=None) -> dict:
             (report['day'], scope, json.dumps(report['stats'], ensure_ascii=False), report['analysis'],
              report['model'], report['generated_at'], report['error']))
     return report
+
+
+def week_allocation_text(allocation, previous=None, *, model=None) -> str | None:
+    """Render model-selected facts; numbers and category names never come from prose.
+
+    model is an optional callable accepting a JSON prompt and returning JSON text.
+    The application supplies its store-bound provider. No provider means no text.
+    """
+    from decimal import Decimal
+
+    rows = sorted((r for r in allocation['by_category'] if r['minutes'] > 0),
+                  key=lambda r: (-r['minutes'], r['name']))[:3]
+    if not rows or model is None:
+        return None
+
+    def percent(share):
+        return Decimal(str(share)) * 100
+
+    def number(value):
+        return format(value, '.2f').rstrip('0').rstrip('.')
+
+    opening = '本周时间主要投入' + '、'.join(
+        f"{r['name']}（{number(percent(r['share']))}%）" for r in rows) + '。'
+    has_previous = bool(previous and previous['total_minutes'] and previous['by_category'])
+    comparisons = {}
+    if has_previous:
+        before = {r['name']: percent(r['share']) for r in previous['by_category']}
+        current = {r['name']: percent(r['share']) for r in allocation['by_category']}
+        changes = {name: current.get(name, Decimal(0)) - before.get(name, Decimal(0))
+                   for name in current.keys() | before.keys()}
+        for name, change in sorted(changes.items(), key=lambda item: (-abs(item[1]), item[0]))[:2]:
+            comparisons[name] = (f"{name}{'上升' if change > 0 else '下降'} {number(abs(change))} 个百分点"
+                                 if change else f'{name}占比持平')
+    try:
+        prompt = json.dumps({'opening': opening, 'comparisons': comparisons,
+                             'has_previous': has_previous}, ensure_ascii=False)
+        result = json.loads(model(prompt))
+        names = result.get('comparison') if isinstance(result, dict) else None
+        if (not isinstance(names, list) or any(not isinstance(n, str) for n in names)
+                or len(set(names)) != len(names) or len(names) > 2
+                or any(n not in comparisons for n in names)
+                or (has_previous and not names) or (not has_previous and names)):
+            return None
+        ending = ('与上周相比，' + '、'.join(comparisons[n] for n in names) + '。'
+                  if has_previous else '上周无对比数据。')
+        return opening + ending
+    except Exception:
+        # SDK messages can contain private endpoint/credential information.
+        return None

@@ -163,7 +163,7 @@ def board_is_current(store, now):
 
 
 def _board(store, day):
-    from app.board_analysis import generate
+    from app.board_generation import generate
     # generate takes the inclusive end date and stores weeks under Monday's key.
     reports = [generate(store, scope=scope, day=day) for scope in ('day', 'week')]
     if any(report['error'] for report in reports):
@@ -197,7 +197,8 @@ def tick(store, *, now=None, sync_job=None, full_sync_job=None, tag_job=None, re
                     conn.execute('INSERT INTO scheduler_state (job, last_run_at) VALUES (?, ?) '
                                  'ON CONFLICT(job) DO UPDATE SET last_run_at=excluded.last_run_at',
                                  (job, now.isoformat()))
-                if job == 'board' and board_is_current(store, now):
+                from app.board_generation import week_is_current
+                if job == 'board' and board_is_current(store, now) and week_is_current(store, now):
                     result['skipped'].append(job)
                     continue
                 try:

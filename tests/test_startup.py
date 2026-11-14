@@ -16,7 +16,7 @@ def test_startup_migrates_only_required_tables_and_seeds_admin(client, settings)
         required = {"backfill_state", "enrichment_tasks", "enrichment_runs", "enrichment_run_tasks", "users", "recordings", "sync_runs", "api_keys", "api_audit", "recording_tags", "tag_runs",
                     "tags", "tag_categories", "tag_category_checks", "tag_aliases", "assistant_config", "tag_change_log",
                     "tag_merge_proposals", "tag_semantic_checks", "hotwords", "recording_overrides",
-                    "settings", "scheduler_state", "models", "board_reports", "recording_primary_tag", "recording_hotword_decisions",
+                    "settings", "scheduler_state", "models", "board_reports", "board_generation_state", "recording_primary_tag", "recording_hotword_decisions",
                     "recording_hotword_checks", "recording_hotword_decision_history", "recording_hotword_check_history", "sqlite_sequence",
                     "hotword_upstream_sync", "hotword_upstream_runs", "hotword_upstream_state", "hotword_upstream_errors"}
         assert required | {"recordings_fts"} <= tables

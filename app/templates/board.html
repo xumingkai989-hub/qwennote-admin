@@ -1,10 +1,10 @@
 {% extends "base.html" %}
 {% block main_attributes %} class="board-page"{% endblock %}
-{% macro generate_button(scope, label) %}
+{% macro generate_button(scope, label, report_day=none) %}
 {% if navigation_admin %}
 <form action="{{ '/board/regenerate' if scope == 'both' else '/board/generate' }}" method="post" class="board-generate">
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-  <input type="hidden" name="day" value="{{ day.isoformat() }}">
+  <input type="hidden" name="day" value="{{ (report_day or day).isoformat() }}">
   <input type="hidden" name="scope" value="{{ scope }}">
   <button type="submit" class="secondary" aria-label="{{ label }}{{ '日报分析' if scope == 'day' else '周报分析' if scope == 'week' else '日报与周报分析' }}">{{ label }}</button>
 </form>
@@ -139,11 +139,15 @@
       </div>
     </div>
     {% endfor %}
-    <p class="board-note board-footnote">解读未生成</p>
+
     {% else %}
-    <p class="board-empty">本周还没有会议</p>
+    <p class="board-empty">{{ "时间分配暂不可用" if allocation_error and '时间分配计算失败' in allocation_error else "本周还没有会议" }}</p>
     {% if allocation.unknown_duration_count %}<p class="board-note board-footnote">{{ allocation.unknown_duration_count }} 场时长未知，未计入</p>{% endif %}
     {% endif %}
+    {% if allocation_error %}<p class="board-note" role="status">{{ allocation_error }}{% if '时间分配计算失败' in allocation_error and allocation.total_minutes %}，显示最近一次成功结果{% endif %}</p>{% endif %}
+    <div class="board-analysis"><p>{{ allocation_text or '解读未生成' }}</p>
+      {% if allocation.total_minutes or allocation_error %}{{ generate_button('week', '重新生成', today) }}{% endif %}
+    </div>
   </div>
 </section>
 <section class="board-section" aria-labelledby="board-history-title">
