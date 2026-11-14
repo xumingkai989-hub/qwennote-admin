@@ -186,16 +186,17 @@ def run_sync(source: MinutesSource, store: SyncStore, *, backfill_days: int = 90
         with ThreadPoolExecutor(max_workers=DETAIL_WORKERS) as pool:
             for offset in range(0, len(pending), DETAIL_WORKERS):
                 wave = pending[offset:offset + DETAIL_WORKERS]
-                ready = [m for m in wave if _claim_detail_attempt(m.recording_id)]
-                skipped += len(wave) - len(ready)
-                wave = ready
                 if detail_serialized:
-                    results = {m.recording_id: _fetch_detail(source, m) for m in wave}
+                    results = {m.recording_id: _fetch_detail_if_due(source, m) for m in wave}
                 else:
-                    futures = {m.recording_id: pool.submit(_fetch_detail, source, m) for m in wave}
+                    futures = {m.recording_id: pool.submit(_fetch_detail_if_due, source, m) for m in wave}
                     results = {rid: future.result() for rid, future in futures.items()}
                 for meta in wave:
-                    detail, error = results[meta.recording_id]
+                    result = results[meta.recording_id]
+                    if result is None:
+                        skipped += 1
+                        continue
+                    detail, error = result
                     previous = previous_by_id[meta.recording_id]
                     code = _http_status(error)
                     consecutive_limited = consecutive_limited + 1 if code == 429 else 0
@@ -274,6 +275,13 @@ def _count_http_failure(counts, error):
     code = _http_status(error)
     if code is not None:
         counts[code] += 1
+
+
+def _fetch_detail_if_due(source: MinutesSource, meta: RecordingMeta):
+    # Claim at actual execution, including after a slow serialized predecessor.
+    if not _claim_detail_attempt(meta.recording_id):
+        return None
+    return _fetch_detail(source, meta)
 
 
 def _fetch_detail(source: MinutesSource, meta: RecordingMeta):

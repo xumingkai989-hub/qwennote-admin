@@ -2,7 +2,7 @@
 
 同步按 `meta.created_at >= start` 判定窗口（包含水位线边界）。快速同步仍跳过已有转写；窗口内未完成会议每轮可以进入 pending，不受 `next_attempt_at` 和补齐队列数量限制；窗口外已知未完成会议仍须在到期的 `backfill_ids` 中。全盘同步使用自己的 backfill 窗口，窗口内同样适用。
 
-`app/sync.py` 的 `_last_detail_attempt` 保存 recording_id → monotonic 时间，`_claim_detail_attempt` 在提交每波详情请求前加线程锁检查并登记。距上次尝试小于 60 秒记为 skipped，不改尝试时间；60 秒时可重试，过期项在后续检查时清理。请求失败也受节流；原有单次拉取内部的 HTTP 重试预算保持不变。窗口内已有未完成记录的请求/入库失败也更新 backfill_state，避免“最近尝试”仍停留在旧值。
+`app/sync.py` 的 `_last_detail_attempt` 保存 recording_id → monotonic 时间，`_claim_detail_attempt` 由 `_fetch_detail_if_due` 在详情实际开始执行时加线程锁检查并登记（包括限流后串行执行）。距上次尝试小于 60 秒记为 skipped，不改尝试时间；60 秒时可重试，过期项在后续检查时清理。请求失败也受节流；原有单次拉取内部的 HTTP 重试预算保持不变。窗口内已有未完成记录的请求/入库失败也更新 backfill_state，避免“最近尝试”仍停留在旧值。
 
 缓存仅属于当前 Python 进程，不落库；服务重启、独立 CLI、不同 worker 会分别拥有缓存。生产 tick 是独立 systemd 进程，因此不能靠此缓存跨进程合并登录和 tick；数据库同步锁仍避免同库并发同步。此限制与单进程要求一致，不新增跨进程存储。
 

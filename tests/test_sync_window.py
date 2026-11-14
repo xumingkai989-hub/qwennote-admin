@@ -92,3 +92,30 @@ def test_backfill_attempt_time_display(client, store, url, offset):
     assert '转写生成中' in html and '最近尝试 14:52' in html
     store.upsert_recording(meta, replace(detail, has_transcript=True, transcript_md='完成'), now.isoformat())
     assert '最近尝试' not in client.get(url).text
+
+
+def test_serial_fallback_records_actual_start_time(queue, monkeypatch):
+    from app.minutes import MinutesRetryableError
+    from app import sync
+    source, store, clock = queue
+    # Four fresh window records; first two exhausted 429s trigger serial fallback.
+    source.recordings = []
+    for i in range(4):
+        meta = RecordingMeta('serial-' + str(i), '', NOW - timedelta(seconds=i), 1)
+        source.recordings.append(meta)
+        store.upsert_recording(meta, RecordingDetail(meta.recording_id, None, None, False, False), NOW.isoformat())
+    starts = {}
+
+    def fetch(source, meta):
+        starts[meta.recording_id] = sync.time.monotonic()
+        if meta.recording_id in {'serial-0', 'serial-1'}:
+            return None, MinutesRetryableError(429)
+        if meta.recording_id == 'serial-2':
+            clock.current += timedelta(seconds=90)
+        return RecordingDetail(meta.recording_id, None, None, False, False), None
+
+    monkeypatch.setattr(sync, '_fetch_detail', fetch)
+    assert run_sync(source, store).detail_serialized == 1
+    assert sync._last_detail_attempt['serial-3'] == starts['serial-3']
+    assert starts['serial-3'] - starts['serial-2'] == 90
+    assert not sync._claim_detail_attempt('serial-3')
