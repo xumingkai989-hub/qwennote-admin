@@ -27,7 +27,7 @@ for (const width of [1440, 390]) for (const scheme of ['light', 'dark']) {
       };
       const screenshot=async (section,name)=>{
         const bounds=await section.evaluate(e=>({y:e.getBoundingClientRect().top+window.scrollY,height:e.getBoundingClientRect().height}));
-        await page.screenshot({path:path.join(output,name),clip:{x:0,y:Math.max(0,bounds.y-16),width,height:bounds.height+32}});
+        await page.screenshot({path:path.join(output,name),fullPage:true,clip:{x:0,y:Math.max(0,bounds.y-16),width,height:bounds.height+32}});
       };
       await state(0);
       if(width===1440 && scheme==='light') await screenshot(section,'1440-switch-before.png');
