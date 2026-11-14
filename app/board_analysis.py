@@ -62,6 +62,23 @@ def clean_analysis(text):
     return ''.join(_sentences(text)[:5]).strip()
 
 
+def request_text(settings, *, model, system, prompt, max_tokens=1024):
+    """Shared Anthropic text request; callers own validation and failure policy."""
+    with httpx.Client(timeout=30.0) as client:
+        response = client.post(messages_url(settings.base_url),
+            headers={'x-api-key': settings.auth_token, 'anthropic-version': '2023-06-01'},
+            json={'model': model or settings.model, 'max_tokens': max_tokens,
+                  'thinking': {'type': 'disabled'}, 'system': system,
+                  'messages': [{'role': 'user', 'content': prompt}]})
+        response.raise_for_status()
+        payload = response.json()
+        content = payload.get('content', []) if isinstance(payload, dict) else []
+        if not isinstance(content, list):
+            raise ValueError('invalid_response')
+        return '\n'.join(block['text'] for block in content if isinstance(block, dict) and
+                         block.get('type') == 'text' and isinstance(block.get('text'), str))
+
+
 def _analyze(store, prompt, model):
     try:
         settings = resolve_model(store)
@@ -75,22 +92,10 @@ def _analyze(store, prompt, model):
         if attempt:
             time.sleep((1, 3)[attempt - 1])
         try:
-            with httpx.Client(timeout=30.0) as client:
-                response = client.post(messages_url(settings.base_url),
-                    headers={'x-api-key': settings.auth_token, 'anthropic-version': '2023-06-01'},
-                    json={'model': model_name, 'max_tokens': 1024, 'thinking': {'type': 'disabled'},
-                          'system': SYSTEM, 'messages': [{'role': 'user', 'content': prompt}]})
-                response.raise_for_status()
-                payload = response.json()
-                content = payload.get('content', []) if isinstance(payload, dict) else []
-                if not isinstance(content, list):
-                    raise ValueError
-                analysis = clean_analysis('\n'.join(
-                    block['text'] for block in content if isinstance(block, dict) and
-                    block.get('type') == 'text' and isinstance(block.get('text'), str)))
-                if len(_sentences(analysis)) >= 3 and re.search(r'[\u4e00-\u9fff]', analysis):
-                    return analysis, model_name, None
-                error = 'invalid_output' if analysis else 'empty_output'
+            analysis = clean_analysis(request_text(settings, model=model_name, system=SYSTEM, prompt=prompt))
+            if len(_sentences(analysis)) >= 3 and re.search(r'[\u4e00-\u9fff]', analysis):
+                return analysis, model_name, None
+            error = 'invalid_output' if analysis else 'empty_output'
         except httpx.HTTPStatusError as exc:
             error = f'http_error_{exc.response.status_code}'
         except httpx.RequestError:

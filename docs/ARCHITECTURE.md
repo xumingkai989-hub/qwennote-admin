@@ -16,7 +16,8 @@
 | `automation.py` | 自动化设置数据类、每日同步模式和每周全盘配置、默认值及表单校验 | store、settings_admin |
 | `board.py` | 上海时区总量、日明细、周分布统计与 day/week JSON CLI | 命令行、board_analysis |
 | `board_page.py` | 看板页面、占比与时长展示、管理员生成表单；复用登录与 CSRF | /board、/board/generate |
-| `board_analysis.py` | 有界会议输入、模型回顾、脱敏重试与复合键存档 | board CLI |
+| `board_analysis.py` | 有界会议输入、共享模型文本请求、模型回顾、脱敏重试与复合键存档 | board CLI、primary_tag |
+| `primary_tag.py` | 会议核心议题判定、持久化 fallback 与标签指纹失效重判 | 显式批量调用 |
 | `config.py` | 读取进程环境、校验身份配置与会话密钥 | main、admin、feishu、部署适配器 |
 | `feishu.py` | OAuth 换身份、联系人搜索与安全错误封装 | main、admin、store |
 | `home_presentation.py` | 列表日期分组、摘要展示数据 | main |
@@ -167,7 +168,7 @@ full_sync 用上海时区周一为周起点比较 last_run_at：本自然周已�
 | 身份与同步 | users、recordings、sync_runs |
 | 异步增强 | enrichment_tasks、enrichment_runs、enrichment_run_tasks（批次与复用任务的关联） |
 | 人工编辑 | recording_overrides（每字段最新一条，无版本历史） |
-| 标签 | recording_tags、tag_runs、tags、tag_categories、tag_aliases、tag_merge_proposals、tag_semantic_checks、tag_change_log、assistant_config |
+| 标签 | recording_primary_tag、recording_tags、tag_runs、tags、tag_categories、tag_aliases、tag_merge_proposals、tag_semantic_checks、tag_change_log、assistant_config |
 | 热词 | hotwords、recording_hotword_decisions、recording_hotword_checks、recording_hotword_decision_history、recording_hotword_check_history |
 | 旧决策归档 | recording_hotword_legacy_decisions（仅旧结构升级时存在） |
 | 上游推送 | hotword_upstream_sync、hotword_upstream_errors、hotword_upstream_runs、hotword_upstream_state |

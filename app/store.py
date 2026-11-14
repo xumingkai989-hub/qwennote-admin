@@ -357,6 +357,17 @@ class SQLiteStore:
             """)
             from app.tag_vocabulary import migrate as migrate_vocabulary
             migrate_vocabulary(conn)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS recording_primary_tag (
+                    recording_id TEXT PRIMARY KEY,
+                    tag_id INTEGER REFERENCES tags(id),
+                    tag_name TEXT,
+                    source TEXT NOT NULL CHECK (source IN ('model', 'fallback')),
+                    reason TEXT,
+                    tag_fingerprint TEXT NOT NULL,
+                    generated_at TEXT NOT NULL
+                )
+            """)
             if 'media_type' not in {row['name'] for row in conn.execute('PRAGMA table_info(recordings)')}:
                 conn.execute('ALTER TABLE recordings ADD COLUMN media_type TEXT')
             if 'refreshed_token' not in {row['name'] for row in conn.execute('PRAGMA table_info(sync_runs)')}:
