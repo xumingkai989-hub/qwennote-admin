@@ -277,16 +277,37 @@ def _tag_recordings(store, tag):
                   reverse=True)
 
 
-def _first_sentence(summary):
-    text = (summary or '').strip()
-    if not text:
+def summary_lead(summary_md: str, limit: int = 80) -> str:
+    """Return the first prose sentence, ignoring Markdown-only lead-in lines."""
+    if limit < 0:
+        raise ValueError('limit must be non-negative')
+    paragraph = []
+    for raw in (summary_md or '').splitlines():
+        # Decode before classifying so escaped Markdown is skipped as well.
+        line = html.unescape(raw).strip()
+        if not line:
+            if paragraph:
+                break
+            continue
+        if line.startswith(('#', '*', '-', '>', '|')):
+            if paragraph:
+                break
+            continue
+        line = re.sub(r'[*_/]', '', line).strip('*-> ')
+        # Short labels are not prose; retain brief sentences in either language.
+        if not line or (len(line) < 6 and not re.search(
+                r'[。！？.!?]|[A-Za-z]+\s+[A-Za-z]+|[是有在已将需应要了]|没有', line)):
+            continue
+        paragraph.append(line)
+    if not paragraph:
         return '（无总结）'
-    end = re.search(r'[。.\r\n]', text)
+    text = ' '.join(paragraph)
+    # Wrapped Chinese prose needs no inter-word space; English still does.
+    text = re.sub(r'(?<=[\u3400-\u9fff]) (?=[\u3400-\u9fff])', '', text)
+    end = re.search(r'[。！？.!?]', text)
     if end:
-        text = text[:end.end()].strip()
-    else:
-        text = text[:60]
-    return text[:80] + '…' if len(text) > 80 else text
+        text = text[:end.end()]
+    return text[:limit] + '…' if len(text) > limit else text
 
 
 def _date(value, pattern):
@@ -401,7 +422,7 @@ def render_tag_file(store, tag: dict, notes: list[dict] | None = None) -> str:
         lines += [f"### {_date(row['created_at'], '%Y-%m-%d')} · {_markdown_text(row['title'])}",
                   f"- {duration} · 主议题：{_markdown_text(row['primary_tag'] or '—')} · "
                   f"标签：{_markdown_text(labels)}",
-                  f"- {_markdown_text(_first_sentence(row['summary_md']))}",
+                  f"- {_markdown_text(summary_lead(row['summary_md']))}",
                   f"- [查看原文](/recordings/{quote(row['recording_id'], safe='')})", '']
     if len(recordings) > 20:
         lines += [f'另有 {len(recordings) - 20} 场更早的会议未列出。', '']
