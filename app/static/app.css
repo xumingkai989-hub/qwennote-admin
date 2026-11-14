@@ -899,3 +899,5 @@ body { padding-bottom: var(--safe-area-bottom); }
 .board-comparison-track { stroke: var(--separator); stroke-width: 14px; stroke-opacity: .5; }
 .board-comparison-legend { display: flex; flex-wrap: wrap; gap: 10px 18px; list-style: none; padding: 0; margin: 20px 0 0; font-size: .8125rem; }
 .board-comparison-legend li { display: flex; align-items: center; gap: 6px; min-width: 0; overflow-wrap: anywhere; }
+
+.navigation-link[href="/knowledge"] svg { width: 24px; height: 24px; flex-basis: 24px; stroke-width: 1.7; }

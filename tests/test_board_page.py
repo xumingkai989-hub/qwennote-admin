@@ -132,7 +132,7 @@ def test_regular_user_no_buttons_but_navigation(client, fake_auth, store):
 def test_navigation_order_and_highlight(board_client):
     html = board_client.get('/board').text
     labels = re.findall(r'class="navigation-link" href="([^"]+)"', html)
-    assert labels[:3] == ['/', '/board', '/hotwords']
+    assert labels[:4] == ['/', '/board', '/knowledge', '/hotwords']
     assert html.count('aria-current="page"') == 1
     assert 'href="/board" aria-label="看板" data-label="看板" aria-current="page"' in html
 

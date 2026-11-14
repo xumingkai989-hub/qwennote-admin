@@ -63,6 +63,11 @@ def install_admin(app: FastAPI, *, settings: Settings, templates: Jinja2Template
                   authorize=authorize, valid_csrf=valid_csrf, csrf=csrf,
                   session_binding=session_binding, parse_form=parse_form, error_page=error_page)
 
+    from app.knowledge_page import install_knowledge
+    install_knowledge(app, settings=settings, templates=templates, sessions=sessions,
+                      authorize=authorize, valid_csrf=valid_csrf, csrf=csrf,
+                      session_binding=session_binding, parse_form=parse_form, error_page=error_page)
+
     from app.assistant import install_assistant
     install_assistant(app, settings=settings, templates=templates, sessions=sessions,
                       authorize=authorize, valid_csrf=valid_csrf, csrf=csrf,

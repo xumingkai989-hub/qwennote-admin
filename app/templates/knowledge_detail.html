@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block main_attributes %} class="knowledge-page"{% endblock %}
+{% block content %}
+<link rel="stylesheet" href="{{ url_for('static', path='knowledge.css') }}?v=20261114-t8">
+<a class="knowledge-back" href="/knowledge">← 知识库</a>
+<header class="knowledge-detail-heading"><h1>{{ tag.name }}</h1>
+<p class="knowledge-meta">{{ tag.category }} · {{ tag.sessions }} 场会议 · {{ '%g' | format(tag.minutes) }} 分钟 · {{ tag.notes }} 条补充 · 更新于 {{ updated }}</p></header>
+<article class="knowledge-document markdown-body">{{ content_html }}</article>
+{% endblock %}
