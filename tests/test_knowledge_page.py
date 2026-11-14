@@ -61,6 +61,43 @@ def test_group_order_stats_links_and_navigation(knowledge_client, knowledge_file
         assert command in unescape(html)
 
 
+@pytest.mark.parametrize('root, cli', [
+    ('/var/lib/qwennote/knowledge', '/opt/qwennote/current/scripts/kb.sh'),
+    (None, 'python -m app.kb'),
+    ('', 'python -m app.kb'),
+])
+def test_agent_prompt_and_commands_use_runtime_cli(knowledge_client, knowledge_files, monkeypatch, root, cli):
+    from html import unescape
+
+    # Keep fixture files isolated while testing the deployment environment branch.
+    monkeypatch.setattr(kb, 'configured_root', lambda: knowledge_files[0])
+    if root is None:
+        monkeypatch.delenv('KB_ROOT', raising=False)
+    else:
+        monkeypatch.setenv('KB_ROOT', root)
+    response = knowledge_client.get('/knowledge')
+    assert response.status_code == 200
+    assert response.context['kb_cli'] == cli
+    prompt = response.context['kb_prompt']
+    assert prompt == knowledge_page.build_agent_prompt(cli)
+    assert prompt.splitlines()[-1] == '<在这里写你的具体任务>'
+    assert ('在项目根目录执行' in prompt) == (cli == 'python -m app.kb')
+    for command in ('list --json', 'show "<标签>" --json', 'search <关键词> --limit 5 --json',
+                    'note add "<标签>" --text "<你的结论>" --source codex'):
+        assert f'执行：{cli} {command}' in prompt
+    assert '- 写完立刻 show 读回，确认记录真的进了文件' in prompt
+    assert '- 知识库是派生产物，不要直接编辑 knowledge/ 下的文件，写内容只能走 note add' in prompt
+    html = response.text
+    assert 'data-copy="knowledge-agent-prompt" data-copy-label="提示词">复制提示词</button>' in html
+    rendered = re.search(r'<pre id="knowledge-agent-prompt"[^>]*>(.*?)</pre>', html, re.S)[1]
+    assert unescape(rendered) == prompt
+    assert '&lt;在这里写你的具体任务&gt;' in rendered
+    assert '<details class="knowledge-commands">' in html
+    assert '<summary>只用命令的话</summary>' in html
+    assert len(response.context['commands']) == 4
+    assert all(command.startswith(cli + ' ') for command in response.context['commands'])
+
+
 @pytest.mark.parametrize('bad', [None, '{broken', '[]', '{}', 'null', '{"tags": []}', '\xff',
                                 '{"generated_at": 5}', '{"generated_at": "not-a-date"}'])
 def test_missing_or_corrupt_index_empty_state(client, bad):

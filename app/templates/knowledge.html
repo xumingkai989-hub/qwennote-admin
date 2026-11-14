@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block main_attributes %} class="knowledge-page"{% endblock %}
 {% block content %}
-<link rel="stylesheet" href="{{ url_for('static', path='knowledge.css') }}?v=20261114-t8">
+<link rel="stylesheet" href="{{ url_for('static', path='knowledge.css') }}?v=20261114-t10">
 {% if error %}<p class="knowledge-error" role="alert">{{ error }}</p>{% endif %}
 <header class="list-heading knowledge-heading">
   <h1>知识库</h1>
@@ -37,13 +37,17 @@
 {% endif %}
 <section class="knowledge-agent" aria-labelledby="knowledge-agent-title">
   <h2 id="knowledge-agent-title">给 Agent 接入</h2>
-  <p>在服务器上执行（已封装环境）：</p>
-  {% for command in commands %}<div class="knowledge-command">
-    <code id="knowledge-command-{{ loop.index }}" tabindex="0">{{ command }}</code>
-    <button type="button" class="secondary knowledge-copy" data-copy="knowledge-command-{{ loop.index }}" aria-label="复制命令 {{ loop.index }}">复制</button>
-  </div>{% endfor %}
+  <p>把下面这段直接粘给 Codex，它会自己读知识库。</p>
+  <pre id="knowledge-agent-prompt" class="knowledge-agent-prompt" tabindex="0" aria-label="Agent 提示词">{{ kb_prompt }}</pre>
+  <button type="button" class="knowledge-copy" data-copy="knowledge-agent-prompt" data-copy-label="提示词">复制提示词</button>
   <p class="knowledge-copy-status" role="status" aria-live="polite"></p>
-  <p class="knowledge-agent-note">Codex 可直接读取 <code>knowledge/tags/&lt;标签&gt;.md</code>；CLI 用于检索与写入。</p>
+  <details class="knowledge-commands">
+    <summary>只用命令的话</summary>
+    {% for command in commands %}<div class="knowledge-command">
+      <code id="knowledge-command-{{ loop.index }}" tabindex="0">{{ command }}</code>
+      <button type="button" class="secondary knowledge-copy" data-copy="knowledge-command-{{ loop.index }}" data-copy-label="命令" aria-label="复制命令 {{ loop.index }}">复制</button>
+    </div>{% endfor %}
+  </details>
 </section>
-<script src="{{ url_for('static', path='knowledge.js') }}?v=20261114-t8" defer></script>
+<script src="{{ url_for('static', path='knowledge.js') }}?v=20261114-t10" defer></script>
 {% endblock %}
