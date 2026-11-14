@@ -17,6 +17,7 @@ from app.store import SQLiteStore
 # Tests for calendar dates or window boundaries must construct those relations explicitly.
 @pytest.fixture(autouse=True)
 def no_network(monkeypatch, tmp_path):
+    monkeypatch.setenv("KB_ROOT", str(tmp_path / "knowledge"))
     monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
     # Never read a developer machine's real model credentials in offline tests.
     monkeypatch.setattr('app.models.CLAUDE_ENV_PATH', tmp_path / 'absent-model.env')

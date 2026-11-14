@@ -102,11 +102,11 @@ class DocumentationTests(unittest.TestCase):
 
     def test_readme_length_and_section_order(self):
         text = README.read_text()
-        # 21–30 的开发记录与同步策略说明增加后，仍保持入口文档简短。
-        self.assertTrue(150 <= len(text.splitlines()) <= 220)
+        # 增加知识库七个命令与数据来源说明后，仍保持入口文档简短。
+        self.assertTrue(150 <= len(text.splitlines()) <= 260)
         self.assertEqual(re.findall(r'^## (.+)$', text, re.MULTILINE), [
             '它解决什么问题', '功能', '技术栈与取舍', '快速开始', '配置',
-            '部署', '测试', '目录结构', '开发记录', '许可证',
+            '知识库', '部署', '测试', '目录结构', '开发记录', '许可证',
         ])
         self.assertIn('把千问笔记里的会议录音同步到自建服务，可搜索、可编辑、可导出，并按热词自动校正。',
                       text.split('## ', 1)[0])

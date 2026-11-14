@@ -202,7 +202,7 @@ def test_build_creates_indexes_directories_and_exact_schema(sample, tmp_path):
     assert '| 标签00 | 3 | 69 分钟 | 11-13 |' in markdown
 
 
-def test_repeated_build_changes_only_generated_at(sample, tmp_path, monkeypatch):
+def test_repeated_build_preserves_index_and_generated_at(sample, tmp_path, monkeypatch):
     class Clock:
         value = datetime.fromisoformat('2026-11-14T15:30:00+08:00')
         fromisoformat = staticmethod(datetime.fromisoformat)
@@ -212,10 +212,12 @@ def test_repeated_build_changes_only_generated_at(sample, tmp_path, monkeypatch)
             return cls.value.astimezone(tz)
 
     monkeypatch.setattr(kb, 'datetime', Clock)
-    first = kb.build(sample, tmp_path)
+    kb.build(sample, tmp_path)
+    first = json.loads((tmp_path / "index.json").read_text())
     Clock.value = datetime.fromisoformat('2026-11-15T15:30:00+08:00')
-    second = kb.build(sample, tmp_path, tags=['标签00'])
-    assert first.pop('generated_at') != second.pop('generated_at')
+    kb.build(sample, tmp_path, tags=['标签00'])
+    second = json.loads((tmp_path / "index.json").read_text())
+    assert first['generated_at'] == second['generated_at']
     assert first == second
 
 
@@ -227,7 +229,8 @@ def test_default_root_is_repository_knowledge():
 
 
 def test_empty_database_and_safe_markdown(db, tmp_path):
-    empty = kb.build(db, tmp_path)
+    kb.build(db, tmp_path)
+    empty = json.loads((tmp_path / "index.json").read_text())
     assert empty['source'] == dict(recordings=0, tags=0, notes=0)
     assert empty['tags'] == []
     add_tag(db, '<b>A|B\nC</b>', category='<script>')
@@ -365,7 +368,8 @@ def test_category_paths_statistics_and_empty_categories(db, tmp_path):
         add_tag(db, name)
     add_tag(db, '技术标签', '技术')
     add_meeting(db, 'one', ('ai-tutor', 'AI Tutor'), 21)
-    index = kb.build(db, tmp_path)
+    kb.build(db, tmp_path)
+    index = json.loads((tmp_path / "index.json").read_text())
     body = (tmp_path / 'categories/产品.md').read_text()
     assert body.startswith('# 产品\n\n> 6 个标签 · 1 场会议 · 21 分钟\n')
     assert '| [ai-tutor](tags/ai-tutor.md) | 1 | 21 分钟 | 11-13 |' in body
@@ -395,11 +399,13 @@ def test_build_bodies_stable_and_database_unchanged(sample, tmp_path, monkeypatc
     monkeypatch.setattr(kb, 'datetime', Clock)
     with sample._connect() as conn:
         before = '\n'.join(conn.iterdump())
-    first = kb.build(sample, tmp_path)
+    kb.build(sample, tmp_path)
+    first = json.loads((tmp_path / "index.json").read_text())
     bodies = {p.relative_to(tmp_path): p.read_bytes() for p in tmp_path.glob('*/*.md')}
     Clock.value = datetime.fromisoformat('2026-11-15T15:30:00+08:00')
-    second = kb.build(sample, tmp_path, tags=['标签00'])
-    assert first.pop('generated_at') != second.pop('generated_at')
+    kb.build(sample, tmp_path, tags=['标签00'])
+    second = json.loads((tmp_path / "index.json").read_text())
+    assert first['generated_at'] == second['generated_at']
     assert first == second
     assert bodies == {p.relative_to(tmp_path): p.read_bytes() for p in tmp_path.glob('*/*.md')}
     assert len(bodies) == 24
@@ -411,7 +417,8 @@ def test_render_safe_markdown(db, tmp_path):
     add_tag(db, '<b>A|B</b>')
     add_meeting(db, 'one/#)escape', ('<b>A|B</b>',))
     meeting_content(db, 'one/#)escape', title='标题|换\n行<script>', summary='<script>危险</script>。')
-    index = kb.build(db, tmp_path)
+    kb.build(db, tmp_path)
+    index = json.loads((tmp_path / "index.json").read_text())
     body = (tmp_path / index['tags'][0]['path']).read_text()
     assert '<script>' not in body and '<b>' not in body
     assert '| 11-13 | 会议 | 标题&#124;换 行&lt;script&gt; |' in body
@@ -448,7 +455,8 @@ def test_notes_full_rebuild_survives_deleted_output(db, tmp_path):
     before = kb.list_notes(db, 'AI Tutor')
     kb.build(db, tmp_path)
     shutil.rmtree(tmp_path)
-    index = kb.build(db, tmp_path)
+    kb.build(db, tmp_path)
+    index = json.loads((tmp_path / "index.json").read_text())
     text = supplement((tmp_path / index['tags'][0]['path']).read_text())
     assert text == ''.join(f'- **2026-11-13 10:04** `codex` — {body}\n' for body in reversed(bodies))
     assert [row['id'] for row in before] == ids[::-1]
@@ -473,7 +481,8 @@ def test_notes_incremental_reads_database_and_preserves_other_files(db, tmp_path
         return original(store, name, limit)
 
     monkeypatch.setattr(kb, 'notes_for', spy)
-    index = kb.build(db, tmp_path, tags=['A'])
+    kb.build(db, tmp_path, tags=['A'])
+    index = json.loads((tmp_path / "index.json").read_text())
     text = supplement((tmp_path / 'tags/A.md').read_text())
     assert text.index('补充三') < text.index('补充二') < text.index('补充一')
     assert calls == ['A']
@@ -513,7 +522,8 @@ def test_notes_source_allowlist(db, source, expected):
 @pytest.mark.parametrize('incremental', [False, True])
 def test_notes_unknown_tag_created_without_mutating_vocabulary(db, tmp_path, incremental):
     ident = kb.add_note(db, '新/主题', '独立回写')
-    index = kb.build(db, tmp_path, tags=['新/主题'] if incremental else None)
+    kb.build(db, tmp_path, tags=['新/主题'] if incremental else None)
+    index = json.loads((tmp_path / "index.json").read_text())
     tag = named(index['tags'], '新/主题')
     assert tag['id'] is None and tag['category'] == '其他'
     assert tag['sessions'] == 0 and tag['notes'] == 1
@@ -529,10 +539,12 @@ def test_notes_remove_updates_render_counts_and_hash(db, tmp_path, incremental):
     add_tag(db, 'A')
     one = kb.add_note(db, 'A', '即将删除')
     two = kb.add_note(db, 'A', '保留内容')
-    before = kb.build(db, tmp_path)
+    kb.build(db, tmp_path)
+    before = json.loads((tmp_path / "index.json").read_text())
     assert kb.remove_note(db, one)
     assert not kb.remove_note(db, one)
-    after = kb.build(db, tmp_path, tags=['A'] if incremental else None)
+    kb.build(db, tmp_path, tags=['A'] if incremental else None)
+    after = json.loads((tmp_path / "index.json").read_text())
     assert '即将删除' not in (tmp_path / 'tags/A.md').read_text()
     assert after['tags'][0]['notes'] == before['tags'][0]['notes'] - 1 == 1
     assert after['source']['notes'] == 1
@@ -546,7 +558,8 @@ def test_notes_remove_updates_render_counts_and_hash(db, tmp_path, incremental):
 def test_notes_display_limit_and_total_count(db, tmp_path, count):
     for i in range(count):
         kb.add_note(db, 'A', f'记录{i:02}')
-    index = kb.build(db, tmp_path)
+    kb.build(db, tmp_path)
+    index = json.loads((tmp_path / "index.json").read_text())
     text = supplement((tmp_path / 'tags/A.md').read_text())
     assert text.count('- **') == 20
     assert index['tags'][0]['notes'] == index['source']['notes'] == count
@@ -580,10 +593,11 @@ def test_notes_last_orphan_remove_and_collision_reallocation(db, tmp_path):
     kb.build(db, tmp_path)
     assert '被删除的主题' in (tmp_path / 'tags/A.md').read_text()
     assert kb.remove_note(db, first)
-    index = kb.build(db, tmp_path, tags=['A/'])
+    kb.build(db, tmp_path, tags=['A/'])
+    index = json.loads((tmp_path / "index.json").read_text())
     assert index['source']['notes'] == 1
-    assert '保留的主题' in (tmp_path / 'tags/A.md').read_text()
-    assert not (tmp_path / 'tags/A-2.md').exists()
+    assert '保留的主题' in (tmp_path / 'tags/A-2.md').read_text()
+    assert not (tmp_path / 'tags/A.md').exists()
     assert all('被删除的主题' not in p.read_text() for p in tmp_path.rglob('*.md'))
 
 
@@ -592,7 +606,8 @@ def test_notes_unclassified_name_preserves_t2_virtual_file(db, tmp_path):
     kb.build(db, tmp_path)
     original = (tmp_path / 'tags/未分类.md').read_bytes()
     kb.add_note(db, '未分类', '独立补充')
-    index = kb.build(db, tmp_path)
+    kb.build(db, tmp_path)
+    index = json.loads((tmp_path / "index.json").read_text())
     assert (tmp_path / 'tags/未分类.md').read_bytes() == original
     assert '独立补充' in (tmp_path / 'tags/未分类-2.md').read_text()
     assert sum(tag['notes'] for tag in index['tags']) == 1
@@ -713,7 +728,8 @@ def test_summary_failure_isolated_during_build(db, summary_model, tmp_path):
         add_tag(db, name)
         kb.add_note(db, name, '推进' + name)
     summary_model.side_effect = [RuntimeError('provider failure'), SUMMARY]
-    index = kb.build(db, tmp_path)
+    kb.build(db, tmp_path)
+    index = json.loads((tmp_path / "index.json").read_text())
     assert '综述未生成。' in (tmp_path / named(index['tags'], 'A')['path']).read_text()
     assert SUMMARY in (tmp_path / named(index['tags'], 'B')['path']).read_text()
     assert summary_model.call_count == 2

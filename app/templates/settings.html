@@ -80,6 +80,16 @@
     </div>
   </fieldset>
   <fieldset>
+    <legend>知识库</legend>
+    <div class="settings-group">
+      <div class="settings-row">
+        <label for="kb_auto_build">同步后更新知识库</label>
+        <input id="kb_auto_build" name="kb_auto_build" type="checkbox" role="switch" value="true"{% if preferences.kb_auto_build %} checked{% endif %} aria-describedby="kb-auto-build-help">
+        <p id="kb-auto-build-help">同步后更新相关标签。每日全量构建使用看板时间，关闭此开关后仍会执行。</p>
+      </div>
+    </div>
+  </fieldset>
+  <fieldset>
     <legend>看板</legend>
     <div class="settings-group">
       <div class="settings-row">

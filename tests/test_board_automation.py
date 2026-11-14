@@ -64,7 +64,7 @@ def test_due_claim_idempotence_restart_and_week_cutoff(client, store, monkeypatc
     assert tick(store, now=at('2026-11-06T21:59'))['executed'] == []
     assert reports(store) == []
     now = at('2026-11-06T22:01')
-    assert tick(store, now=now)['executed'] == ['board']
+    assert tick(store, now=now)['executed'] == ['board', 'kb_full_build']
     assert tick(SQLiteStore(store.db_path), now=now)['executed'] == []
     assert len(calls) == 2
     assert read_state(store)['board'] == now
@@ -78,7 +78,7 @@ def test_due_claim_idempotence_restart_and_week_cutoff(client, store, monkeypatc
 
 def test_disabled_board_never_claims(client, store):
     board_only(store, board_enabled=False)
-    assert tick(store, now=at('2026-11-06T22:01'), board_job=lambda *a: pytest.fail('disabled'))['executed'] == []
+    assert tick(store, now=at('2026-11-06T22:01'), board_job=lambda *a: pytest.fail('disabled'))['executed'] == ['kb_full_build']
     assert 'board' not in read_state(store)
 
 
@@ -109,7 +109,7 @@ def test_fresh_report_skip_consumes_daily_slot(client, store, monkeypatch):
         conn.execute('INSERT INTO board_reports VALUES (?, ?, ?, ?, ?, ?, ?)',
                      ('2026-11-06', 'day', '{}', GOOD, 'fixture', '2026-11-06T13:00:00Z', None))
     result = tick(store, now=at('2026-11-06T22:01'), board_job=lambda *a: pytest.fail('fresh'))
-    assert result == {'executed': [], 'failed': [], 'skipped': ['board']}
+    assert result == {'executed': ['kb_full_build'], 'failed': [], 'skipped': ['board']}
     assert read_state(store)['board'] == at('2026-11-06T22:01')
 
 

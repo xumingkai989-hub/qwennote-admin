@@ -18,3 +18,4 @@ data/
 *.hotword-judge.lock
 *.hotword-upstream.lock
 *.enrichment-*.lock
+knowledge/

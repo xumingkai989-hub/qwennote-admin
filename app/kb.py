@@ -1,8 +1,15 @@
 """SQLite-backed knowledge notes, cached AI summaries and derived Markdown."""
+import argparse
+from contextlib import contextmanager
 from datetime import datetime
+import fcntl
 import hashlib
 import html
 import json
+import logging
+import os
+import sys
+import tempfile
 from pathlib import Path
 import re
 from urllib.parse import quote
@@ -234,8 +241,8 @@ def _write_index(index, root):
     root = Path(root)
     (root / 'categories').mkdir(parents=True, exist_ok=True)
     (root / 'tags').mkdir(parents=True, exist_ok=True)
-    (root / 'index.json').write_text(json.dumps(index, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
-    (root / 'index.md').write_text(_markdown(index), encoding='utf-8')
+    _write_changed(root / 'index.json', json.dumps(index, ensure_ascii=False, indent=2) + '\n')
+    _write_changed(root / 'index.md', _markdown(index))
 
 
 def _is_unclassified(tag):
@@ -422,43 +429,335 @@ def render_category_file(store, category: dict, tags: list[dict]) -> str:
     return '\n'.join(lines) + '\n'
 
 
+def configured_root() -> Path:
+    return Path(os.environ.get('KB_ROOT', '').strip() or DEFAULT_ROOT).expanduser()
+
+
+def _write_changed(path, content):
+    """Atomic replacement, preserving mtime when bytes are unchanged."""
+    data = content.encode('utf-8')
+    if path.is_file() and path.read_bytes() == data:
+        return False
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as output:
+        temporary = Path(output.name)
+        try:
+            output.write(data)
+            output.close()
+            os.replace(temporary, path)
+        finally:
+            temporary.unlink(missing_ok=True)
+    return True
+
+
+def _safe_path(root, relative, directory):
+    path = Path(relative)
+    if len(path.parts) != 2 or path.parts[0] != directory or path.suffix != '.md':
+        raise ValueError('invalid knowledge path')
+    target = root / path
+    if not target.resolve().is_relative_to(root.resolve()):
+        raise ValueError('invalid knowledge path')
+    return target
+
+
+@contextmanager
+def _build_lock(root):
+    root.mkdir(parents=True, exist_ok=True)
+    with (root / '.build.lock').open('a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
+
+
+def _identity(tag):
+    return tag['name'], _is_unclassified(tag)
+
+
+def _retain_paths(entries, previous, directory, key):
+    """Keep existing owners' filenames when a colliding note-only tag disappears."""
+    old = {key(entry): entry for entry in previous}
+    used = set()
+    for entry in entries:
+        prior = old.get(key(entry))
+        if prior:
+            _safe_path(Path('.'), prior['path'], directory)
+            entry['path'] = prior['path']
+            used.add(entry['path'].casefold())
+    for entry in entries:
+        if key(entry) in old:
+            continue
+        stem, suffix = slug(entry['name']), 2
+        path = f'{directory}/{stem}.md'
+        while path.casefold() in used:
+            path = f'{directory}/{stem}-{suffix}.md'
+            suffix += 1
+        entry['path'] = path
+        used.add(path.casefold())
+
+
 def build(store, root: Path = DEFAULT_ROOT, tags: list[str] | None = None) -> dict:
-    """Rebuild derived files, reading notes from SQLite for every selected tag."""
-    index = scan(store)
+    """Build selected tags, their categories and index; isolate each file failure.
+
+    content_hash is the SHA-256 of rendered UTF-8, including the cached summary.
+    Unchanged content never replaces files, even on a full build. Index generation
+    time advances only when its data changes. The lock serializes CLI/sync/tick.
+    """
     root = Path(root)
+    with _build_lock(root):
+        return _build(store, root, tags)
+
+
+def _build(store, root, tags):
+    result = dict(rebuilt=[], skipped=[], errors=[])
     selected = None if tags is None else set(tags)
     try:
         previous = json.loads((root / 'index.json').read_text(encoding='utf-8'))
-    except (FileNotFoundError, ValueError):
+    except FileNotFoundError:
         previous = dict(tags=[], categories=[])
-    previous_paths = {tag['path']: (tag['name'], tag['category']) for tag in previous['tags']}
-    affected_categories = {tag['category'] for tag in [*index['tags'], *previous['tags']]
-                           if selected is None or tag['name'] in selected}
-    for tag in index['tags']:
-        path = root / tag['path']
-        same_owner = previous_paths.get(tag['path']) == (tag['name'], tag['category'])
-        if selected is not None and tag['name'] not in selected and path.exists() and same_owner:
+    index = scan(store)
+    if selected is not None:
+        current_ids = {_identity(tag) for tag in index['tags']}
+        index['tags'].extend(tag for tag in previous['tags']
+                             if tag['name'] not in selected and _identity(tag) not in current_ids)
+    _retain_paths(index['tags'], previous['tags'], 'tags', _identity)
+    _retain_paths(index['categories'], previous['categories'], 'categories', lambda c: c['name'])
+    old_tags = {_identity(tag): tag for tag in previous['tags']}
+    affected = {tag['category'] for tag in [*index['tags'], *previous['tags']]
+                if selected is None or tag['name'] in selected}
+    for i, tag in enumerate(index['tags']):
+        prior = old_tags.get(_identity(tag))
+        if selected is not None and tag['name'] not in selected:
+            # Never advertise a new hash for an unbuilt tag.
+            if prior:
+                index['tags'][i] = prior
+            else:
+                tag['content_hash'] = None
             continue
-        affected_categories.add(tag['category'])
-        path.parent.mkdir(parents=True, exist_ok=True)
-        notes = [] if _is_unclassified(tag) else notes_for(store, tag['name'])
-        path.write_text(render_tag_file(store, tag, notes=notes), encoding='utf-8')
+        try:
+            path = _safe_path(root, tag['path'], 'tags')
+            notes = [] if _is_unclassified(tag) else notes_for(store, tag['name'])
+            content = render_tag_file(store, tag, notes=notes)
+            tag['content_hash'] = hashlib.sha256(content.encode('utf-8')).hexdigest()
+            if (prior and prior.get('content_hash') == tag['content_hash'] and path.is_file()
+                    and hashlib.sha256(path.read_bytes()).hexdigest() == tag['content_hash']):
+                result['skipped'].append(tag['name'])
+            else:
+                changed = _write_changed(path, content)
+                result['rebuilt' if changed else 'skipped'].append(tag['name'])
+        except Exception:
+            tag['content_hash'] = prior.get('content_hash') if prior else None
+            tag['error'] = 'tag_build_failed'
+            result['errors'].append(dict(tag=tag['name'], error=tag['error']))
     for category in index['categories']:
-        if not category['tags']:
+        if not category['tags'] or (selected is not None and category['name'] not in affected):
             continue
-        path = root / category['path']
-        if selected is not None and category['name'] not in affected_categories and path.exists():
-            continue
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(render_category_file(store, category, index['tags']), encoding='utf-8')
-    # Remove only previously indexed derived files, including a note-only tag
-    # whose last note was deleted. Never trust an index path outside these dirs.
-    current_paths = {tag['path'] for tag in index['tags']} | {
+        try:
+            _write_changed(_safe_path(root, category['path'], 'categories'),
+                           render_category_file(store, category, index['tags']))
+        except Exception:
+            category['error'] = 'category_build_failed'
+            result['errors'].append(dict(category=category['name'], error=category['error']))
+    current = {tag['path'] for tag in index['tags']} | {
         category['path'] for category in index['categories'] if category['tags']}
-    for entry in [*previous['tags'], *previous['categories']]:
-        path = Path(entry['path'])
-        if (entry['path'] not in current_paths and len(path.parts) == 2
-                and path.parts[0] in {'tags', 'categories'} and path.suffix == '.md'):
-            (root / path).unlink(missing_ok=True)
+    for directory in ('tags', 'categories'):
+        for entry in previous[directory]:
+            eligible = (selected is None or (entry['name'] in selected if directory == 'tags'
+                                            else entry['name'] in affected))
+            if eligible and entry['path'] not in current:
+                try:
+                    _safe_path(root, entry['path'], directory).unlink(missing_ok=True)
+                    if directory == 'tags':
+                        result['rebuilt'].append(entry['name'])
+                except Exception:
+                    result['errors'].append(dict(path=entry['path'], error='cleanup_failed'))
+    if {k: v for k, v in index.items() if k != 'generated_at'} == {
+            k: v for k, v in previous.items() if k != 'generated_at'}:
+        index['generated_at'] = previous['generated_at']
     _write_index(index, root)
-    return index
+    return result
+
+
+def recording_tags(store, recording_ids) -> set[str]:
+    """Read canonical labels without changing meeting/tag state."""
+    names = set()
+    with store._connect() as conn:
+        for ident in recording_ids:
+            rows = conn.execute('SELECT tag FROM recording_tags WHERE recording_id=?', (ident,)).fetchall()
+            if not rows:
+                names.add(UNCLASSIFIED)
+            for row in rows:
+                target = resolve(conn, row['tag'])
+                names.add(target['name'] if target else row['tag'])
+    return names
+
+
+def auto_build(store, recording_ids, *, previous_tags=()):
+    """Best effort after sync; provider/storage failures never change sync status."""
+    try:
+        if not recording_ids or not store.get_settings().kb_auto_build:
+            return
+        names = recording_tags(store, recording_ids)
+        with store._connect() as conn:
+            for name in previous_tags:
+                target = resolve(conn, name)
+                names.add(target['name'] if target else name)
+        result = build(store, configured_root(), tags=sorted(names))
+        if result['errors']:
+            logging.getLogger(__name__).warning('知识库增量构建部分失败；同步结果不受影响')
+    except Exception:
+        logging.getLogger(__name__).warning('知识库增量构建失败；同步结果不受影响')
+
+
+def _read_index(root):
+    try:
+        return json.loads((root / 'index.json').read_text(encoding='utf-8'))
+    except FileNotFoundError:
+        return dict(tags=[], categories=[])
+
+
+def _show(root, tag):
+    return dict(tag=tag['name'], path=tag['path'], sessions=tag['sessions'], notes=tag['notes'],
+                content=_safe_path(root, tag['path'], 'tags').read_text(encoding='utf-8'))
+
+
+def _search(store, root, keyword, limit):
+    needle = keyword.casefold()
+    found = []
+    for tag in _read_index(root)['tags']:
+        path = _safe_path(root, tag['path'], 'tags')
+        content = path.read_text(encoding='utf-8') if path.is_file() else ''
+        summary = content.split('## 当前状态\n', 1)[-1].split('## 补充记录', 1)[0] if '## 当前状态\n' in content else ''
+        texts = [tag['name'], html.unescape(summary),
+                 *(row['title'] or '' for row in _tag_recordings(store, tag))]
+        with store._connect() as conn:
+            texts.extend(row['body'] for row in conn.execute(
+                'SELECT body FROM knowledge_notes WHERE tag_name=?', (tag['name'],)))
+        if any(needle in text.casefold() for text in texts):
+            found.append(tag)
+            if len(found) >= limit:
+                break
+    return found
+
+
+def _positive(value):
+    number = int(value)
+    if number < 1:
+        raise argparse.ArgumentTypeError('limit must be positive')
+    return number
+
+
+def _parser():
+    parser = argparse.ArgumentParser(prog='python -m app.kb', description='知识库构建、查询与补充记录')
+    parser.add_argument('--root', type=Path, default=None)
+    commands = parser.add_subparsers(dest='command', required=True)
+    build_parser = commands.add_parser('build')
+    mode = build_parser.add_mutually_exclusive_group()
+    mode.add_argument('--tag', action='append')
+    mode.add_argument('--full', action='store_true')
+    listing = commands.add_parser('list')
+    listing.add_argument('--category')
+    show = commands.add_parser('show')
+    show.add_argument('tag')
+    search = commands.add_parser('search')
+    search.add_argument('keyword')
+    search.add_argument('--limit', type=_positive, default=5)
+    notes = commands.add_parser('note').add_subparsers(dest='note_command', required=True)
+    add = notes.add_parser('add')
+    add.add_argument('tag')
+    add.add_argument('--text', required=True)
+    add.add_argument('--source', default='cli')
+    add.add_argument('--no-build', action='store_true')
+    note_list = notes.add_parser('list')
+    note_list.add_argument('tag')
+    note_list.add_argument('--limit', type=_positive, default=20)
+    remove = notes.add_parser('remove')
+    remove.add_argument('id', type=_positive)
+    remove.add_argument('--no-build', action='store_true')
+    for sub in (listing, show, search, note_list):
+        sub.add_argument('--json', action='store_true')
+    for sub in (build_parser, listing, show, search, add, note_list, remove):
+        sub.add_argument('--root', type=Path, default=argparse.SUPPRESS)
+    return parser
+
+
+def _cli_build(store, root, tags):
+    result = build(store, root, tags=tags)
+    if result['errors']:
+        print(json.dumps(result['errors'], ensure_ascii=False), file=sys.stderr)
+    return result
+
+
+def main(argv=None):
+    args = _parser().parse_args(argv)
+    root = (args.root or configured_root()).expanduser()
+    try:
+        # Queries against the derived index require no model or application secrets.
+        store = None
+        if args.command in ('build', 'search', 'note'):
+            from app.store import SQLiteStore
+            db = os.environ.get('DB_PATH', '').strip()
+            if not db:
+                print('DB_PATH is required', file=sys.stderr)
+                return 2
+            db = Path(db).expanduser()
+            if not db.is_file():
+                print('DB_PATH must point to an existing database', file=sys.stderr)
+                return 2
+            store = SQLiteStore(db)
+            store.migrate()
+        if args.command == 'build':
+            result = _cli_build(store, root, args.tag)
+            print(json.dumps(result, ensure_ascii=False))
+            return 2 if result['errors'] else 0 if result['rebuilt'] or result['skipped'] else 1
+        if args.command == 'list':
+            result = [tag for tag in _read_index(root)['tags']
+                      if args.category is None or tag['category'] == args.category]
+        elif args.command == 'show':
+            tag = next((tag for tag in _read_index(root)['tags'] if tag['name'] == args.tag), None)
+            result = _show(root, tag) if tag else None
+            if not args.json:
+                if result:
+                    print(result['content'], end='')
+                return 0 if result else 1
+        elif args.command == 'search':
+            if not args.keyword.strip():
+                raise ValueError('empty search keyword')
+            result = _search(store, root, args.keyword, args.limit)
+        elif args.note_command == 'list':
+            result = list_notes(store, args.tag, args.limit)
+        else:
+            if args.note_command == 'add':
+                ident = add_note(store, args.tag, args.text, args.source)
+                name = args.tag.strip()
+            else:
+                with store._connect() as conn:
+                    row = conn.execute('SELECT tag_name FROM knowledge_notes WHERE id=?', (args.id,)).fetchone()
+                if row is None:
+                    return 1
+                name, ident = row['tag_name'], args.id
+                if not remove_note(store, ident):
+                    return 1
+            # A committed note remains durable if the derived rebuild fails.
+            print(ident)
+            if not args.no_build and _cli_build(store, root, [name])['errors']:
+                return 2
+            return 0
+        if args.json:
+            print(json.dumps(result, ensure_ascii=False))
+        else:
+            for row in result:
+                if 'body' in row:
+                    print(f"{row['id']}\t{row['created_at']}\t{row['source']}\t{row['body']}")
+                else:
+                    print(f"{row['name']}\t{row['category']}\t{row['sessions']} 场\t{row['notes']} 条补充\t{row['path']}")
+        return 0 if result else 1
+    except Exception:
+        # Model/provider exceptions can carry secrets; never dump raw errors.
+        print('知识库操作失败：请检查参数、数据库及知识库目录权限。', file=sys.stderr)
+        return 2
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())

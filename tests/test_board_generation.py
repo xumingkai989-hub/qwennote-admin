@@ -227,7 +227,7 @@ def test_fresh_daily_archive_cannot_skip_missing_week(store, monkeypatch, provid
     with store._connect() as conn:
         conn.execute('INSERT INTO board_reports VALUES (?, ?, ?, ?, ?, ?, ?)',
                      ('2026-11-06', 'day', '{}', GOOD, 'fixture', '2026-11-06T21:00:00+08:00', None))
-    assert tick(store, now=datetime(2026, 11, 6, 22, 1, tzinfo=SHANGHAI))['executed'] == ['board']
+    assert tick(store, now=datetime(2026, 11, 6, 22, 1, tzinfo=SHANGHAI))['executed'] == ['board', 'kb_full_build']
     assert len(provider) == 1 and board.load_report(store, MONDAY, 'week')
 
 

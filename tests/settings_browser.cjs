@@ -19,8 +19,8 @@ test('settings save, validation, CSRF isolation and responsive screenshots', asy
       page.on('pageerror', error => errors.push(error.message));
       await page.route('**/*', route => new URL(route.request().url()).origin === base ? route.continue() : route.abort());
       await page.goto(base + '/settings');
-      assert.equal(await page.locator('legend').allTextContents().then(x=>x.join('/')), '同步/同步策略/标签/看板/数据保留');
-      for (const key of ['sync_enabled','tag_enabled','board_enabled']) await page.locator('#' + key).check();
+      assert.equal(await page.locator('legend').allTextContents().then(x=>x.join('/')), '同步/同步策略/标签/知识库/看板/数据保留');
+      for (const key of ['sync_enabled','tag_enabled','board_enabled','kb_auto_build']) await page.locator('#' + key).check();
       for (const [key,value] of Object.entries({sync_time:'03:00', sync_interval_hours:'0',backfill_days:'90',tag_time:'05:00',retention_days:'0',board_time:'22:00'})) {
         await page.locator('#' + key).fill(value);
       }

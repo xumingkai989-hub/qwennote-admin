@@ -135,6 +135,40 @@ Uvicorn 的 `--env-file` 加载本地文件；生产由 systemd 注入，应用�
 模型中心显示的 provider 类型不代表已实现各厂商全部协议；当前调用仍走 Messages 接口。
 生产模型环境文件为 `/etc/claude/deepseek.qwennote.env`，不要将其放进发布包。
 
+## 知识库
+
+知识库把 SQLite 中的会议、标签关联和补充记录整理成可读文件。AI 综述复用模型中心与成功结果缓存；模型不可用时显示「综述未生成」，其余内容照常生成。
+
+```text
+knowledge/                  # 默认 <repo>/knowledge，已 gitignore
+├── index.json              # 标签元数据、文件路径、内容 SHA-256、构建错误
+├── index.md                # 人读总览
+├── categories/<分类>.md
+└── tags/<标签>.md
+```
+
+先激活 Python 环境并设置 `DB_PATH` 指向已有数据库（无需 Web 登录参数）。以下七个命令均通过 `python -m app.kb` 执行：
+
+```sh
+python -m app.kb build --full                 # 或 --tag "AI Tutor"；可加 --root <路径>
+python -m app.kb list --category 产品 --json
+python -m app.kb show "AI Tutor"              # 默认输出 Markdown 原文；可加 --json
+python -m app.kb search "教师试点" --limit 5 --json
+python -m app.kb note add "AI Tutor" --text "试点教师样本已补齐。" --source codex
+python -m app.kb note list "AI Tutor" --limit 20 --json
+python -m app.kb note remove 123              # 123 替换为 add 返回的真实 id
+```
+
+查询命中退出 0，空结果退出 1，参数或运行错误退出 2；正文在 stdout，错误在 stderr。`show --json` 返回 `{tag, path, sessions, notes, content}`；`list/search/note list --json` 返回数组。搜索不区分大小写，匹配标签名、全部关联会议标题、全部补充记录正文及已生成的综述；默认最多 5 个标签。首次使用先全量构建。
+
+回写只追加到 SQLite `knowledge_notes`，不改会议原文或标签词表，单条最多 2000 字；`add` 输出 id，`remove` 按 id 删除。未知标签可回写，并生成独立标签文件。添加或删除后立即增量构建；`--no-build` 可暂缓，之后用 `build --tag` 补建。若构建失败，已提交的记录仍保留，可按输出 id 查询后重建，避免重复添加。
+
+`build --tag` 只处理指定标签、其所属分类和索引；不改其他标签文件。`--full` 或不带筛选参数处理全部标签。文件内容不变时不写盘，完整内容的 SHA-256 存入 index 的 `content_hash`；没有元数据变化时索引也不写盘。构建输出 `{rebuilt, skipped, errors}`，前两项为标签名数组，最后一项为脱敏错误数组。删除最后一条记录后的孤立标签文件会清理；文件名冲突时保留其他标签既有路径。
+
+同步完成后自动更新本轮 inserted/updated 会议涉及的新旧标签，失败仅记日志，不改变同步结果。设置中心的「同步后更新知识库」（`kb_auto_build`，默认 true）可关闭此步骤。既有异步打标流程保持原样，后续标签变化由每日全量兜底。`kb_full_build` 每天按 `board_time`（默认 Asia/Shanghai 22:00）在看板任务之后执行，独立记录每日执行状态；看板关闭、跳过或失败不阻断知识库，知识库失败也不阻断后续任务。
+
+`KB_ROOT` 环境变量可统一指定 CLI、同步和调度的输出目录；各叶子命令的 `--root` 可临时覆盖。生产跨 release 保留产物时可使用持久目录；默认目录仍为当前代码仓库下的 `knowledge/`。补充记录和综述缓存始终保存在数据库，重建不会丢失。
+
 ## 部署
 
 目标服务器用 `<server-ip>` 表示，云实例用 `<instance-id>` 表示；不要在文档中填真实值。
@@ -212,7 +246,7 @@ JS 层验证同步按钮、搜索、复制和菜单等交互；浏览器层验�
 - [增强模型兜底与 SQLite 兼容（35）](docs/enrichment-35.md)
 - [标签词表两级分类（37）](docs/tag-categories-37.md)
 - [标签树形列表（38）](docs/tag-tree-38.md)
-- [移动端导航与触摸目标（40）](docs/mobile-40.md)、[页面密度与控件收纳（41）](docs/mobile-41.md)、[登录快速同步（42）](docs/login-sync-42.md)、[看板统计与分析（T1+T2）](docs/board-t1-t2.md)、[看板页面与导航（T3）](docs/board-t3.md)、[看板定时生成（T4）](docs/board-t4.md)、[未完成会议自动补齐（T6）](docs/backfill-t6.md)、[补齐状态分类修正（T7）](docs/backfill-t7.md)、[窗口内同步与详情节流（T9）](docs/backfill-t9.md)、[看板图表与 UI（T5）](docs/board-t5.md)、[会议核心议题判定（T1）](docs/primary-tag-t1.md)、[周度时间分配聚合（T2）](docs/tag-time-t2.md)、[本周时间分配饼图（T3）](docs/tag-time-t3.md)、[周度时间分配每日生成与解读（T4）](docs/tag-time-t4.md)、[层级切换与近八周对比（T5）](docs/tag-time-t5.md)、[判定健壮性与对比图比例尺（T6）](docs/tag-time-t6.md)、[允许模型显式未分类（T7）](docs/tag-time-t7.md)、[对比周数可选（T8）](docs/board-t8.md)、[近 N 周垂直堆叠柱（T10）](docs/board-t10.md)、[固定堆叠顺序（T11）](docs/board-t11.md)、[知识库扫描与索引（T1）](docs/kb-t1.md)、[知识库标签与分类渲染（T2）](docs/kb-t2.md)、[知识库回写与重建保真（T3）](docs/kb-t3.md)、[知识库 AI 综述与缓存（T4）](docs/kb-t4.md)
+- [移动端导航与触摸目标（40）](docs/mobile-40.md)、[页面密度与控件收纳（41）](docs/mobile-41.md)、[登录快速同步（42）](docs/login-sync-42.md)、[看板统计与分析（T1+T2）](docs/board-t1-t2.md)、[看板页面与导航（T3）](docs/board-t3.md)、[看板定时生成（T4）](docs/board-t4.md)、[未完成会议自动补齐（T6）](docs/backfill-t6.md)、[补齐状态分类修正（T7）](docs/backfill-t7.md)、[窗口内同步与详情节流（T9）](docs/backfill-t9.md)、[看板图表与 UI（T5）](docs/board-t5.md)、[会议核心议题判定（T1）](docs/primary-tag-t1.md)、[周度时间分配聚合（T2）](docs/tag-time-t2.md)、[本周时间分配饼图（T3）](docs/tag-time-t3.md)、[周度时间分配每日生成与解读（T4）](docs/tag-time-t4.md)、[层级切换与近八周对比（T5）](docs/tag-time-t5.md)、[判定健壮性与对比图比例尺（T6）](docs/tag-time-t6.md)、[允许模型显式未分类（T7）](docs/tag-time-t7.md)、[对比周数可选（T8）](docs/board-t8.md)、[近 N 周垂直堆叠柱（T10）](docs/board-t10.md)、[固定堆叠顺序（T11）](docs/board-t11.md)、[知识库扫描与索引（T1）](docs/kb-t1.md)、[知识库标签与分类渲染（T2）](docs/kb-t2.md)、[知识库回写与重建保真（T3）](docs/kb-t3.md)、[知识库 AI 综述与缓存（T4）](docs/kb-t4.md)、[知识库 CLI、增量与调度（T5）](docs/kb-t5.md)
 - [同步按钮主次与进行中状态（30，提交记录）](https://github.com/xumingkai989-hub/qwennote-admin/commit/4b12f5d346f99713022be25bf7051e7792acb25b)
 
 ## 许可证

@@ -127,6 +127,8 @@ def run_sync(source: MinutesSource, store: SyncStore, *, backfill_days: int = 90
         http_failures = Counter()
         backfilled = 0
         seen = set()
+        changed_ids = []
+        previous_tags = set()
         tag_ids = []
         judge_ids = []
         refresh_before = getattr(source, 'refresh_count', 0)
@@ -233,6 +235,10 @@ def run_sync(source: MinutesSource, store: SyncStore, *, backfill_days: int = 90
                     backfilled += meta.recording_id in backfill_ids and complete
                     inserted += outcome == 'inserted'
                     updated += outcome == 'updated'
+                    if outcome in ('inserted', 'updated'):
+                        changed_ids.append(meta.recording_id)
+                        if previous is not None:
+                            previous_tags.update(previous.tags or ('未分类',))
                     if previous is None or (previous.summary_md, previous.transcript_md,
                             previous.has_summary, previous.has_transcript) != (
                             detail.summary_md or '', detail.transcript_md or '', detail.has_summary, detail.has_transcript):
@@ -262,6 +268,8 @@ def run_sync(source: MinutesSource, store: SyncStore, *, backfill_days: int = 90
     run = replace(run, finished_at=datetime.now(SHANGHAI).isoformat(),
                   duration_ms=max(1, int((time.perf_counter() - clock_started) * 1000)))
     store.finish_sync(run)
+    from app.kb import auto_build
+    auto_build(store, changed_ids, previous_tags=previous_tags)
     return run
 
 

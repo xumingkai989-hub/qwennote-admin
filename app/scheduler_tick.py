@@ -61,7 +61,7 @@ def scheduled_time(job, settings, now, last):
                 + timedelta(hours=settings.sync_interval_hours) if last else
                 now.replace(minute=0, second=0, microsecond=0))
     text = {'sync': settings.sync_time, 'tag': settings.tag_time, 'retention': '00:00',
-            'board': settings.board_time}[job]
+            'board': settings.board_time, 'kb_full_build': settings.board_time}[job]
     hour, minute = map(int, text.split(':'))
     due = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
     if last and last.date() >= now.date():
@@ -73,7 +73,7 @@ def next_runs(store, settings, now):
     now = local_time(now)
     state = read_state(store)
     result = {}
-    for job in ('sync', 'full_sync', 'tag', 'retention', 'enrichment', 'board'):
+    for job in ('sync', 'full_sync', 'tag', 'retention', 'enrichment', 'board', 'kb_full_build'):
         due = scheduled_time(job, settings, now, state.get(job))
         if due is not None:
             due = max(due, now)
@@ -170,7 +170,13 @@ def _board(store, day):
         raise RuntimeError('board_analysis_failed')
 
 
-def tick(store, *, now=None, sync_job=None, full_sync_job=None, tag_job=None, retention_job=None, enrichment_job=None, board_job=None):
+def _kb_full_build(store, preferences):
+    from app.kb import build, configured_root
+    if build(store, configured_root())['errors']:
+        raise RuntimeError('kb_full_build_failed')
+
+
+def tick(store, *, now=None, sync_job=None, full_sync_job=None, tag_job=None, retention_job=None, enrichment_job=None, board_job=None, kb_full_build_job=None):
     now = local_time(now if now is not None else datetime.now(SHANGHAI))
     result = {'executed': [], 'failed': [], 'skipped': []}
     try:
@@ -184,6 +190,7 @@ def tick(store, *, now=None, sync_job=None, full_sync_job=None, tag_job=None, re
                 ('retention', retention_job or
                  (lambda store, settings: retain_recordings(store, settings.retention_days, now))),
                 ('board', board_job or (lambda store, settings: _board(store, now.date()))),
+                ('kb_full_build', kb_full_build_job or _kb_full_build),
                 ('enrichment', enrichment_job or (lambda store, settings: process_pending(store))),
             ):
                 if job == 'enrichment' and not has_work(store):
