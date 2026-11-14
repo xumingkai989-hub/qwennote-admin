@@ -1,6 +1,6 @@
 """Synthetic board fixtures for browser checks, without network or model calls."""
 import argparse
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 import re
 import secrets
@@ -99,6 +99,23 @@ def render(output):
                     'app.board_generation._requester', return_value=lambda prompt: '{"comparison":[]}'):
                 board_generation.generate(store, scope='week', day='2026-11-06')
             save('allocation')
+            # Eight-week example with rank changes, absent categories and one
+            # empty week, separate from the existing allocation/daily fixtures.
+            for week in range(7):
+                if week == 3:
+                    continue
+                monday = date(2026, 9, 14) + timedelta(weeks=week)
+                for i, (name, category, minutes) in enumerate([
+                    ('产品规划', '产品', [420, 300, 540, 0, 280, 500, 380][week]),
+                    ('平台建设', '中台', 160 + week * 35),
+                    ('师资匹配', '师资', 190 - week * 15),
+                    ('渠道复盘', '市场', 60 + week * 20),
+                ]):
+                    if week == 5 and category == '师资':
+                        continue
+                    meeting(store, f'comparison-{week}-{i}', name, category, minutes,
+                            stamp=monday.isoformat() + 'T09:00:00+08:00')
+            save('comparison')
 
 
 

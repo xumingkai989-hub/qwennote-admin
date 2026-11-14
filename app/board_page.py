@@ -76,6 +76,43 @@ def allocation_chart(rows, total, level):
     return sectors
 
 
+def allocation_comparison(weeks, current_sectors):
+    """One category palette shared with the unchanged current-week donut.
+
+    Use the largest weekly total as the common scale, retaining each week's
+    aggregation order. Connections only join categories in adjacent rows.
+    """
+    colors = {item['name']: item['color'] for item in current_sectors}
+    colors.update({'其他': 'allocation-other', '未分类': 'allocation-unknown'})
+    names = dict.fromkeys(item['name'] for week in weeks for item in week['by_category'])
+    used = {color for color in colors.values() if color.isdigit()}
+    available = [str(i) for i in range(1, 7) if str(i) not in used]
+    for name in names:
+        if name not in colors:
+            colors[name] = available.pop(0) if available else str(len(colors) % 6 + 1)
+    maximum = max((week['total_minutes'] for week in weeks), default=0)
+    rows, connections, previous = [], [], {}
+    for index, week in enumerate(weeks):
+        segments, current, offset = [], {}, 0
+        for item in week['by_category']:
+            start = offset / maximum if maximum else 0
+            offset += item['minutes']
+            segment = {**item, 'start': start, 'end': offset / maximum if maximum else 0,
+                       'y': index * 28 + 2, 'color': colors[item['name']]}
+            segments.append(segment)
+            current[item['name']] = segment
+            prior = previous.get(item['name'])
+            if prior and prior['minutes'] and item['minutes']:
+                connections.append({'name': item['name'], 'color': segment['color'],
+                                    'start1': prior['start'], 'end1': prior['end'],
+                                    'start2': segment['start'], 'end2': segment['end'],
+                                    'y1': prior['y'] + 14, 'y2': segment['y']})
+        rows.append({**week, 'y': index * 28, 'segments': segments})
+        previous = current
+    return {'rows': rows, 'connections': connections, 'height': len(rows) * 28 - 10,
+            'legend': [{'name': name, 'color': colors[name]} for name in names]}
+
+
 def parse_day(value):
     day = date.fromisoformat(value)
     if day.isoformat() != value:
@@ -107,6 +144,15 @@ def install_board(app, *, settings, templates, sessions, authorize, valid_csrf,
         daily, weekly = board.day_stats(store, day), board.week_stats(store, monday, day)
         allocation, allocation_text, allocation_error = board_generation.allocation_view(
             store, board.monday_of(today), today)
+        allocation_charts = {key: allocation_chart(allocation[key], allocation['total_minutes'], key)
+                             for key in ('by_category', 'by_tag')}
+        try:
+            comparison = allocation_comparison(tag_time.weekly_allocation(store, today=today),
+                                               allocation_charts['by_category'])
+        except Exception:
+            # A failed historical query must not break today's cards or the
+            # existing current-week fallback. Never mislabel failure as zero.
+            comparison = None
         admin = bool(set(settings.admin_open_ids).intersection((user.subject, user.union_id, user.open_id)))
         token = ''
         if admin:
@@ -122,8 +168,7 @@ def install_board(app, *, settings, templates, sessions, authorize, valid_csrf,
             'chart': donut_chart(daily['items']),
             'allocation': allocation, 'allocation_text': allocation_text,
             'allocation_error': allocation_error,
-            'allocation_charts': {key: allocation_chart(allocation[key], allocation['total_minutes'], key)
-                                  for key in ('by_category', 'by_tag')},
+            'allocation_charts': allocation_charts, 'allocation_comparison': comparison,
             'unknown_count': sum(item['minutes'] is None for item in daily['items']),
             'day_report': board.load_report(store, day),
             'week_report': board_generation.meeting_review(board.load_report(store, monday, 'week')),

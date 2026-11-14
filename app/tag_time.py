@@ -1,11 +1,34 @@
 """Read-only weekly time allocation from persisted primary-topic decisions."""
-from datetime import datetime, time, timedelta
+from datetime import date, datetime, time, timedelta
 
 from app.board import _week_bounds
 from app.minutes import SHANGHAI
 
 UNKNOWN = '未分类'
 OTHER = '其他'
+
+
+def weekly_allocation(store, *, weeks: int = 8, today=None) -> list[dict]:
+    """Recent Shanghai calendar weeks, oldest first, including empty weeks.
+
+    Completed weeks end on Sunday; the current week stops at today. Delegate
+    all grouping, rounding and fallback rules to week_allocation unchanged.
+    """
+    if isinstance(weeks, bool) or not isinstance(weeks, int) or weeks < 1:
+        raise ValueError('weeks must be a positive integer')
+    today = today or datetime.now(SHANGHAI).date()
+    if isinstance(today, str):
+        today = date.fromisoformat(today)
+    monday = today - timedelta(days=today.weekday())
+    result = []
+    for offset in range(weeks - 1, -1, -1):
+        start = monday - timedelta(weeks=offset)
+        allocation = week_allocation(store, start, min(start + timedelta(days=6), today))
+        result.append({'monday': start.isoformat(), 'label': start.strftime('%m-%d 周'),
+                       'total_minutes': allocation['total_minutes'],
+                       'by_category': [{key: row[key] for key in ('name', 'minutes', 'share')}
+                                       for row in allocation['by_category']]})
+    return result
 
 
 def _merge_other(rows, kept, total, *, tag=False):

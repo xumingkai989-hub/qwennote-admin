@@ -24,7 +24,9 @@ def test_route_exposes_both_levels_for_current_week_even_on_history(board_client
         return original(store, monday, today)
     monkeypatch.setattr(tag_time, 'week_allocation', capture)
     response = board_client.get('/board?day=2026-10-30')
-    assert calls == [(date(2026, 11, 2), date(2026, 11, 6))]
+    assert calls[0] == (date(2026, 11, 2), date(2026, 11, 6))
+    assert calls[-1] == calls[0]
+    assert len(calls) == 9  # Current allocation plus the eight comparison weeks.
     assert response.context['allocation']['total_minutes'] == 61
     assert response.context['daily']['minutes'] == 999
     html = block(response)

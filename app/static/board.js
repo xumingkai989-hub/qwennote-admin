@@ -28,10 +28,37 @@ document.querySelectorAll('.board-donut-layout').forEach(chart => {
 document.querySelectorAll('.board-allocation').forEach(section => {
   const buttons = section.querySelectorAll('[data-allocation-view]');
   const panels = section.querySelectorAll('[data-allocation-panel]');
-  buttons.forEach(button => button.addEventListener('click', () => {
+  const select = button => {
     buttons.forEach(item => item.setAttribute('aria-pressed', String(item === button)));
     panels.forEach(panel => {
       panel.hidden = panel.dataset.allocationPanel !== button.dataset.allocationView;
     });
-  }));
+  };
+  buttons.forEach(button => button.addEventListener('click', () => select(button)));
+  const selected = [...buttons].find(button => button.getAttribute('aria-pressed') === 'true') || buttons[0];
+  if (selected) select(selected);
+});
+
+// Keep SVG text, row height and corner radii in CSS pixels at every width.
+// Only the plot's horizontal coordinates scale; all eight weeks remain readable.
+document.querySelectorAll('.board-comparison-plot').forEach(plot => {
+  const viewport = plot.parentElement;
+  const resize = () => {
+    const width = viewport.getBoundingClientRect().width - 124;
+    if (!width) return;
+    plot.setAttribute('viewBox', `0 0 ${width} ${plot.getAttribute('height')}`);
+    plot.querySelectorAll('rect').forEach(rect => {
+      rect.setAttribute('x', Number(rect.dataset.start) * width);
+      rect.setAttribute('width', (Number(rect.dataset.end) - Number(rect.dataset.start)) * width);
+    });
+    plot.querySelectorAll('polygon').forEach(polygon => {
+      const p = polygon.dataset;
+      polygon.setAttribute('points', [
+        [p.start1 * width, p.y1], [p.end1 * width, p.y1],
+        [p.end2 * width, p.y2], [p.start2 * width, p.y2],
+      ].map(point => point.join(',')).join(' '));
+    });
+  };
+  resize();
+  new ResizeObserver(resize).observe(viewport);
 });

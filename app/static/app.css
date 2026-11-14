@@ -878,7 +878,7 @@ body { padding-bottom: var(--safe-area-bottom); }
 #sync-feedback { white-space: pre-line; }
 
 /* Weekly allocation shares the daily donut and legend geometry. */
-.board-allocation {
+.board-allocation, .board-allocation-comparison {
   --chart-allocation-other: color-mix(in srgb, var(--chart-6) 65%, var(--surface));
   --chart-allocation-unknown: var(--muted);
 }
@@ -889,3 +889,8 @@ body { padding-bottom: var(--safe-area-bottom); }
 .board-segmented button[aria-pressed="true"] { background: var(--surface); color: var(--text); box-shadow: 0 1px 3px rgb(0 0 0 / .08); }
 .board-allocation-name { min-width: 0; overflow-wrap: anywhere; }
 .board-allocation-name small { display: block; margin-top: 2px; color: var(--muted); font-size: .75rem; }
+.board-comparison-svg { display: block; overflow: hidden; }
+.board-comparison-label { fill: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.board-comparison-track { stroke: var(--separator); stroke-width: 14px; stroke-opacity: .5; }
+.board-comparison-legend { display: flex; flex-wrap: wrap; gap: 10px 18px; list-style: none; padding: 0; margin: 20px 0 0; font-size: .8125rem; }
+.board-comparison-legend li { display: flex; align-items: center; gap: 6px; min-width: 0; overflow-wrap: anywhere; }
