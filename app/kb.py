@@ -281,15 +281,25 @@ def summary_lead(summary_md: str, limit: int = 80) -> str:
     """Return the first prose sentence, ignoring Markdown-only lead-in lines."""
     if limit < 0:
         raise ValueError('limit must be non-negative')
+    summary_md = html.unescape(summary_md or '')
+    # Rich meeting templates wrap all prose in quotes; recognize that format
+    # before filtering, rather than treating its keyword ribbon as the lead.
+    rich_meeting = (re.search(r'^\s*(?:【[^】\n]+】\s*)+$', summary_md, re.M)
+                    and '**议题数**' in summary_md)
     paragraph = []
-    for raw in (summary_md or '').splitlines():
-        # Decode before classifying so escaped Markdown is skipped as well.
-        line = html.unescape(raw).strip()
+    for raw in summary_md.splitlines():
+        line = raw.strip()
         if not line:
             if paragraph:
                 break
             continue
-        if line.startswith(('#', '*', '-', '>', '|')):
+        if rich_meeting and line.startswith('>'):
+            prose = line.lstrip('>*- ')
+            if re.search(r'[。！？.!?]', prose):
+                line = prose
+        if (line.startswith(('#', '*', '-', '>', '|'))
+                or re.fullmatch(r'(?:【[^】]+】\s*)+', line)
+                or re.match(r'\d+[.)]\s|🕒', line)):
             if paragraph:
                 break
             continue
