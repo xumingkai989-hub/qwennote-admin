@@ -18,6 +18,20 @@
   {% else %}<p>分析未生成</p>{{ generate_button(scope, '生成') }}{% endif %}
 </div>
 {% endmacro %}
+{% macro donut(sectors, total, chart_id, label, hours=false) %}
+      <div class="board-donut">
+        <svg viewBox="0 0 120 120" width="120" height="120" role="img" aria-labelledby="{{ chart_id }}">
+          <title id="{{ chart_id }}">{{ label }}</title>
+          <circle class="board-donut-track" cx="60" cy="60" r="50" />
+          {% for item in sectors %}
+          <circle class="board-donut-sector" data-chart-key="{{ item.key }}" cx="60" cy="60" r="50" pathLength="100" stroke-dasharray="{{ item.bar_percent }} 100" stroke-dashoffset="{{ -item.offset }}" transform="rotate(-90 60 60)" style="--chart-color: var(--chart-{{ item.color }})">
+            <title>{{ item.title or '未命名会议' }} · {{ ('%.1f 小时' | format(item.minutes / 60)) if hours else duration(item.minutes) }} · {{ item.percent }}%</title>
+          </circle>
+          {% endfor %}
+        </svg>
+        <div class="board-donut-center" aria-hidden="true"><strong>{{ '%.1f' | format(total / 60) }}</strong><span>小时</span></div>
+      </div>
+{% endmacro %}
 {% block content %}
 {% if (day_report and day_report.error) or (week_report and week_report.error) %}
 <p class="board-note" role="status">数字已更新，部分分析未生成，可稍后重新生成。</p>
@@ -53,18 +67,7 @@
   <div class="board-panel">
     {% if items %}
     <div class="board-donut-layout">
-      <div class="board-donut">
-        <svg viewBox="0 0 120 120" width="120" height="120" role="img" aria-labelledby="board-donut-title">
-          <title id="board-donut-title">{{ '今日' if day == today else '当日' }} {{ daily.count }} 场会议，共 {{ '%.1f' | format(daily.minutes / 60) }} 小时</title>
-          <circle class="board-donut-track" cx="60" cy="60" r="50" />
-          {% for item in chart.sectors %}
-          <circle class="board-donut-sector" data-chart-key="{{ item.key }}" cx="60" cy="60" r="50" pathLength="100" stroke-dasharray="{{ item.bar_percent }} 100" stroke-dashoffset="{{ -item.offset }}" transform="rotate(-90 60 60)" style="--chart-color: var(--chart-{{ item.color }})">
-            <title>{{ item.title or '未命名会议' }} · {{ duration(item.minutes) }} · {{ item.percent }}%</title>
-          </circle>
-          {% endfor %}
-        </svg>
-        <div class="board-donut-center" aria-hidden="true"><strong>{{ '%.1f' | format(daily.minutes / 60) }}</strong><span>小时</span></div>
-      </div>
+      {{ donut(chart.sectors, daily.minutes, 'board-donut-title', ('今日' if day == today else '当日') ~ ' ' ~ daily.count ~ ' 场会议，共 ' ~ ('%.1f' | format(daily.minutes / 60)) ~ ' 小时') }}
       <ul class="board-legend" aria-label="会议时长占比">
         {% for item in chart.sectors %}
         <li class="board-legend-row" data-chart-key="{{ item.key }}" style="--chart-color: var(--chart-{{ item.color }})">
@@ -105,6 +108,43 @@
 <section class="board-section" aria-labelledby="board-week-analysis-title">
   <h2 id="board-week-analysis-title">本周分析</h2>
   {{ analysis(week_report, 'week') }}
+</section>
+<section class="board-section board-allocation" aria-labelledby="board-allocation-title">
+  <div class="board-section-heading">
+    <h2 id="board-allocation-title">本周时间分配</h2>
+    {% if allocation.total_minutes %}
+    <div class="board-segmented" role="group" aria-label="时间分配层级">
+      <button type="button" aria-pressed="true" aria-controls="allocation-by_category" data-allocation-view="by_category">一级分类</button>
+      <button type="button" aria-pressed="false" aria-controls="allocation-by_tag" data-allocation-view="by_tag">二级标签</button>
+    </div>
+    {% endif %}
+  </div>
+  <div class="board-panel">
+    {% if allocation.total_minutes %}
+    {% for key, label in [('by_category', '一级分类'), ('by_tag', '二级标签')] %}
+    <div id="allocation-{{ key }}" data-allocation-panel="{{ key }}"{% if key == 'by_tag' %} hidden{% endif %}>
+      <div class="board-donut-layout">
+        {{ donut(allocation_charts[key], allocation.total_minutes, 'allocation-' ~ key ~ '-title', '本周' ~ label ~ '时间分配，共 ' ~ ('%.1f' | format(allocation.total_minutes / 60)) ~ ' 小时', hours=true) }}
+        <ul class="board-legend" aria-label="{{ label }}时长占比">
+          {% for item in allocation_charts[key] %}
+          <li class="board-legend-row" data-chart-key="{{ item.key }}" style="--chart-color: var(--chart-{{ item.color }})" tabindex="0">
+            <span class="board-legend-swatch" aria-hidden="true"></span>
+            <span class="board-allocation-name">{{ item.name }}{% if key == 'by_tag' %}<small>{{ item.category }}</small>{% endif %}</span>
+            <span class="board-legend-duration">{{ '%.1f' | format(item.minutes / 60) }} 小时</span>
+            <span class="board-legend-percent">{{ item.percent }}%</span>
+          </li>
+          {% endfor %}
+          {% if allocation.unknown_duration_count %}<li class="board-note board-footnote">{{ allocation.unknown_duration_count }} 场时长未知，未计入</li>{% endif %}
+        </ul>
+      </div>
+    </div>
+    {% endfor %}
+    <p class="board-note board-footnote">解读未生成</p>
+    {% else %}
+    <p class="board-empty">本周还没有会议</p>
+    {% if allocation.unknown_duration_count %}<p class="board-note board-footnote">{{ allocation.unknown_duration_count }} 场时长未知，未计入</p>{% endif %}
+    {% endif %}
+  </div>
 </section>
 <section class="board-section" aria-labelledby="board-history-title">
   <div class="board-history-heading"><h2 id="board-history-title">历史</h2>{% if day != today %}<a href="/board">回到今天</a>{% endif %}</div>

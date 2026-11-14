@@ -19,6 +19,7 @@ from app.store import SQLiteStore
 from conftest import FakeFeishuAuth
 from test_board import add
 from test_board_page import archive
+from test_tag_time import meeting
 from test_login import login
 
 
@@ -78,6 +79,22 @@ def render(output):
             add(store, 'tiny', minutes=1, title='LongUnbrokenTitle' * 30, tags=('LongTag' * 40,))
             add(store, 'long', minutes=3000, title='长时间会议：' + 'LongUnbrokenTitle' * 30)
             save('stress')
+            with store._connect() as conn:
+                conn.execute('DELETE FROM recordings')
+            add(store, 'allocation-unclassified', '2026-11-02T09:00:00+08:00', 54)
+            add(store, 'allocation-unknown-duration', '2026-11-02T09:00:00+08:00', None)
+            # Separate allocation fixture keeps the original daily chart fixtures intact.
+            for i, (name, category, minutes) in enumerate([
+                ('产品规划', '产品', 372), ('平台建设', '中台', 264),
+                ('师资匹配', '师资', 126), ('渠道复盘', '市场', 108),
+                ('技术方案', '技术', 96), ('组织协作', '公司管理', 84),
+                ('其他事项', '其他', 72), ('体验研究', '产品', 60),
+                ('课程设计', '产品', 48),
+            ]):
+                meeting(store, f'allocation-{i}', name, category, minutes,
+                        stamp='2026-11-02T09:00:00+08:00')
+            save('allocation')
+
 
 
 if __name__ == '__main__':

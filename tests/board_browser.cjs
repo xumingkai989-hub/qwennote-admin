@@ -42,11 +42,11 @@ for (const width of [1440,390]) for (const scheme of ['light','dark']) {
     assert.equal(await page.locator('.board-week-row').count(),7);
     assert.equal(await page.locator('.board-week-row.is-today').getAttribute('data-day'),'2026-11-06');
     assert.equal(await page.locator('.board-week-row.is-future .board-week-numbers').allTextContents().then(xs=>xs.join('')),'——');
-    assert.equal(await page.locator('.board-donut-sector').count(),5);
-    assert.equal(await page.locator('.board-legend-row.is-uncharted').count(),1);
-    assert.equal(await page.locator('.board-legend-percent').evaluateAll(es=>es.reduce((n,e)=>n+(parseInt(e.textContent)||0),0)),100);
-    assert.match(await page.locator('.board-donut svg title').first().textContent(),/今日 6 场会议，共 2.7 小时/);
-    const layout=await page.locator('.board-donut-layout').evaluate(e=>{
+    assert.equal(await page.locator('[aria-labelledby="board-day-title"] .board-donut-sector').count(),5);
+    assert.equal(await page.locator('[aria-labelledby="board-day-title"] .board-legend-row.is-uncharted').count(),1);
+    assert.equal(await page.locator('[aria-labelledby="board-day-title"] .board-legend-percent').evaluateAll(es=>es.reduce((n,e)=>n+(parseInt(e.textContent)||0),0)),100);
+    assert.match(await page.locator('[aria-labelledby="board-day-title"] .board-donut svg title').first().textContent(),/今日 6 场会议，共 2.7 小时/);
+    const layout=await page.locator('[aria-labelledby="board-day-title"] .board-donut-layout').evaluate(e=>{
       const ring=e.querySelector('.board-donut').getBoundingClientRect();
       const legend=e.querySelector('.board-legend').getBoundingClientRect();
       return {width:ring.width,height:ring.height,stacked:legend.top>=ring.bottom,side:legend.left>=ring.right};
@@ -65,8 +65,8 @@ for (const width of [1440,390]) for (const scheme of ['light','dark']) {
       border:getComputedStyle(e).borderTopWidth,shadow:getComputedStyle(e).boxShadow
     }));
     assert.deepEqual(styles,{size:'32px',weight:'600',unit:'14px',border:'0px',shadow:'none'});
-    const row=page.locator('.board-legend-row[data-chart-key="sector-0"]');
-    const sector=page.locator('.board-donut-sector[data-chart-key="sector-0"]');
+    const row=page.locator('[aria-labelledby="board-day-title"] .board-legend-row[data-chart-key="sector-0"]');
+    const sector=page.locator('[aria-labelledby="board-day-title"] .board-donut-sector[data-chart-key="sector-0"]');
     await row.hover();
     assert.ok(await sector.evaluate(e=>e.classList.contains('is-active')));
     assert.equal(await sector.evaluate(e=>getComputedStyle(e).filter),'brightness(1.08)');
@@ -75,7 +75,7 @@ for (const width of [1440,390]) for (const scheme of ['light','dark']) {
     await row.locator('a').blur();
     await page.mouse.move(0,0);
     // First sector starts at twelve o'clock: move to a point inside its stroke.
-    const ring=await page.locator('.board-donut').boundingBox();
+    const ring=await page.locator('[aria-labelledby="board-day-title"] .board-donut').boundingBox();
     await page.mouse.move(ring.x+95,ring.y+25);
     assert.ok(await row.evaluate(e=>e.classList.contains('is-active')));
     await page.mouse.move(0,0);
@@ -83,11 +83,11 @@ for (const width of [1440,390]) for (const scheme of ['light','dark']) {
     await page.screenshot({path:path.join(output,`${width}-data-${scheme}.png`),fullPage:true});
     await page.goto(url('stress'));
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth),width);
-    assert.equal(await page.locator('.board-donut-sector').count(),6);
-    assert.equal(await page.locator('.board-legend-title').getByText('其他',{exact:true}).count(),1);
-    assert.equal(await page.locator('.board-legend-percent').evaluateAll(es=>es.reduce((n,e)=>n+(parseInt(e.textContent)||0),0)),100);
+    assert.equal(await page.locator('[aria-labelledby="board-day-title"] .board-donut-sector').count(),6);
+    assert.equal(await page.locator('[aria-labelledby="board-day-title"] .board-legend-title').getByText('其他',{exact:true}).count(),1);
+    assert.equal(await page.locator('[aria-labelledby="board-day-title"] .board-legend-percent').evaluateAll(es=>es.reduce((n,e)=>n+(parseInt(e.textContent)||0),0)),100);
     assert.equal(await page.locator('[data-recording-id="tiny"]').count(),1);
-    const title=page.locator('.board-legend-title').first();
+    const title=page.locator('[aria-labelledby="board-day-title"] .board-legend-title').first();
     assert.ok(await title.evaluate(e=>e.scrollWidth>e.clientWidth));
     assert.equal(await title.evaluate(e=>getComputedStyle(e).textOverflow),'ellipsis');
     await title.focus();
@@ -114,11 +114,11 @@ for (const width of [320,720]) test(`${width}: long titles and enlarged text rem
   await page.goto(url('stress'));
   await page.evaluate(()=>document.documentElement.style.fontSize='200%');
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth),width);
-  const overlap=await page.locator('.board-legend-row').evaluateAll(es=>es.some(e=>{
+  const overlap=await page.locator('[aria-labelledby="board-day-title"] .board-legend-row').evaluateAll(es=>es.some(e=>{
     const range=document.createRange();range.selectNodeContents(e.querySelector('.board-legend-duration'));
     return range.getBoundingClientRect().right > e.querySelector('.board-legend-percent').getBoundingClientRect().left;
   }));
   assert.equal(overlap,false);
-  await page.locator('.board-legend-title').first().focus();
+  await page.locator('[aria-labelledby="board-day-title"] .board-legend-title').first().focus();
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth),width);
 }));

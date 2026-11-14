@@ -23,3 +23,15 @@ document.querySelectorAll('.board-donut-layout').forEach(chart => {
     part.addEventListener('focusout', () => highlight(null));
   });
 });
+
+// Both levels are rendered once; switching stays local and replaces one panel.
+document.querySelectorAll('.board-allocation').forEach(section => {
+  const buttons = section.querySelectorAll('[data-allocation-view]');
+  const panels = section.querySelectorAll('[data-allocation-panel]');
+  buttons.forEach(button => button.addEventListener('click', () => {
+    buttons.forEach(item => item.setAttribute('aria-pressed', String(item === button)));
+    panels.forEach(panel => {
+      panel.hidden = panel.dataset.allocationPanel !== button.dataset.allocationView;
+    });
+  }));
+});

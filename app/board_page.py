@@ -7,7 +7,7 @@ from fastapi import Request
 from fastapi.responses import RedirectResponse
 from starlette.concurrency import run_in_threadpool
 
-from app import board, board_analysis
+from app import board, board_analysis, tag_time
 from app.minutes import SHANGHAI
 from app.session import SESSION_MAX_AGE
 
@@ -64,6 +64,18 @@ def donut_chart(items):
     return {'sectors': sectors, 'uncharted': uncharted}
 
 
+def allocation_chart(rows, total, level):
+    """Decorate T2 rows for SVG; never regroup or change allocation minutes."""
+    sectors = shares(rows, total)
+    offset = 0
+    for i, item in enumerate(sectors):
+        color = ('allocation-unknown' if item['name'] == '未分类' else
+                 'allocation-other' if item['name'] == '其他' else str(i % 6 + 1))
+        item.update(title=item['name'], color=color, key=f'{level}-{i}', offset=offset)
+        offset += item['bar_percent']
+    return sectors
+
+
 def parse_day(value):
     day = date.fromisoformat(value)
     if day.isoformat() != value:
@@ -93,6 +105,7 @@ def install_board(app, *, settings, templates, sessions, authorize, valid_csrf,
         monday = board.monday_of(day)
         store = app.state.store
         daily, weekly = board.day_stats(store, day), board.week_stats(store, monday, day)
+        allocation = tag_time.week_allocation(store, board.monday_of(today), today)
         admin = bool(set(settings.admin_open_ids).intersection((user.subject, user.union_id, user.open_id)))
         token = ''
         if admin:
@@ -106,6 +119,9 @@ def install_board(app, *, settings, templates, sessions, authorize, valid_csrf,
             'week_days': week_chart(weekly, monday, day, today),
             'week_end': monday + timedelta(days=7),
             'chart': donut_chart(daily['items']),
+            'allocation': allocation,
+            'allocation_charts': {key: allocation_chart(allocation[key], allocation['total_minutes'], key)
+                                  for key in ('by_category', 'by_tag')},
             'unknown_count': sum(item['minutes'] is None for item in daily['items']),
             'day_report': board.load_report(store, day),
             'week_report': board.load_report(store, monday, 'week'),

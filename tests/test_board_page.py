@@ -243,7 +243,7 @@ def test_donut_sector_counts_totals_and_other(board_client, store, values):
     response = board_client.get('/board')
     sectors = response.context['chart']['sectors']
     assert len(sectors) == min(len(values), 6)
-    assert response.text.count('class="board-donut-sector"') == len(sectors)
+    assert re.search(r'<svg[^>]*aria-labelledby="board-donut-title".*?</svg>', response.text, re.S)[0].count('class="board-donut-sector"') == len(sectors)
     assert sum(item['percent'] for item in sectors) == 100
     assert sum(item['bar_percent'] for item in sectors) == pytest.approx(100)
     assert sum(item['minutes'] for item in sectors) == sum(values)
