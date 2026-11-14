@@ -2,6 +2,7 @@
 from datetime import datetime
 import hashlib
 import json
+import sqlite3
 from unittest.mock import Mock
 
 import httpx
@@ -96,7 +97,8 @@ def test_outside_set_or_empty_falls_back(db, reply, answer):
     result = primary_tag.judge(db, 'r1')
     assert result['source'] == 'fallback'
     assert result['tag_name'] == '未分类'
-    assert result['tag_id'] is None and result['reason'] is None
+    assert result['tag_id'] is None
+    assert result['reason'] == ('out_of_set:' + answer if answer and answer.strip() else 'empty_response')
     assert saved(db) == result
 
 
@@ -107,6 +109,7 @@ def test_model_exception_never_escapes_or_leaks(db, reply, caplog, failure):
     result = primary_tag.judge(db, 'r1')
     assert result['source'] == 'fallback'
     assert result['tag_name'] == '未分类' and result['tag_id'] is None
+    assert result['reason'] == 'model_error:' + type(failure).__name__
     assert 'private-test-key' not in json.dumps(result) + caplog.text
 
 
@@ -115,7 +118,8 @@ def test_empty_tags_skip_model_resolution(db, monkeypatch):
     resolve = Mock(side_effect=AssertionError('must not resolve'))
     monkeypatch.setattr(board_analysis, 'resolve_model', resolve)
     result = primary_tag.judge(db, 'r1')
-    assert result['source'] == 'fallback'
+    assert result['source'] == 'rule'
+    assert result['tag_name'] == '未分类' and result['reason'] == 'rule_no_tag'
     assert result['tag_fingerprint'] == primary_tag.fingerprint([])
     resolve.assert_not_called()
 
@@ -152,7 +156,8 @@ def test_changed_tags_rejudge_and_upsert(db, reply):
     assert result['judged'] == 1 and result['skipped'] == 0
     assert saved(db)['tag_fingerprint'] != before['tag_fingerprint']
     assert saved(db)['tag_name'] == '模考系统'
-    assert reply.call_count == 2
+    assert reply.call_count == 1
+    assert saved(db)['source'] == 'rule'
 
 
 def test_merge_retains_historical_name_until_refresh(db, reply):
@@ -190,7 +195,8 @@ def test_storage_failure_isolated(db, reply, monkeypatch):
     monkeypatch.setattr(primary_tag, 'judge', sometimes)
     result = week(db)
     assert result['judged'] == 2 and result['failed'] == 1
-    assert result['errors'] == [{'recording_id': 'r1', 'error': 'judgment_failed'}]
+    assert result['errors'] == 0
+    assert result['failures'] == [{'recording_id': 'r1', 'error': 'judgment_failed'}]
     assert saved(db, 'r2')['source'] == 'model'
 
 
@@ -204,12 +210,13 @@ def test_shanghai_week_boundary(db, reply):
     assert reply.call_count == 2
 
 
-def test_legacy_tag_without_vocabulary_is_in_input_and_falls_back(db, reply):
+def test_legacy_single_tag_without_vocabulary_uses_rule(db, reply):
     meeting(db, tags=('遗留标签',))
     reply.return_value = '遗留标签'
     result = primary_tag.judge(db, 'r1')
-    assert json.loads(reply.call_args.kwargs['prompt'])['tags'] == [{'name': '遗留标签', 'category': None}]
-    assert result['source'] == 'fallback' and result['tag_id'] is None
+    reply.assert_not_called()
+    assert result['source'] == 'rule' and result['tag_id'] is None
+    assert result['tag_name'] == '遗留标签'
 
 
 @pytest.mark.parametrize('mode', ['ok', 'http', 'empty', 'malformed', 'timeout', 'unconfigured'])
@@ -277,3 +284,77 @@ def test_resolution_failure_is_fallback(db, reply, monkeypatch):
     monkeypatch.setattr(board_analysis, 'resolve_model', Mock(side_effect=RuntimeError('private-test-key')))
     assert primary_tag.judge(db, 'r1')['source'] == 'fallback'
     reply.assert_not_called()
+
+
+def test_single_tag_skips_model_entirely(db, reply, monkeypatch):
+    meeting(db, tags=('AI Tutor',))
+    resolve = Mock(side_effect=AssertionError('must not resolve'))
+    monkeypatch.setattr(board_analysis, 'resolve_model', resolve)
+    result = primary_tag.judge(db, 'r1')
+    assert result['source'] == 'rule' and result['tag_name'] == 'AI Tutor'
+    assert result['reason'] == 'rule_single_tag' and result['tag_id'] is not None
+    resolve.assert_not_called()
+    reply.assert_not_called()
+
+
+def test_old_check_migrates_idempotently_preserving_rows_and_index(db, reply):
+    meeting(db)
+    before = primary_tag.judge(db, 'r1')
+    with db._connect() as conn:
+        schema = conn.execute("SELECT sql FROM sqlite_master WHERE name='recording_primary_tag'").fetchone()[0]
+        conn.execute('ALTER TABLE recording_primary_tag RENAME TO old_primary')
+        conn.execute(schema.replace(", 'rule'", ''))
+        conn.execute('INSERT INTO recording_primary_tag SELECT * FROM old_primary')
+        conn.execute('DROP TABLE old_primary')
+        conn.execute('CREATE INDEX primary_source_idx ON recording_primary_tag(source)')
+    for _ in range(2):
+        db.migrate()
+        assert saved(db) == before
+        with db._connect() as conn:
+            assert conn.execute('PRAGMA foreign_key_check').fetchall() == []
+            assert conn.execute("SELECT 1 FROM sqlite_master WHERE name='primary_source_idx'").fetchone()
+            conn.execute("UPDATE recording_primary_tag SET source='rule'")
+            with pytest.raises(sqlite3.IntegrityError, match='CHECK constraint failed'):
+                conn.execute("UPDATE recording_primary_tag SET source='invalid'")
+            conn.execute("UPDATE recording_primary_tag SET source='model'")
+
+
+@pytest.mark.parametrize('answer', ['x' * 100, 'private-test-key https://model.invalid/anthropic/path?q=secret',
+    'a' * 70 + 'private-test-key', 'https://another.invalid/key', 'api_key=secret sk-other-secret'])
+def test_out_of_set_reason_is_redacted_before_truncating(db, reply, answer):
+    meeting(db)
+    reply.return_value = answer
+    reason = primary_tag.judge(db, 'r1')['reason']
+    assert reason.startswith('out_of_set:') and len(reason.removeprefix('out_of_set:')) <= 80
+    assert not any(s in reason for s in ('private-test', 'https://', 'sk-other', 'secret'))
+
+
+def test_week_counts_model_errors_separately_from_fallback_and_rule(db, reply):
+    for i in range(3):
+        meeting(db, f'r{i}')
+    meeting(db, 'single', tags=('AI Tutor',))
+    meeting(db, 'empty', tags=())
+    reply.side_effect = ['AI Tutor', 'not a tag', httpx.ReadTimeout('private-key')]
+    result = week(db)
+    assert {k: result[k] for k in ('judged', 'fallback', 'errors', 'rule')} == {
+        'judged': 5, 'fallback': 2, 'errors': 1, 'rule': 2}
+    cached = week(db)
+    assert cached['errors'] == 1 and cached['judged'] == 0 and reply.call_count == 3
+
+
+@pytest.mark.parametrize('tags', [(), ('AI Tutor',), ('AI Tutor', '模考系统')])
+def test_legacy_fallback_without_reason_is_refreshed(db, reply, tags):
+    meeting(db, tags=tags)
+    primary_tag.judge(db, 'r1')
+    with db._connect() as conn:
+        conn.execute("UPDATE recording_primary_tag SET source='fallback', reason=NULL")
+    result = week(db)
+    assert result['judged'] == 1
+    assert result['items'][0]['source'] == ('model' if len(tags) > 1 else 'rule')
+
+
+def test_force_rejudges_cached_week(db, reply):
+    meeting(db)
+    week(db)
+    result = primary_tag.ensure_week(db, '2026-11-02', '2026-11-06', force=True)
+    assert result['judged'] == 1 and result['skipped'] == 0 and reply.call_count == 2

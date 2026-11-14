@@ -51,6 +51,17 @@ def _clean(text):
     return name, reason
 
 
+def _redact(text, settings):
+    """Redact before truncation so partial secrets cannot reach persisted reasons."""
+    text = re.sub(r'https?://[^\s<>"\'「」]+', '[redacted]', text, flags=re.I)
+    for secret in (getattr(settings, 'auth_token', None), getattr(settings, 'base_url', None)):
+        if secret:
+            text = text.replace(secret, '[redacted]')
+    text = re.sub(r'(?i)(?:api[-_ ]?key|token|authorization|password)\s*[:=]\s*\S+',
+                  '[redacted]', text)
+    return re.sub(r'\bsk-[A-Za-z0-9_-]+', '[redacted]', text)
+
+
 def judge(store, recording_id, *, model=None) -> dict:
     """Judge and upsert one meeting. model optionally overrides the model name."""
     with store._connect() as conn:
@@ -64,21 +75,32 @@ def judge(store, recording_id, *, model=None) -> dict:
               'source': 'fallback', 'reason': None,
               'tag_fingerprint': fingerprint([tag['name'] for tag in tags]),
               'generated_at': datetime.now(SHANGHAI).isoformat()}
-    if tags:
+    if len(tags) <= 1:
+        result.update(source='rule', reason='rule_single_tag' if tags else 'rule_no_tag')
+        if tags:
+            result.update(tag_id=tags[0]['id'], tag_name=tags[0]['name'])
+    else:
         try:
             settings = board_analysis.resolve_model(store)
+            raw = None
             if settings is not None and settings.auth_token:
                 prompt = json.dumps({'title': recording['title'], 'summary': recording['summary'] or '',
                                      'tags': [{'name': t['name'], 'category': t['category']} for t in tags]},
                                     ensure_ascii=False)
-                name, reason = _clean(board_analysis.request_text(
-                    settings, model=model, system=SYSTEM, prompt=prompt, max_tokens=256))
-                selected = next((tag for tag in tags if tag['name'] == name), None)
-                if selected is not None and selected['id'] is not None and name != '未分类':
-                    result.update(tag_id=selected['id'], tag_name=name, source='model', reason=reason)
-        except Exception:
-            # No provider exception or credential-bearing response reaches storage/logs.
-            pass
+                raw = board_analysis.request_text(
+                    settings, model=model, system=SYSTEM, prompt=prompt, max_tokens=256)
+            name, reason = _clean(raw)
+            selected = next((tag for tag in tags if tag['name'] == name), None)
+            if selected is not None and selected['id'] is not None and name != '未分类':
+                result.update(tag_id=selected['id'], tag_name=name, source='model',
+                              reason=_redact(reason, settings) if reason else None)
+            elif not isinstance(raw, str) or not raw.strip():
+                result['reason'] = 'empty_response'
+            else:
+                result['reason'] = 'out_of_set:' + _redact(raw, settings)[:80]
+        except Exception as exc:
+            # Exception messages may contain provider URLs and credentials.
+            result['reason'] = 'model_error:' + type(exc).__name__
     with store._connect() as conn:
         conn.execute('''INSERT INTO recording_primary_tag
             (recording_id, tag_id, tag_name, source, reason, tag_fingerprint, generated_at)
@@ -89,18 +111,19 @@ def judge(store, recording_id, *, model=None) -> dict:
     return result
 
 
-def ensure_week(store, monday, today, *, model=None) -> dict:
+def ensure_week(store, monday, today, *, model=None, force=False) -> dict:
     """Fill/refresh the Shanghai week through today, excluding future timestamps.
 
     judged/model/fallback count newly written decisions; skipped counts cached rows.
-    failed/errors describe per-meeting read/write failures, without exception text.
+    errors counts model exceptions in current decisions (including cached failures).
+    failed/failures describe per-meeting read/write failures. force refreshes all rows.
     items includes both newly judged and cached decisions.
     """
     monday, today = _week_bounds(monday, today)
     now = datetime.now(SHANGHAI)
     items = [item for item in _records(store, monday, today) if item['created_at'] <= now]
     result = {'total': len(items), 'judged': 0, 'model': 0, 'fallback': 0,
-              'skipped': 0, 'failed': 0, 'items': [], 'errors': []}
+              'rule': 0, 'skipped': 0, 'failed': 0, 'items': [], 'errors': 0, 'failures': []}
     for item in items:
         ident = item['recording_id']
         try:
@@ -109,15 +132,21 @@ def ensure_week(store, monday, today, *, model=None) -> dict:
                 tags = _tags(conn, ident)
                 previous = conn.execute('SELECT * FROM recording_primary_tag WHERE recording_id = ?',
                                         (ident,)).fetchone()
-            if previous is not None and previous['tag_fingerprint'] == fingerprint([t['name'] for t in tags]):
+            legacy = previous is not None and (
+                (len(tags) <= 1 and previous['source'] != 'rule') or
+                (previous['source'] == 'fallback' and not previous['reason']))
+            if (not force and not legacy and previous is not None and
+                    previous['tag_fingerprint'] == fingerprint([t['name'] for t in tags])):
                 decision = dict(previous)
                 result['skipped'] += 1
             else:
                 decision = judge(store, ident, model=model)
                 result['judged'] += 1
                 result[decision['source']] += 1
+            if (decision['reason'] or '').startswith('model_error:'):
+                result['errors'] += 1
             result['items'].append(decision)
         except Exception:
             result['failed'] += 1
-            result['errors'].append({'recording_id': ident, 'error': 'judgment_failed'})
+            result['failures'].append({'recording_id': ident, 'error': 'judgment_failed'})
     return result

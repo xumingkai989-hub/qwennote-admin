@@ -98,6 +98,7 @@ def allocation_comparison(weeks, current_sectors):
             start = offset / maximum if maximum else 0
             offset += item['minutes']
             segment = {**item, 'start': start, 'end': offset / maximum if maximum else 0,
+                       'width': item['minutes'] / maximum if maximum else 0,
                        'y': index * 28 + 2, 'color': colors[item['name']]}
             segments.append(segment)
             current[item['name']] = segment
@@ -110,6 +111,7 @@ def allocation_comparison(weeks, current_sectors):
         rows.append({**week, 'y': index * 28, 'segments': segments})
         previous = current
     return {'rows': rows, 'connections': connections, 'height': len(rows) * 28 - 10,
+            'max_minutes': maximum,
             'legend': [{'name': name, 'color': colors[name]} for name in names]}
 
 

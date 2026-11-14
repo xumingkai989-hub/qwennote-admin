@@ -88,7 +88,7 @@ def week_allocation(store, monday, today) -> dict:
             unknown_duration_count += 1
             minutes = 0
         total += minutes
-        if record['source'] != 'model' or record['tag_id'] is None or record['tag_name'] == UNKNOWN:
+        if record['source'] not in ('model', 'rule') or record['tag_id'] is None or record['tag_name'] == UNKNOWN:
             name = category = UNKNOWN
         else:
             name = record['tag_name']

@@ -56,13 +56,15 @@ for (const width of [1440, 390]) for (const scheme of ['light', 'dark']) {
             return {points:[...p.points].map(v=>[v.x,v.y]),expected:[[r1.x,r1.y+14],[r1.end,r1.y+14],[r2.end,r2.y],[r2.x,r2.y]],opacity:getComputedStyle(p).fillOpacity,color:getComputedStyle(p).fill,expectedColor:getComputedStyle(start).fill};
           });
           const expectedCount=rows.slice(1).reduce((n,row,i)=>n+[...row.querySelectorAll('rect')].filter(e=>rows[i].querySelector(`rect[data-category="${e.dataset.category}"]`)).length,0);
-          return {rowCount:rows.length,rectCount:rects.length,empty:rows.filter(r=>!r.querySelector('rect')).length,colors,connections,expectedCount,
+          return {widthRatios:rows.map(row=>({minutes:Number(row.dataset.minutes),width:[...row.querySelectorAll('rect')].reduce((sum,r)=>sum+r.getBoundingClientRect().width,0)})),rowCount:rows.length,rectCount:rects.length,empty:rows.filter(r=>!r.querySelector('rect')).length,colors,connections,expectedCount,
             heights:rects.map(r=>r.getBoundingClientRect().height),radii:rects.map(r=>Number(r.getAttribute('rx'))),
             fontSize:getComputedStyle(section.querySelector('text')).fontSize,
             plotWidth:svg.getBoundingClientRect().width,viewBoxWidth:svg.viewBox.baseVal.width,
             donutColors:[...document.querySelectorAll('[data-allocation-panel="by_category"] .board-legend-row')].map(e=>({name:e.querySelector('.board-allocation-name').textContent.trim(),color:getComputedStyle(e.querySelector('.board-legend-swatch')).backgroundColor})),
             legendColors:[...section.querySelectorAll('li[data-category]')].map(e=>({name:e.dataset.category,color:getComputedStyle(e.querySelector('.board-legend-swatch')).backgroundColor}))};
         });
+        const maxMinutes=Math.max(...facts.widthRatios.map(row=>row.minutes));
+        for(const row of facts.widthRatios) assert.ok(Math.abs(row.width/facts.plotWidth-row.minutes/maxMinutes)<.0001);
         assert.equal(facts.rowCount,8); assert.equal(facts.rectCount,31); assert.equal(facts.empty,1);
         assert.equal(facts.connections.length,facts.expectedCount);
         assert.equal(facts.fontSize,'12px');

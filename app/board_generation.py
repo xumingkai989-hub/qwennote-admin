@@ -146,11 +146,12 @@ def generate(store, *, scope, day, model=None):
         if scope == 'week':
             try:
                 judgment = primary_tag.ensure_week(store, start, day, model=model)
-                if judgment['failed'] or judgment['fallback'] or any(
-                        item['source'] == 'fallback' for item in judgment['items']):
-                    primary_error = '主标签判定部分失败'
+                if judgment['errors'] > 0:
+                    primary_error = f"主标签判定部分失败（{judgment['errors']} 场）"
+                elif judgment['failed']:
+                    primary_error = '主标签记录读写失败'
             except Exception:
-                primary_error = '主标签判定部分失败'
+                primary_error = '主标签记录读写失败'
             try:
                 allocation = _valid(tag_time.week_allocation(store, start, day))
             except Exception:

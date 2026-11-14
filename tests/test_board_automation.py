@@ -60,7 +60,7 @@ def test_due_claim_idempotence_restart_and_week_cutoff(client, store, monkeypatc
     monkeypatch.setattr(board_generation, '_requester', lambda *a: lambda p: '{"comparison":[]}')
     from app import primary_tag
     monkeypatch.setattr(primary_tag, 'ensure_week', lambda *a, **kw:
-                        {'failed': 0, 'fallback': 0, 'items': []})
+                        {'judged': 0, 'failed': 0, 'fallback': 0, 'errors': 0, 'items': []})
     assert tick(store, now=at('2026-11-06T21:59'))['executed'] == []
     assert reports(store) == []
     now = at('2026-11-06T22:01')

@@ -221,3 +221,11 @@ def test_read_only_and_existing_statistics_unchanged(db, monkeypatch):
     before = snapshot()
     allocation(db)
     assert snapshot() == before
+
+
+def test_rule_decision_allocates_same_as_model_without_structure_changes(db):
+    meeting(db, minutes=33)
+    before = allocation(db)
+    result = primary_tag.judge(db, 'r1')
+    assert result['source'] == 'rule'
+    assert allocation(db) == before

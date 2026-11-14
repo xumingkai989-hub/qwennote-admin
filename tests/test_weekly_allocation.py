@@ -129,5 +129,18 @@ def test_category_name_is_escaped(board_client, store):
 
 def test_script_and_styles_have_updated_cache_keys(board_client):
     html = board_client.get('/board').text
-    assert 'board.js?v=20261114-tag-time-t5' in html
+    assert 'board.js?v=20261114-tag-time-t6' in html
     assert 'app.css?v=20261114-tag-time-t5' in html
+
+
+def test_138_and_214_hours_use_one_global_scale_and_matching_connections():
+    weeks = [{'monday': f'2026-11-{2 + i * 7:02}', 'total_minutes': minutes,
+              'by_category': [{'name': '产品', 'minutes': minutes, 'share': 1}]}
+             for i, minutes in enumerate((828, 1284))]
+    result = board_page.allocation_comparison(weeks, [])
+    assert result['max_minutes'] == 1284
+    short, longest = [row['segments'][0] for row in result['rows']]
+    assert longest['width'] == longest['end'] == 1
+    assert short['width'] == short['end'] == pytest.approx(13.8 / 21.4)
+    band = result['connections'][0]
+    assert band['end1'] == short['end'] and band['end2'] == longest['end']

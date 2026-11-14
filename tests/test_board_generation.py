@@ -51,7 +51,7 @@ def test_ensure_failure_continues_in_order(store, monkeypatch, provider):
     report = run(store)
     assert events[:2] == ['ensure', 'allocation']
     assert report['allocation']['total_minutes'] == 30
-    assert '主标签判定部分失败' in report['error']
+    assert report['error'] == '主标签记录读写失败'
     assert report['allocation_analysis'] and len(provider) == 1
     assert 'private' not in json.dumps(report)
 
@@ -195,7 +195,7 @@ def test_manual_and_scheduler_use_same_pipeline(board_client, store, monkeypatch
 
 
 def test_actual_judgment_and_analysis_models_called_only_once(store, monkeypatch, provider):
-    meeting(store)
+    meeting(store, tags=('AI Tutor', '模考系统'))
     with store._connect() as conn:
         conn.execute('DELETE FROM recording_primary_tag')
     from app.models import ModelCredentials
@@ -244,3 +244,21 @@ def test_failed_allocation_stays_failed_until_regenerated(board_client, store, m
     assert '最近一次成功结果' in block(response)
     assert not run(store)['allocation_error']
     assert board_client.get('/board').context['allocation']['total_minutes'] == 40
+
+
+@pytest.mark.parametrize('exception_count', [0, 1, 2])
+def test_week_report_only_flags_model_exceptions(store, monkeypatch, provider, exception_count):
+    from unittest.mock import Mock
+    from app.models import ModelCredentials
+    for i in range(2):
+        add(store, f'judge-{i}', tags=('AI Tutor', '模考系统'))
+    monkeypatch.setattr(board_analysis, 'resolve_model', lambda s: ModelCredentials('fixture', 'https://fixture.invalid', 'test'))
+    request = Mock(side_effect=[RuntimeError('private-key') if i < exception_count else 'invalid label' for i in range(2)])
+    monkeypatch.setattr(board_analysis, 'request_text', request)
+    for _ in range(2):
+        result = run(store)
+        expected = f'主标签判定部分失败（{exception_count} 场）' if exception_count else None
+        assert result['judgment']['errors'] == exception_count
+        assert result['error'] == expected
+        assert board.load_report(store, MONDAY, 'week')['error'] == expected
+    assert request.call_count == 2

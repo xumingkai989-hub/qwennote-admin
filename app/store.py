@@ -373,12 +373,35 @@ class SQLiteStore:
                     recording_id TEXT PRIMARY KEY,
                     tag_id INTEGER REFERENCES tags(id),
                     tag_name TEXT,
-                    source TEXT NOT NULL CHECK (source IN ('model', 'fallback')),
+                    source TEXT NOT NULL CHECK (source IN ('model', 'fallback', 'rule')),
                     reason TEXT,
                     tag_fingerprint TEXT NOT NULL,
                     generated_at TEXT NOT NULL
                 )
             """)
+            # SQLite cannot ALTER a CHECK. Rebuild only legacy schemas, atomically,
+            # preserving decisions and any explicit indexes/triggers on the table.
+            primary_schema = conn.execute("SELECT sql FROM sqlite_master "
+                                          "WHERE name='recording_primary_tag'").fetchone()[0]
+            if "'rule'" not in primary_schema:
+                if not conn.in_transaction:
+                    conn.execute('BEGIN IMMEDIATE')
+                objects = conn.execute("SELECT sql FROM sqlite_master WHERE "
+                                       "tbl_name='recording_primary_tag' AND "
+                                       "type IN ('index', 'trigger') AND sql IS NOT NULL").fetchall()
+                conn.execute("""CREATE TABLE recording_primary_tag_rule (
+                    recording_id TEXT PRIMARY KEY,
+                    tag_id INTEGER REFERENCES tags(id), tag_name TEXT,
+                    source TEXT NOT NULL CHECK (source IN ('model', 'fallback', 'rule')),
+                    reason TEXT, tag_fingerprint TEXT NOT NULL, generated_at TEXT NOT NULL
+                )""")
+                columns = 'recording_id, tag_id, tag_name, source, reason, tag_fingerprint, generated_at'
+                conn.execute(f'INSERT INTO recording_primary_tag_rule ({columns}) '
+                             f'SELECT {columns} FROM recording_primary_tag')
+                conn.execute('DROP TABLE recording_primary_tag')
+                conn.execute('ALTER TABLE recording_primary_tag_rule RENAME TO recording_primary_tag')
+                for obj in objects:
+                    conn.execute(obj[0])
             if 'media_type' not in {row['name'] for row in conn.execute('PRAGMA table_info(recordings)')}:
                 conn.execute('ALTER TABLE recordings ADD COLUMN media_type TEXT')
             if 'refreshed_token' not in {row['name'] for row in conn.execute('PRAGMA table_info(sync_runs)')}:

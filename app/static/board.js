@@ -49,7 +49,7 @@ document.querySelectorAll('.board-comparison-plot').forEach(plot => {
     plot.setAttribute('viewBox', `0 0 ${width} ${plot.getAttribute('height')}`);
     plot.querySelectorAll('rect').forEach(rect => {
       rect.setAttribute('x', Number(rect.dataset.start) * width);
-      rect.setAttribute('width', (Number(rect.dataset.end) - Number(rect.dataset.start)) * width);
+      rect.setAttribute('width', Number(rect.dataset.width) * width);
     });
     plot.querySelectorAll('polygon').forEach(polygon => {
       const p = polygon.dataset;
