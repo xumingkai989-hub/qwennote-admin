@@ -376,6 +376,17 @@ class SQLiteStore:
             from app.tag_vocabulary import migrate as migrate_vocabulary
             migrate_vocabulary(conn)
             conn.execute("""
+                CREATE TABLE IF NOT EXISTS knowledge_notes (
+                    id INTEGER PRIMARY KEY,
+                    tag_name TEXT NOT NULL,
+                    body TEXT NOT NULL,
+                    source TEXT NOT NULL DEFAULT 'cli',
+                    created_at TEXT NOT NULL
+                )
+            """)
+            conn.execute('CREATE INDEX IF NOT EXISTS knowledge_notes_tag '
+                         'ON knowledge_notes(tag_name, created_at DESC)')
+            conn.execute("""
                 CREATE TABLE IF NOT EXISTS recording_primary_tag (
                     recording_id TEXT PRIMARY KEY,
                     tag_id INTEGER REFERENCES tags(id),

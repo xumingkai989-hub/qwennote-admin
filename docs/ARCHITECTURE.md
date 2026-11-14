@@ -20,7 +20,7 @@
 | `board_analysis.py` | 有界会议输入、共享模型文本请求、模型回顾、脱敏重试与复合键存档 | board CLI、primary_tag |
 | `primary_tag.py` | 会议核心议题判定、持久化 fallback 与标签指纹失效重判 | 显式批量调用 |
 | `tag_time.py` | 主标签周度时长聚合、分类小项与标签 Top 6 合并、双层整数分钟守恒 | 显式只读调用 |
-| `kb.py` | 只读会议与标签扫描、分类去重统计、知识库索引与标签/分类 Markdown 渲染 | 显式 Python 调用，后续 CLI 扩展 |
+| `kb.py` | 只读会议与标签扫描、SQLite 补充记录回写、知识库索引与标签/分类 Markdown 重建 | 显式 Python 调用，后续 CLI 扩展 |
 | `config.py` | 读取进程环境、校验身份配置与会话密钥 | main、admin、feishu、部署适配器 |
 | `feishu.py` | OAuth 换身份、联系人搜索与安全错误封装 | main、admin、store |
 | `home_presentation.py` | 列表日期分组、摘要展示数据 | main |

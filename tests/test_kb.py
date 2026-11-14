@@ -416,3 +416,184 @@ def test_render_safe_markdown(db, tmp_path):
     assert '<script>' not in body and '<b>' not in body
     assert '| 11-13 | 会议 | 标题&#124;换 行&lt;script&gt; |' in body
     assert '(/recordings/one%2F%23%29escape)' in body
+
+
+def supplement(body):
+    return body.split('## 补充记录\n\n', 1)[1].split('\n## 会议', 1)[0]
+
+
+def test_notes_migration_is_idempotent_and_keeps_data(db):
+    ident = kb.add_note(db, 'A', '保留记录')
+    db.migrate()
+    db.migrate()
+    assert kb.list_notes(db, 'A')[0]['id'] == ident
+    with db._connect() as conn:
+        columns = [row['name'] for row in conn.execute('PRAGMA table_info(knowledge_notes)')]
+        index = list(conn.execute('PRAGMA index_info(knowledge_notes_tag)'))
+        assert columns == ['id', 'tag_name', 'body', 'source', 'created_at']
+        assert [row['name'] for row in index] == ['tag_name', 'created_at']
+        assert conn.execute('PRAGMA foreign_key_list(knowledge_notes)').fetchall() == []
+
+
+def test_notes_full_rebuild_survives_deleted_output(db, tmp_path):
+    import shutil
+
+    tmp_path = tmp_path / 'knowledge'
+    add_tag(db, 'AI Tutor')
+    bodies = ['第一条：教师样本不足。', '第二条：交互已上线。', '第三条：待观察一周留存。']
+    ids = [kb.add_note(db, 'AI Tutor', body, 'codex') for body in bodies]
+    # Equal timestamps are resolved deterministically by descending ID.
+    with db._connect() as conn:
+        conn.execute('UPDATE knowledge_notes SET created_at = ?', (STAMP,))
+    before = kb.list_notes(db, 'AI Tutor')
+    kb.build(db, tmp_path)
+    shutil.rmtree(tmp_path)
+    index = kb.build(db, tmp_path)
+    text = supplement((tmp_path / index['tags'][0]['path']).read_text())
+    assert text == ''.join(f'- **2026-11-13 10:04** `codex` — {body}\n' for body in reversed(bodies))
+    assert [row['id'] for row in before] == ids[::-1]
+    assert kb.notes_for(db, 'AI Tutor') == before
+    assert index['tags'][0]['notes'] == index['source']['notes'] == 3
+
+
+def test_notes_incremental_reads_database_and_preserves_other_files(db, tmp_path, monkeypatch):
+    add_tag(db, 'A')
+    add_tag(db, 'B', '技术')
+    kb.build(db, tmp_path)
+    other = tmp_path / 'tags/B.md'
+    category = tmp_path / 'categories/技术.md'
+    mtimes = [p.stat().st_mtime_ns for p in (other, category)]
+    for body in ['补充一', '补充二', '补充三']:
+        kb.add_note(db, 'A', body)
+    calls = []
+    original = kb.notes_for
+
+    def spy(store, name, limit=20):
+        calls.append(name)
+        return original(store, name, limit)
+
+    monkeypatch.setattr(kb, 'notes_for', spy)
+    index = kb.build(db, tmp_path, tags=['A'])
+    text = supplement((tmp_path / 'tags/A.md').read_text())
+    assert text.index('补充三') < text.index('补充二') < text.index('补充一')
+    assert calls == ['A']
+    assert named(index['tags'], 'A')['notes'] == 3
+    assert mtimes == [p.stat().st_mtime_ns for p in (other, category)]
+
+
+@pytest.mark.parametrize('tag,body,message', [
+    ('A', '字' * 2001, 'note too long'), ('', '内容', 'empty tag name'),
+    (' \n\t', '内容', 'empty tag name'), ('A', '', 'empty note'),
+    ('A', ' \n\t', 'empty note'), ('字' * 61, '内容', 'tag name too long'),
+])
+def test_notes_invalid_input_never_writes(db, tag, body, message):
+    with pytest.raises(ValueError, match='^' + message + '$'):
+        kb.add_note(db, tag, body)
+    with db._connect() as conn:
+        assert conn.execute('SELECT count(*) FROM knowledge_notes').fetchone()[0] == 0
+
+
+def test_notes_trim_boundaries_and_preserve_stored_text(db):
+    body = '字' * 1990 + '\n多行  内容尾巴'
+    ident = kb.add_note(db, ' ' + '标' * 60 + '\n', '  ' + body + '\t', 'hermes')
+    row = kb.list_notes(db, '标' * 60)[0]
+    assert row['id'] == ident and row['body'] == body and row['source'] == 'hermes'
+    kb.add_note(db, 'A', '字' * 2000)
+    assert len(kb.list_notes(db, ' A ')[0]['body']) == 2000
+
+
+@pytest.mark.parametrize('source,expected', [('codex', 'codex'), ('hermes', 'hermes'),
+                                             ('cli', 'cli'), ('人工', 'cli'), ('', 'cli'),
+                                             ('CODEX', 'cli'), (None, 'cli')])
+def test_notes_source_allowlist(db, source, expected):
+    kb.add_note(db, 'A', '内容', source)
+    assert kb.notes_for(db, 'A')[0]['source'] == expected
+
+
+@pytest.mark.parametrize('incremental', [False, True])
+def test_notes_unknown_tag_created_without_mutating_vocabulary(db, tmp_path, incremental):
+    ident = kb.add_note(db, '新/主题', '独立回写')
+    index = kb.build(db, tmp_path, tags=['新/主题'] if incremental else None)
+    tag = named(index['tags'], '新/主题')
+    assert tag['id'] is None and tag['category'] == '其他'
+    assert tag['sessions'] == 0 and tag['notes'] == 1
+    assert '独立回写' in (tmp_path / tag['path']).read_text()
+    assert index['source'] == dict(recordings=0, tags=1, notes=1)
+    assert kb.list_notes(db, '新/主题')[0]['id'] == ident
+    with db._connect() as conn:
+        assert conn.execute('SELECT count(*) FROM tags').fetchone()[0] == 0
+
+
+@pytest.mark.parametrize('incremental', [False, True])
+def test_notes_remove_updates_render_counts_and_hash(db, tmp_path, incremental):
+    add_tag(db, 'A')
+    one = kb.add_note(db, 'A', '即将删除')
+    two = kb.add_note(db, 'A', '保留内容')
+    before = kb.build(db, tmp_path)
+    assert kb.remove_note(db, one)
+    assert not kb.remove_note(db, one)
+    after = kb.build(db, tmp_path, tags=['A'] if incremental else None)
+    assert '即将删除' not in (tmp_path / 'tags/A.md').read_text()
+    assert after['tags'][0]['notes'] == before['tags'][0]['notes'] - 1 == 1
+    assert after['source']['notes'] == 1
+    assert after['tags'][0]['content_hash'] != before['tags'][0]['content_hash']
+    assert kb.remove_note(db, two)
+    kb.build(db, tmp_path, tags=['A'] if incremental else None)
+    assert '暂无补充记录。' in (tmp_path / 'tags/A.md').read_text()
+
+
+@pytest.mark.parametrize('count', [20, 21, 25])
+def test_notes_display_limit_and_total_count(db, tmp_path, count):
+    for i in range(count):
+        kb.add_note(db, 'A', f'记录{i:02}')
+    index = kb.build(db, tmp_path)
+    text = supplement((tmp_path / 'tags/A.md').read_text())
+    assert text.count('- **') == 20
+    assert index['tags'][0]['notes'] == index['source']['notes'] == count
+    assert len(kb.notes_for(db, 'A')) == 20
+    assert len(kb.list_notes(db, 'A', limit=100)) == count
+    assert kb.list_notes(db, 'A', limit=0) == []
+    if count > 20:
+        assert f'另有 {count - 20} 条，可用 kb note list A 查看。' in text
+        assert '记录00' not in text
+    else:
+        assert '另有' not in text
+    with pytest.raises(ValueError):
+        kb.list_notes(db, 'A', limit=-1)
+
+
+def test_notes_timezone_and_safe_markdown(db):
+    ident = kb.add_note(db, 'A', '内容|<script> *文字* `代码`')
+    with db._connect() as conn:
+        conn.execute('UPDATE knowledge_notes SET created_at=? WHERE id=?',
+                     ('2026-11-14T07:42:00+00:00', ident))
+    tag = kb.scan(db)['tags'][0]
+    text = supplement(kb.render_tag_file(db, tag))
+    assert '**2026-11-14 15:42** `cli`' in text
+    assert '<script>' not in text
+    assert '内容&#124;&lt;script&gt; &#42;文字&#42; &#96;代码&#96;' in text
+
+
+def test_notes_last_orphan_remove_and_collision_reallocation(db, tmp_path):
+    first = kb.add_note(db, 'A/', '被删除的主题')
+    kb.add_note(db, 'A:', '保留的主题')
+    kb.build(db, tmp_path)
+    assert '被删除的主题' in (tmp_path / 'tags/A.md').read_text()
+    assert kb.remove_note(db, first)
+    index = kb.build(db, tmp_path, tags=['A/'])
+    assert index['source']['notes'] == 1
+    assert '保留的主题' in (tmp_path / 'tags/A.md').read_text()
+    assert not (tmp_path / 'tags/A-2.md').exists()
+    assert all('被删除的主题' not in p.read_text() for p in tmp_path.rglob('*.md'))
+
+
+def test_notes_unclassified_name_preserves_t2_virtual_file(db, tmp_path):
+    add_meeting(db, 'untagged')
+    kb.build(db, tmp_path)
+    original = (tmp_path / 'tags/未分类.md').read_bytes()
+    kb.add_note(db, '未分类', '独立补充')
+    index = kb.build(db, tmp_path)
+    assert (tmp_path / 'tags/未分类.md').read_bytes() == original
+    assert '独立补充' in (tmp_path / 'tags/未分类-2.md').read_text()
+    assert sum(tag['notes'] for tag in index['tags']) == 1
+    assert index['source'] == dict(recordings=1, tags=1, notes=1)

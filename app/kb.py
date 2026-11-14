@@ -1,4 +1,4 @@
-"""Read-only knowledge scanning and Markdown generation (no AI summaries)."""
+"""SQLite-backed knowledge notes and derived Markdown (no AI summaries)."""
 from datetime import datetime
 import hashlib
 import html
@@ -13,6 +13,51 @@ from app.tag_vocabulary import resolve
 
 DEFAULT_ROOT = Path(__file__).resolve().parents[1] / 'knowledge'
 UNCLASSIFIED = '未分类'
+
+
+def _note_tag(tag_name: str) -> str:
+    name = tag_name.strip()
+    if not name:
+        raise ValueError('empty tag name')
+    if len(name) > 60:
+        raise ValueError('tag name too long')
+    return name
+
+
+def add_note(store, tag_name: str, body: str, source: str = 'cli') -> int:
+    """Append independently of the meeting vocabulary; rebuilding never owns notes."""
+    name = _note_tag(tag_name)
+    body = body.strip()
+    if not body:
+        raise ValueError('empty note')
+    if len(body) > 2000:
+        raise ValueError('note too long')
+    if source not in ('codex', 'hermes', 'cli'):
+        source = 'cli'
+    with store._connect() as conn:
+        return conn.execute(
+            'INSERT INTO knowledge_notes (tag_name, body, source, created_at) VALUES (?, ?, ?, ?)',
+            (name, body, source, datetime.now(SHANGHAI).isoformat())).lastrowid
+
+
+def list_notes(store, tag_name: str, limit: int = 20) -> list[dict]:
+    name = _note_tag(tag_name)
+    if limit < 0:
+        raise ValueError('limit must be non-negative')
+    with store._connect() as conn:
+        return [dict(row) for row in conn.execute(
+            'SELECT id, tag_name, body, source, created_at FROM knowledge_notes '
+            'WHERE tag_name = ? ORDER BY created_at DESC, id DESC LIMIT ?', (name, limit))]
+
+
+def remove_note(store, note_id: int) -> bool:
+    with store._connect() as conn:
+        return conn.execute('DELETE FROM knowledge_notes WHERE id = ?', (note_id,)).rowcount > 0
+
+
+def notes_for(store, tag_name: str, limit: int = 20) -> list[dict]:
+    """Read persisted notes for rendering, never from generated Markdown."""
+    return list_notes(store, tag_name, limit)
 
 
 def slug(name: str) -> str:
@@ -64,6 +109,10 @@ def scan(store) -> dict:
             'SELECT name FROM tag_categories ORDER BY position, id')]
         relations = list(conn.execute(
             'SELECT recording_id, tag, created_at FROM recording_tags ORDER BY tag, recording_id'))
+        note_groups = {}
+        for row in conn.execute('SELECT id, tag_name, body, source, created_at FROM knowledge_notes '
+                                'ORDER BY tag_name, created_at DESC, id DESC'):
+            note_groups.setdefault(row['tag_name'], []).append(dict(row))
         by_name = {tag['name']: tag for tag in vocabulary}
         resolved = {}
         for name in sorted({row['tag'] for row in relations}):
@@ -93,6 +142,12 @@ def scan(store) -> dict:
     if untagged:
         entries.append((dict(id=None, name=UNCLASSIFIED, category=UNCLASSIFIED, updated_at=None),
                         untagged, []))
+    # Append note-only names so existing T1 filename allocations stay unchanged.
+    for name in note_groups:
+        if name not in by_name:
+            entries.append((dict(id=None, name=name, category='其他', updated_at=None), set(), []))
+            source['tags'] += 1
+    source['notes'] = sum(len(notes) for notes in note_groups.values())
 
     tags = []
     category_members = {name: set() for name in category_names}
@@ -111,9 +166,12 @@ def scan(store) -> dict:
                      last_session_at=_latest(row['created_at'] for row in rows))
         updated_at = _latest([tag['updated_at'], stats['last_session_at'], *times,
                               *(row['synced_at'] for row in rows)])
-        content_hash = hashlib.sha256(json.dumps(stats, sort_keys=True).encode()).hexdigest()
+        notes = [] if _is_unclassified(tag) else note_groups.get(tag['name'], [])
+        updated_at = _latest([updated_at, *(note['created_at'] for note in notes)])
+        hash_input = dict(stats, notes=notes) if notes else stats
+        content_hash = hashlib.sha256(json.dumps(hash_input, sort_keys=True).encode()).hexdigest()
         tags.append(dict(id=tag['id'], name=tag['name'], category=category, path=path,
-                         **stats, notes=0, updated_at=updated_at, content_hash=content_hash))
+                         **stats, notes=len(notes), updated_at=updated_at, content_hash=content_hash))
 
     categories = [dict(name=name, path=path, tags=category_counts[name],
                        sessions=len(category_members[name]),
@@ -153,12 +211,16 @@ def _markdown(index):
 def build_index(store, root: Path = DEFAULT_ROOT) -> dict:
     """Create directories and both indexes without rendering tag/category bodies."""
     index = scan(store)
+    _write_index(index, root)
+    return index
+
+
+def _write_index(index, root):
     root = Path(root)
     (root / 'categories').mkdir(parents=True, exist_ok=True)
     (root / 'tags').mkdir(parents=True, exist_ok=True)
     (root / 'index.json').write_text(json.dumps(index, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
     (root / 'index.md').write_text(_markdown(index), encoding='utf-8')
-    return index
 
 
 def _is_unclassified(tag):
@@ -210,14 +272,26 @@ def _date(value, pattern):
 
 
 def render_tag_file(store, tag: dict, notes: list[dict] | None = None) -> str:
-    """Render a scanned tag; notes are reserved for T3 and empty in this ticket."""
+    """Merge persisted notes into the existing supplemental-records section."""
     recordings = _tag_recordings(store, tag)
     lines = [f"# {_markdown_text(tag['name'])}", '',
              f"> {_markdown_text(tag['category'])} · {tag['sessions']} 场会议 · "
              f"{tag['minutes']} 分钟 · 更新于 {_date(tag['updated_at'], '%Y-%m-%d %H:%M')}", '']
     if not _is_unclassified(tag):
+        if notes is None:
+            notes = notes_for(store, tag['name'])
+        notes = sorted(notes, key=lambda row: (_instant(row['created_at']), row['id']), reverse=True)
         lines += ['## 当前状态', '', '综述未生成。', '',
-                  '## 补充记录', '', '暂无补充记录。', '']
+                  '## 补充记录', '']
+        for note in notes[:20]:
+            lines.append(f"- **{_date(note['created_at'], '%Y-%m-%d %H:%M')}** "
+                         f"`{_markdown_text(note['source'])}` — {_markdown_text(note['body'])}")
+        if not notes:
+            lines.append('暂无补充记录。')
+        remaining = max(tag['notes'], len(notes)) - 20
+        if remaining > 0:
+            lines += ['', f"另有 {remaining} 条，可用 kb note list {_markdown_text(tag['name'])} 查看。"]
+        lines.append('')
     lines += ['## 会议', '']
     for row in recordings[:20]:
         duration = '时长未知' if row['duration_min'] is None else f"{row['duration_min']} 分钟"
@@ -254,17 +328,42 @@ def render_category_file(store, category: dict, tags: list[dict]) -> str:
 
 
 def build(store, root: Path = DEFAULT_ROOT, tags: list[str] | None = None) -> dict:
-    """Render all bodies, then build the unchanged T1 indexes; tags is reserved."""
+    """Rebuild derived files, reading notes from SQLite for every selected tag."""
     index = scan(store)
     root = Path(root)
+    selected = None if tags is None else set(tags)
+    try:
+        previous = json.loads((root / 'index.json').read_text(encoding='utf-8'))
+    except (FileNotFoundError, ValueError):
+        previous = dict(tags=[], categories=[])
+    previous_paths = {tag['path']: (tag['name'], tag['category']) for tag in previous['tags']}
+    affected_categories = {tag['category'] for tag in [*index['tags'], *previous['tags']]
+                           if selected is None or tag['name'] in selected}
     for tag in index['tags']:
         path = root / tag['path']
+        same_owner = previous_paths.get(tag['path']) == (tag['name'], tag['category'])
+        if selected is not None and tag['name'] not in selected and path.exists() and same_owner:
+            continue
+        affected_categories.add(tag['category'])
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(render_tag_file(store, tag, notes=[]), encoding='utf-8')
+        notes = [] if _is_unclassified(tag) else notes_for(store, tag['name'])
+        path.write_text(render_tag_file(store, tag, notes=notes), encoding='utf-8')
     for category in index['categories']:
         if not category['tags']:
             continue
         path = root / category['path']
+        if selected is not None and category['name'] not in affected_categories and path.exists():
+            continue
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(render_category_file(store, category, index['tags']), encoding='utf-8')
-    return build_index(store, root)
+    # Remove only previously indexed derived files, including a note-only tag
+    # whose last note was deleted. Never trust an index path outside these dirs.
+    current_paths = {tag['path'] for tag in index['tags']} | {
+        category['path'] for category in index['categories'] if category['tags']}
+    for entry in [*previous['tags'], *previous['categories']]:
+        path = Path(entry['path'])
+        if (entry['path'] not in current_paths and len(path.parts) == 2
+                and path.parts[0] in {'tags', 'categories'} and path.suffix == '.md'):
+            (root / path).unlink(missing_ok=True)
+    _write_index(index, root)
+    return index
