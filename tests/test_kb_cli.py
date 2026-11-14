@@ -22,6 +22,19 @@ from test_login import login
 from test_settings import settings_form
 
 
+@pytest.mark.parametrize('value', [None, '', '/tmp/persistent-knowledge'])
+def test_default_root_respects_environment_on_import(value):
+    env = dict(os.environ)
+    env.pop('KB_ROOT', None)
+    if value is not None:
+        env['KB_ROOT'] = value
+    result = subprocess.run([sys.executable, '-c',
+                             'from app.kb import DEFAULT_ROOT; print(DEFAULT_ROOT)'],
+                            env=env, check=True, capture_output=True, text=True)
+    expected = Path(value) if value else Path(kb.__file__).resolve().parents[1] / 'knowledge'
+    assert result.stdout.strip() == str(expected)
+
+
 def mtimes(root):
     return {str(p.relative_to(root)): p.stat().st_mtime_ns for p in root.rglob('*') if p.is_file() and 'db' not in p.relative_to(root).parts}
 

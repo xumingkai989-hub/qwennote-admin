@@ -4,6 +4,7 @@ import shlex
 import subprocess
 import sys
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 
@@ -46,6 +47,7 @@ def test_app_only_deploy_uses_existing_release_flow_without_certificate_phase(tm
     def archive(args, **kwargs):
         assert args[:2] == ['tar', 'czf']
         assert '--exclude=.scratch' in args
+        assert '--exclude=knowledge' in args
         Path(args[2]).write_bytes(b'test archive')
 
     monkeypatch.setattr(deploy.subprocess, 'run', archive)
@@ -62,6 +64,8 @@ def test_app_only_deploy_uses_existing_release_flow_without_certificate_phase(tm
     assert all('QWENNOTE_APP_ONLY=1' in command for command in phases)
     assert all('QWENNOTE_DOMAIN=notes.example.com' in command for command in phases)
     assert not any(' certificate ' in command for command in commands)
+    bootstrap = next(command for command in commands if 'KB_INITIAL_BUILD_STARTED' in command)
+    assert commands.index(bootstrap) > commands.index(phases[1])
     assert any('sha256sum -c' in command for command in commands)
     assert 'systemctl is-active qwennote.service' in commands[-1]
     assert 'nginx -t' not in commands[-1]
@@ -126,3 +130,50 @@ def test_installer_activation_limits_app_only_changes(tmp_path, app_only):
         assert 'server_name notes.example.com;' in config
         assert '/etc/letsencrypt/live/notes.example.com/fullchain.pem' in config
         assert '$request_uri' in config and '$proxy_add_x_forwarded_for' in config
+
+
+@pytest.mark.parametrize('state', ['missing_directory', 'missing_index', 'existing_index'])
+@pytest.mark.parametrize('build_exit', [0, 2])
+def test_initial_knowledge_build_only_when_index_missing(tmp_path, state, build_exit):
+    root = tmp_path / 'knowledge'
+    if state != 'missing_directory':
+        root.mkdir()
+    if state == 'existing_index':
+        (root / 'index.json').write_text('{}')
+    calls = tmp_path / 'build-call'
+    script = tmp_path / 'kb.sh'
+    script.write_text(f'printf "%s\\n" "$*" > {shlex.quote(str(calls))}\nexit {build_exit}\n')
+
+    def run(label, command, timeout):
+        assert label == 'knowledge' and timeout == 900
+        command = command.replace('/opt/qwennote/data/knowledge', str(root)).replace(
+            '/opt/qwennote/current/scripts/kb.sh', str(script))
+        result = subprocess.run(['bash', '-eu', '-c', command], capture_output=True, text=True)
+        assert result.returncode == 0, result.stderr
+        if state == 'existing_index':
+            assert 'initial build skipped' in result.stdout
+        elif build_exit:
+            assert 'KB_INITIAL_BUILD_FAILED' in result.stderr
+        else:
+            assert 'KB_INITIAL_BUILD_OK' in result.stdout
+
+    remote = Mock(side_effect=run)
+    deploy.initialize_knowledge(remote)
+    remote.assert_called_once()
+    if state == 'existing_index':
+        assert not calls.exists()
+    else:
+        assert calls.read_text() == 'build --full\n'
+
+
+def test_initial_knowledge_remote_failure_does_not_block_deployment(capsys):
+    deploy.initialize_knowledge(Mock(side_effect=RuntimeError('knowledge failed; inspect logs')))
+    assert 'WARNING: knowledge initialization failed' in capsys.readouterr().out
+
+
+@pytest.mark.parametrize('unit', ['qwennote', 'qwennote-tick', 'qwennote-sync', 'qwennote-tag-maintenance'])
+def test_knowledge_units_use_persistent_root(unit):
+    text = (deploy.ROOT / 'deploy/systemd' / (unit + '.service')).read_text()
+    assert 'Environment=KB_ROOT=/opt/qwennote/data/knowledge' in text
+    assert 'EnvironmentFile=/etc/qwennote/qwennote.env' in text
+    assert 'ReadWritePaths=/opt/qwennote/data' in text

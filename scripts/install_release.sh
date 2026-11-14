@@ -32,7 +32,8 @@ prepare)
     if ! id qwennote >/dev/null 2>&1; then
         useradd --system --home-dir /opt/qwennote --shell /sbin/nologin qwennote
     fi
-    install -d -o qwennote -g qwennote -m 750 /opt/qwennote/data /opt/qwennote/backups
+    install -d -o qwennote -g qwennote -m 750 /opt/qwennote/data /opt/qwennote/backups \
+        /opt/qwennote/data/knowledge
     install -d -o root -g root -m 700 /etc/qwennote
     if [[ ! -e /etc/qwennote/qwennote.env ]]; then
         umask 077
@@ -50,6 +51,9 @@ QWENNOTE_SOURCE=fixture
 QWENNOTE_FIXTURE_DIR=/opt/qwennote/current/tests/fixtures/minutes
 EOF
     fi
+    # Also migrate existing app-only installations: their units already load this file.
+    sed -i '/^KB_ROOT=/d' /etc/qwennote/qwennote.env
+    printf '\nKB_ROOT=/opt/qwennote/data/knowledge\n' >> /etc/qwennote/qwennote.env
     chown root:root /etc/qwennote/qwennote.env
     chmod 600 /etc/qwennote/qwennote.env
     # Do not alter /usr/bin/python3 or install another interpreter.

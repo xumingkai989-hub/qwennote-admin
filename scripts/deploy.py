@@ -15,6 +15,26 @@ ROOT = Path(__file__).resolve().parents[1]
 INSTANCE = os.environ.get('QWENNOTE_SWAS_INSTANCE_ID', '')
 
 
+def initialize_knowledge(remote):
+    """Build missing persistent knowledge after activation; failure is non-fatal."""
+    try:
+        remote('knowledge', '''
+KB_ROOT=/opt/qwennote/data/knowledge
+if [ ! -f "$KB_ROOT/index.json" ]; then
+    echo 'KB_INITIAL_BUILD_STARTED'
+    if bash /opt/qwennote/current/scripts/kb.sh build --full; then
+        echo 'KB_INITIAL_BUILD_OK'
+    else
+        echo 'WARNING: KB_INITIAL_BUILD_FAILED; retry scripts/kb.sh build --full' >&2
+    fi
+else
+    echo 'KB_INDEX_EXISTS; initial build skipped'
+fi
+''', timeout=900)
+    except RuntimeError as exc:
+        print('WARNING: knowledge initialization failed: ' + str(exc), flush=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--helper', type=Path, default=Path.home() / '.hermes/digital-agent/tools/swas_run.py')
@@ -68,7 +88,7 @@ cat /opt/qwennote/deploy-audit/''' + stamp + '''.nginx-before
     archive = logs / 'qwennote.tar.gz'
     # Exclude credentials, local data, caches, scratch and macOS metadata as well.
     subprocess.run(['tar', 'czf', str(archive), '--exclude=.git', '--exclude=.venv',
-                    '--exclude=data', '--exclude=.scratch', '--exclude=.env', '--exclude=.env.*',
+                    '--exclude=data', '--exclude=knowledge', '--exclude=.scratch', '--exclude=.env', '--exclude=.env.*',
                     '--no-xattrs', '--no-acls', '--no-fflags',
                     '--exclude=__pycache__', '--exclude=.pytest_cache', '--exclude=.DS_Store',
                     '-C', str(ROOT), '.'], check=True,
@@ -98,6 +118,7 @@ cat /opt/qwennote/deploy-audit/''' + stamp + '''.nginx-before
     for phase in phases:
         print('PHASE=' + phase, flush=True)
         remote(phase, f'{mode}bash {release}/scripts/install_release.sh {phase} {release}', timeout=900)
+    initialize_knowledge(remote)
     remote('regression', 'sha256sum -c /opt/qwennote/deploy-audit/' + stamp + '.nginx-before\n' +
            'systemctl is-active qwennote.service')
     print('DEPLOYMENT_LOGS=' + str(logs), flush=True)

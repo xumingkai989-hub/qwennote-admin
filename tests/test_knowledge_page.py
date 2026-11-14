@@ -72,6 +72,7 @@ def test_missing_or_corrupt_index_empty_state(client, bad):
     assert response.status_code == 200
     assert '知识库尚未生成' in response.text
     assert 'python -m app.kb build --full' in response.text
+    assert 'scripts/kb.sh build --full' in response.text
     assert '给 Agent 接入' in response.text
 
 
@@ -154,6 +155,16 @@ def test_regular_whitelist_read_only(client, fake_auth, store, knowledge_files):
     (knowledge_files[0] / 'index.json').unlink()
     html = client.get('/knowledge').text
     assert '知识库尚未生成' in html and 'python -m app.kb build --full' not in html
+    assert 'scripts/kb.sh build --full' not in html
+
+
+def test_empty_generated_index_offers_admin_build_hint(knowledge_client, knowledge_files):
+    root, index = knowledge_files
+    index['tags'] = []
+    (root / 'index.json').write_text(json.dumps(index))
+    html = knowledge_client.get('/knowledge').text
+    assert '知识库暂无内容' in html
+    assert 'scripts/kb.sh build --full' in html
 
 
 def test_admin_rebuild(knowledge_client, store, knowledge_files, monkeypatch):

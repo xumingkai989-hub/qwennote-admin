@@ -169,7 +169,7 @@ python -m app.kb note remove 123              # 123 替换为 add 返回的真�
 
 同步完成后自动更新本轮 inserted/updated 会议涉及的新旧标签，失败仅记日志，不改变同步结果。设置中心的「同步后更新知识库」（`kb_auto_build`，默认 true）可关闭此步骤。既有异步打标流程保持原样，后续标签变化由每日全量兜底。`kb_full_build` 每天按 `board_time`（默认 Asia/Shanghai 22:00）在看板任务之后执行，独立记录每日执行状态；看板关闭、跳过或失败不阻断知识库，知识库失败也不阻断后续任务。
 
-`KB_ROOT` 环境变量可统一指定 CLI、同步和调度的输出目录；各叶子命令的 `--root` 可临时覆盖。生产跨 release 保留产物时可使用持久目录；默认目录仍为当前代码仓库下的 `knowledge/`。补充记录和综述缓存始终保存在数据库，重建不会丢失。
+`KB_ROOT` 环境变量可统一指定 CLI、同步和调度的输出目录；各叶子命令的 `--root` 可临时覆盖。本地未设置时仍为当前代码仓库下的 `knowledge/`。生产服务及 `scripts/kb.sh` 使用 `/opt/qwennote/data/knowledge`，部署会创建该目录并设置属主为 `qwennote:qwennote`。包括 `--app-only` 在内的部署会更新生产环境文件，在激活 release 后仅当 `index.json` 不存在时自动全量构建；失败只记部署日志，可运行 `scripts/kb.sh build --full` 重试。补充记录和综述缓存始终保存在数据库，重建不会丢失。
 
 ## 部署
 
